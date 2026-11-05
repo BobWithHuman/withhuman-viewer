@@ -22,7 +22,7 @@
 cargo run                      # 실행
 VIEWER_MOCK=1 cargo run        # 데모 데이터로 실행
 cargo test                     # 테스트
-cargo packager --release       # 유니버설 .app/.dmg (dist/)
+cargo packager --release --target universal-apple-darwin   # 유니버설 .app/.dmg (dist/)
 ```
 
 - 데모 데이터는 `mock/fixture.json`입니다. `python3 mock/make_fixture.py`로 다시 만들고, `VIEWER_FIXTURE=<파일>`로 다른 파일을 쓸 수 있습니다.

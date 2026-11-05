@@ -73,7 +73,7 @@ jobs:
           tool: cargo-packager@0.11.8
 
       - name: Package
-        run: cargo packager --release
+        run: cargo packager --release --target universal-apple-darwin
 
       - name: Check the app is universal
         run: lipo -info "dist/WithHuman Viewer.app/Contents/MacOS/withhuman-viewer" | grep -q "x86_64 arm64"

@@ -50,8 +50,14 @@ impl Backend {
         }
     }
 
+    /// The settings to read with. For Neo4j the password comes out of the keychain the first
+    /// time it is needed, and stays in memory after.
     fn current(&self) -> Settings {
-        self.settings.lock().expect("settings lock").clone()
+        let mut settings = self.settings.lock().expect("settings lock");
+        if !settings.demo && settings.password.is_empty() {
+            *settings = settings.clone().unlocked();
+        }
+        settings.clone()
     }
 
     pub async fn sessions(&self) -> Result<Vec<Session>, String> {
@@ -126,7 +132,7 @@ impl Backend {
 
     pub fn save(&self, change: Change) -> Result<Public, String> {
         let mut settings = self.settings.lock().expect("settings lock");
-        let next = settings.apply(change)?;
+        let mut next = settings.apply(change)?;
         next.save(&self.path)?;
         *settings = next;
         Ok(settings.public(&self.path))
@@ -135,10 +141,8 @@ impl Backend {
     /// Switches between the demo graph and Neo4j, keeping the connection as it is.
     pub fn set_demo(&self, demo: bool) -> Result<Public, String> {
         let mut settings = self.settings.lock().expect("settings lock");
-        let next = Settings {
-            demo,
-            ..settings.clone()
-        };
+        let mut next = settings.clone();
+        next.demo = demo;
         next.save(&self.path)?;
         *settings = next;
         Ok(settings.public(&self.path))
@@ -146,7 +150,12 @@ impl Backend {
 
     /// Tries settings from the form before they are saved: connects and counts the sessions.
     pub async fn test(&self, change: Change) -> Result<Probe, String> {
-        let candidate = self.settings.lock().expect("settings lock").apply(change)?;
+        let candidate = self
+            .settings
+            .lock()
+            .expect("settings lock")
+            .apply(change)?
+            .unlocked();
         let started = Instant::now();
         let db = Neo4j {
             client: &self.client,
