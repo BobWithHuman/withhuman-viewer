@@ -378,9 +378,15 @@ fn Paragraphs(
                             if p.hidden == Some(true) {
                                 span { class: "tag deny", "숨김" }
                             }
-                            if p.instructs == Some(true) {
-                                span { class: "tag", "지시" }
+                            if p.instructs() {
+                                span { class: "tag", "지시 {percent(p.instructs.unwrap_or(0.0))}" }
                             }
+                            if let Some(source) = p.source.clone().filter(|s| !s.is_empty()) {
+                                span { class: "muted", "{source}" }
+                            }
+                        }
+                        if p.hidden == Some(true) && !p.hidden_rules.is_null() {
+                            p { class: "muted", "숨긴 규칙: {hidden_rules(&p.hidden_rules)}" }
                         }
                         pre { "{p.text.clone().unwrap_or_default()}" }
                         for call in traced {
@@ -514,5 +520,18 @@ fn EdgeView(
                 Paragraphs { model: model.clone(), seq: to, detail, only: paragraph }
             }
         }
+    }
+}
+
+/// The rules that hid a paragraph, as one line: a list joined, anything else as JSON.
+fn hidden_rules(rules: &serde_json::Value) -> String {
+    match rules {
+        serde_json::Value::Array(items) => items
+            .iter()
+            .map(|r| r.as_str().map_or_else(|| r.to_string(), str::to_owned))
+            .collect::<Vec<_>>()
+            .join(", "),
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
