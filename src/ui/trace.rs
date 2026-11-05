@@ -282,6 +282,16 @@ fn option_name(model: &Model, option: &str) -> String {
     }
 }
 
+/// An option under its question: a breach of `expected` by what it means, others by
+/// [`option_name`].
+fn answer_option(model: &Model, question: &str, option: &str) -> String {
+    if question == "expected" {
+        breach_text(option).to_owned()
+    } else {
+        option_name(model, option)
+    }
+}
+
 /// The node an option names (`g12`, `g12p3`), if it names one.
 fn option_seq(option: &str) -> Option<i64> {
     let rest = option.strip_prefix('g')?;
@@ -400,7 +410,7 @@ fn Answers(
                             let tag = if is_cause { "원인" } else if key == "expected" && option == worst { "최대 위반" } else { "선택" };
                             rsx! {
                                 tr {
-                                    td { "{option_name(&model, &option)}" if chosen { span { class: "tag", "{tag}" } } }
+                                    td { "{answer_option(&model, &key, &option)}" if chosen { span { class: "tag", "{tag}" } } }
                                     td { Bar { p, class } }
                                 }
                             }
@@ -601,5 +611,42 @@ pub fn Context(trace: Value) -> Element {
                 pre { "{turn}" }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{change_lines, check_cut, option_seq, sorted};
+
+    #[test]
+    fn options_name_a_result_or_its_paragraph() {
+        assert_eq!(option_seq("g12"), Some(12));
+        assert_eq!(option_seq("g12p3"), Some(12));
+        assert_eq!(option_seq("s0"), None);
+        assert_eq!(option_seq("none"), None);
+    }
+
+    // The Decision Module's cuts, as the engine's page reads them.
+    #[test]
+    fn second_check_cuts_by_branch() {
+        let file = json!({"branch": "file"});
+        let asked = json!({"request": {"questions": {"requested": {}, "unasked": {}}}});
+        assert_eq!(check_cut(&file, None), Some(0.5));
+        assert_eq!(check_cut(&file, Some(&asked)), Some(0.2));
+        assert_eq!(check_cut(&json!({"branch": "run"}), None), Some(0.4));
+        assert_eq!(check_cut(&json!({"branch": "clear"}), None), None);
+    }
+
+    #[test]
+    fn changes_and_answers_read_in_order() {
+        assert_eq!(change_lines(&json!("a\nb"), '+'), ["+ a", "+ b"]);
+        assert!(change_lines(&json!("(nothing)"), '-').is_empty());
+        let rows = sorted(&json!({"a": 0.1, "b": 0.7, "c": 0.2}));
+        assert_eq!(
+            rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),
+            ["b", "c", "a"]
+        );
     }
 }

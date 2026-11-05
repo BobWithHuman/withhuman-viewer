@@ -124,7 +124,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; white-space: 
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 0; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; word-break: break-word; }
-.tag { font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--muted); margin-left: 4px; }
+.tag { white-space: nowrap; font-size: 10px; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--muted); margin-left: 4px; }
 .tag.deny { background: color-mix(in srgb, var(--deny) 16%, transparent); color: var(--deny); }
 table { border-collapse: collapse; width: 100%; }
 table.bars { margin-top: 10px; }
