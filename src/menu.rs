@@ -12,6 +12,7 @@ pub const TREE: &str = "view-tree";
 pub const FLOW: &str = "view-flow";
 pub const FIT: &str = "fit";
 pub const DEMO: &str = "demo";
+pub const CHECK_UPDATES: &str = "check-updates";
 
 fn item(id: &str, text: &str, shortcut: Option<&str>) -> MenuItem {
     let accelerator = shortcut.map(|s| Accelerator::from_str(s).expect("valid shortcut"));
@@ -31,6 +32,7 @@ pub fn build() -> Menu {
         &[
             &PredefinedMenuItem::about(Some("WithHuman Viewer에 관하여"), Some(about)),
             &PredefinedMenuItem::separator(),
+            &item(CHECK_UPDATES, "업데이트 확인…", None),
             &item(SETTINGS, "설정…", Some("CmdOrCtrl+Comma")),
             &PredefinedMenuItem::separator(),
             &PredefinedMenuItem::hide(Some("WithHuman Viewer 가리기")),

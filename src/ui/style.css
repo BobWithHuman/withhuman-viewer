@@ -159,3 +159,7 @@ table.props td:first-child { color: var(--muted); width: 34%; }
 .resizing { cursor: col-resize; }
 .resizing .canvas, .resizing .inspector { pointer-events: none; }
 .sheet-backdrop:focus { outline: none; }
+.update-banner { display: flex; align-items: center; gap: 10px; padding: 7px 14px; background: var(--accent-soft);
+                 border-bottom: 1px solid var(--line); }
+.update-banner .notes { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-banner > span:first-child { flex: none; }
