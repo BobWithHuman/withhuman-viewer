@@ -26,3 +26,33 @@ unknown-git = "deny"
 [[licenses.exceptions]]
 name = "webpki-roots"
 allow = ["CDLA-Permissive-2.0"]
+
+# The HTML parser inside the webview (wry → kuchikiki) and its CSS crates are MPL-2.0. The
+# viewer uses them unmodified as libraries; MPL's obligations attach to those files, whose source
+# is on crates.io, and leave the app's own license alone.
+[[licenses.exceptions]]
+name = "cssparser"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "cssparser-macros"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "selectors"
+allow = ["MPL-2.0"]
+
+[[licenses.exceptions]]
+name = "dtoa-short"
+allow = ["MPL-2.0"]
+
+# dirs (the settings folder) → option-ext, MPL-2.0, used unmodified.
+[[licenses.exceptions]]
+name = "option-ext"
+allow = ["MPL-2.0"]
+
+# The window icon decoder (image → ravif → rav1e) lists a fuzzing helper under the permissive,
+# BSD-style NCSA licence; it is not compiled into the app.
+[[licenses.exceptions]]
+name = "libfuzzer-sys"
+allow = ["NCSA"]
