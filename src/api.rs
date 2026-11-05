@@ -168,10 +168,7 @@ impl Backend {
                 json!({}),
             )
             .await
-            .map_err(|e| match e.status {
-                401 => "사용자 이름이나 비밀번호가 맞지 않습니다.".to_owned(),
-                _ => e.error,
-            })?;
+            .map_err(|e| e.error)?;
         let sessions = rows
             .first()
             .and_then(|r| r.get("sessions"))

@@ -51,6 +51,7 @@ fn matches(s: &Session, query: &str) -> bool {
             s.prompt.as_deref(),
             s.intent.as_deref(),
             s.cwd.as_deref(),
+            s.client.as_deref(),
             Some(s.id.as_str()),
         ]
         .into_iter()
@@ -86,6 +87,64 @@ pub fn Sidebar() -> Element {
         .copied()
         .filter(|s| prefs.is_pinned(&s.id))
         .collect();
+    // The order on screen, for moving with the arrow keys.
+    let order: Vec<String> = pinned
+        .iter()
+        .chain(shown.iter().filter(|s| !prefs.is_pinned(&s.id)))
+        .map(|s| s.id.clone())
+        .collect();
+    let step = {
+        let order = order.clone();
+        move |by: isize| {
+            let at = state
+                .current
+                .peek()
+                .as_ref()
+                .and_then(|c| order.iter().position(|id| id == c));
+            let next = match at {
+                Some(i) => i
+                    .saturating_add_signed(by)
+                    .min(order.len().saturating_sub(1)),
+                None => 0,
+            };
+            if let Some(id) = order.get(next) {
+                state.open_session(id.clone());
+                document::eval(
+                    "requestAnimationFrame(() => document.querySelector('.session.current')?.scrollIntoView({block: 'nearest'}))",
+                );
+            }
+        }
+    };
+    let keys = {
+        let step = step.clone();
+        move |e: KeyboardEvent| match e.key() {
+            Key::ArrowDown => {
+                e.prevent_default();
+                step(1);
+            }
+            Key::ArrowUp => {
+                e.prevent_default();
+                step(-1);
+            }
+            _ => {}
+        }
+    };
+    let first = order.first().cloned();
+    let search_keys = {
+        let step = step.clone();
+        move |e: KeyboardEvent| match e.key() {
+            Key::Enter => {
+                if let Some(id) = first.clone() {
+                    state.open_session(id);
+                }
+            }
+            Key::ArrowDown => {
+                e.prevent_default();
+                step(1);
+            }
+            _ => {}
+        }
+    };
     let mut days: Vec<(String, Vec<&Session>)> = Vec::new();
     for s in shown.iter().copied().filter(|s| !prefs.is_pinned(&s.id)) {
         let label = day_label(s.created_at.unwrap_or(0));
@@ -104,6 +163,7 @@ pub fn Sidebar() -> Element {
                     placeholder: "프롬프트, 의도, 폴더, ID 검색",
                     value: "{query}",
                     oninput: move |e| query.set(e.value()),
+                    onkeydown: search_keys,
                 }
                 div { class: "row",
                     select { value: "{folder}", onchange: move |e| folder.set(e.value()),
@@ -121,7 +181,7 @@ pub fn Sidebar() -> Element {
             if let Some((error, text)) = message() {
                 p { class: if error { "message error" } else { "message" }, onclick: move |_| message.set(None), "{text}" }
             }
-            div { class: "sessions",
+            div { class: "sessions", tabindex: "0", onkeydown: keys,
                 if shown.is_empty() {
                     p { class: "muted pad", "맞는 세션이 없습니다." }
                 }

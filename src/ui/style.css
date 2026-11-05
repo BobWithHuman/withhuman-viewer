@@ -57,6 +57,9 @@ label.check { display: inline-flex; gap: 6px; align-items: center; white-space: 
 .topbar .source .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--allow); flex: none; }
 .topbar .source.demo { color: var(--accent); }
 .topbar .source.demo .dot { background: var(--accent); }
+.topbar .source.wait .dot { background: var(--muted); }
+.topbar .source.down { color: var(--deny); }
+.topbar .source.down .dot { background: var(--deny); }
 
 .columns { flex: 1; min-height: 0; display: flex; }
 .sidebar { width: 300px; flex: none; display: flex; flex-direction: column; background: var(--panel);
@@ -163,3 +166,4 @@ table.props td:first-child { color: var(--muted); width: 34%; }
                  border-bottom: 1px solid var(--line); }
 .update-banner .notes { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .update-banner > span:first-child { flex: none; }
+.sessions:focus { outline: none; }

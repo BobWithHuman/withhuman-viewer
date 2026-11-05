@@ -65,7 +65,7 @@ pub fn SettingsSheet() -> Element {
     let hint = if current.has_password {
         "비워 두면 저장된 비밀번호 유지"
     } else {
-        ""
+        "엔진 .env의 NEO4J_PASSWORD"
     };
 
     rsx! {

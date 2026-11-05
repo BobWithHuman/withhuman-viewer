@@ -27,6 +27,9 @@ pub struct Settings {
     new_password: bool,
     /// Reads the bundled demo graph instead of Neo4j.
     pub demo: bool,
+    /// No settings were saved yet: the app greets instead of reporting a failed connection.
+    #[serde(skip)]
+    pub first_run: bool,
 }
 
 impl Default for Settings {
@@ -42,6 +45,7 @@ impl Default for Settings {
             password_saved: false,
             new_password: false,
             demo: std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1"),
+            first_run: false,
         }
     }
 }
@@ -54,6 +58,7 @@ pub struct Public {
     pub user: String,
     pub has_password: bool,
     pub demo: bool,
+    pub first_run: bool,
     pub path: String,
 }
 
@@ -98,8 +103,10 @@ impl Settings {
             neo4j_url: self.neo4j_url.clone(),
             database: self.database.clone(),
             user: self.user.clone(),
-            has_password: self.password_saved || !self.password.is_empty(),
+            // Saved by the person, not the development default the app starts with.
+            has_password: self.password_saved,
             demo: self.demo,
+            first_run: self.first_run,
             path: path.display().to_string(),
         }
     }
@@ -120,6 +127,7 @@ impl Settings {
             password_saved: self.password_saved,
             new_password: self.new_password,
             demo: change.demo,
+            first_run: self.first_run,
         };
         match change.password {
             Some(password) => {
@@ -162,7 +170,10 @@ impl Settings {
                 }
                 saved
             }
-            None => Self::default(),
+            None => Self {
+                first_run: true,
+                ..Self::default()
+            },
         };
         if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") {
             settings.demo = true;
@@ -177,7 +188,9 @@ impl Settings {
             self.password_saved = true;
             self.new_password = false;
         }
-        self.write(path)
+        self.write(path)?;
+        self.first_run = false;
+        Ok(())
     }
 
     fn write(&self, path: &Path) -> Result<(), String> {
