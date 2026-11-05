@@ -373,7 +373,7 @@ impl Metro {
                             None => counts.push((t, 1)),
                         }
                     }
-                    counts.sort_by(|a, b| b.1.cmp(&a.1));
+                    counts.sort_by_key(|c| std::cmp::Reverse(c.1));
                     counts
                         .iter()
                         .map(|(t, c)| format!("{t} {c}"))
