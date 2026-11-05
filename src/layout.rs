@@ -648,8 +648,12 @@ mod tests {
     use super::*;
     use crate::demo::Demo;
 
+    /// Hand-made sessions whose counts were checked against the page's own code; the demo
+    /// fixture is re-exported from the engine and changes.
+    const CASES: &str = include_str!("../mock/layout_cases.json");
+
     fn fixture(session: &str) -> Model {
-        let graph = Demo::load().graph(session).expect("fixture session");
+        let graph = Demo::parse(CASES).graph(session).expect("fixture session");
         Model::build(&serde_json::from_value(graph).expect("graph shape"))
     }
 

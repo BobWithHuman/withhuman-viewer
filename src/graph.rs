@@ -528,3 +528,73 @@ mod tests {
         );
     }
 }
+
+/// Writes the demo fixture from a live Neo4j, through the same queries and shaping the app
+/// uses, so the demo shows what the engine records. Reads `NEO4J_URL`, `NEO4J_DATABASE`,
+/// `NEO4J_USER` and `NEO4J_PASSWORD`; writes `VIEWER_FIXTURE_OUT` (default `mock/fixture.json`).
+/// `VIEWER_FIXTURE_REWRITE="<from>=<to>;…"` replaces text such as local paths before writing,
+/// longest first, since the fixture ships inside the app.
+/// Run: `cargo test export_fixture -- --ignored` (see `mock/README.md`).
+#[cfg(test)]
+mod export {
+    use serde_json::{Map, Value, json};
+
+    use super::Neo4j;
+    use crate::settings::Settings;
+
+    #[test]
+    #[ignore = "needs a running Neo4j with recorded sessions"]
+    fn export_fixture() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let client = reqwest::Client::new();
+        let settings = Settings::default();
+        let db = Neo4j {
+            client: &client,
+            settings: &settings,
+        };
+        let fixture = runtime.block_on(async {
+            let sessions = db.sessions().await.expect("sessions");
+            let ids: Vec<String> = sessions
+                .as_array()
+                .expect("sessions list")
+                .iter()
+                .filter_map(|s| s["id"].as_str().map(str::to_owned))
+                .collect();
+            let mut graphs = Map::new();
+            let mut nodes = Map::new();
+            for id in &ids {
+                let graph = db.graph(id).await.expect("graph");
+                let mut details = Map::new();
+                for node in graph["nodes"].as_array().into_iter().flatten() {
+                    if let Some(seq) = node["props"]["seq"].as_i64() {
+                        details.insert(seq.to_string(), db.node(id, seq).await.expect("node"));
+                    }
+                }
+                graphs.insert(id.clone(), graph);
+                nodes.insert(id.clone(), Value::Object(details));
+            }
+            let calls = db.calls(&ids).await.expect("calls");
+            json!({"sessions": sessions, "graphs": graphs, "nodes": nodes, "calls": calls})
+        });
+        let out =
+            std::env::var("VIEWER_FIXTURE_OUT").unwrap_or_else(|_| "mock/fixture.json".into());
+        let mut text = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+        let rewrite = std::env::var("VIEWER_FIXTURE_REWRITE").unwrap_or_default();
+        let mut pairs: Vec<(&str, &str)> = rewrite
+            .split(';')
+            .filter_map(|pair| pair.split_once('='))
+            .collect();
+        pairs.sort_by_key(|(from, _)| std::cmp::Reverse(from.len()));
+        for (from, to) in pairs {
+            text = text.replace(from, to);
+        }
+        std::fs::write(&out, text).expect("write fixture");
+        eprintln!(
+            "{} 세션을 {out}에 썼습니다.",
+            fixture["sessions"].as_array().map_or(0, Vec::len)
+        );
+    }
+}
