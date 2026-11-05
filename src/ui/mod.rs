@@ -5,6 +5,7 @@ mod canvas;
 mod inspector;
 mod settings;
 mod sidebar;
+mod update;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +55,8 @@ pub struct AppState {
     pub settings_open: Signal<bool>,
     pub live: Signal<bool>,
     pub inspector_width: Signal<f64>,
+    /// Bumped by the menu to look for an update.
+    pub check_updates: Signal<u32>,
     /// Bumped to read the sessions, the graph, or fit the canvas again.
     pub reload: Signal<u32>,
     pub refresh: Signal<u32>,
@@ -109,6 +112,7 @@ pub fn App() -> Element {
         settings_open: Signal::new(false),
         live: Signal::new(false),
         inspector_width: Signal::new(width),
+        check_updates: Signal::new(0),
         reload: Signal::new(0),
         refresh: Signal::new(0),
         fit: Signal::new(0),
@@ -143,6 +147,7 @@ pub fn App() -> Element {
             onmouseup: drop,
             onmouseleave: drop,
             TopBar {}
+            update::UpdateBanner {}
             div { class: "columns",
                 sidebar::Sidebar {}
                 main { class: "stage",
@@ -194,6 +199,7 @@ fn use_menu(backend: Arc<Backend>, mut state: AppState) {
         menu::FLOW => state.view.set(View::Flow),
         menu::FIT => state.fit += 1,
         menu::DEMO => state.toggle_demo(&backend),
+        menu::CHECK_UPDATES => state.check_updates += 1,
         _ => {}
     });
 }

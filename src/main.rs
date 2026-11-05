@@ -11,6 +11,7 @@ mod model;
 mod prefs;
 mod settings;
 mod ui;
+mod updater;
 
 use std::sync::Arc;
 

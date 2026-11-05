@@ -73,6 +73,10 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # With the key set, the notarized app is also archived (.app.tar.gz) and signed
+          # for the updater.
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
         run: cargo packager --release --target universal-apple-darwin
 
       # The app inside is notarized already; notarizing the disk image too lets Gatekeeper
@@ -90,20 +94,56 @@ jobs:
       - name: Check signature, notarization and architectures
         run: |
           app="dist/WithHuman Viewer.app"
+          test -f "dist/WithHuman Viewer.app.tar.gz.sig"
           codesign --verify --deep --strict --verbose=2 "$app"
           spctl --assess --type execute --verbose "$app"
           xcrun stapler validate "$app"
           xcrun stapler validate dist/*.dmg
           lipo -info "$app/Contents/MacOS/withhuman-viewer" | grep -q "x86_64 arm64"
 
+      # Release assets get names without spaces: GitHub would turn them into dots, and the
+      # updater's manifest has to name the archive exactly.
+      - name: Name the release files
+        working-directory: dist
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' ../Cargo.toml | head -1)
+          name="WithHuman-Viewer_${version}_universal"
+          mv "WithHuman Viewer_${version}_universal.dmg" "$name.dmg"
+          mv "WithHuman Viewer.app.tar.gz" "$name.app.tar.gz"
+          mv "WithHuman Viewer.app.tar.gz.sig" "$name.app.tar.gz.sig"
+          # The image was stapled after it was signed for the updater, so its signature is stale.
+          rm -f *.dmg.sig
+          echo "RELEASE_NAME=$name" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # The manifest the app reads from releases/latest/download/latest.json. The universal
+      # archive serves both architectures.
+      - name: Write the update manifest
+        working-directory: dist
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          url="https://github.com/$REPOSITORY/releases/download/v$VERSION/$RELEASE_NAME.app.tar.gz"
+          jq -n --arg version "$VERSION" --arg url "$url" \
+                --arg signature "$(cat "$RELEASE_NAME.app.tar.gz.sig")" \
+                --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg notes "WithHuman Viewer $VERSION" '
+            {version: $version, notes: $notes, pub_date: $date,
+             platforms: {
+               "macos-aarch64": {url: $url, signature: $signature, format: "app"},
+               "macos-x86_64":  {url: $url, signature: $signature, format: "app"}}}' > latest.json
+          jq . latest.json
+
       - name: Write checksums
         working-directory: dist
-        run: shasum -a 256 *.dmg > SHA256SUMS
+        run: shasum -a 256 *.dmg *.app.tar.gz > SHA256SUMS
 
       - name: Attest the build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist/*.dmg
+          subject-path: |
+            dist/*.dmg
+            dist/*.app.tar.gz
 
       - name: Upload the disk image
         uses: actions/upload-artifact@v4
@@ -111,6 +151,9 @@ jobs:
           name: withhuman-viewer-signed
           path: |
             dist/*.dmg
+            dist/*.app.tar.gz
+            dist/*.app.tar.gz.sig
+            dist/latest.json
             dist/SHA256SUMS
           retention-days: 14
 
@@ -120,5 +163,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.app.tar.gz dist/*.app.tar.gz.sig \
+            dist/latest.json dist/SHA256SUMS \
             --draft --generate-notes --title "WithHuman Viewer ${GITHUB_REF_NAME#v}"
