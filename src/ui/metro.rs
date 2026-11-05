@@ -2,6 +2,7 @@
 //! and the quoted sources in HTML over them, panned by dragging or scrolling and zoomed with a
 //! pinch or ⌘-scroll. A station is a Call; picking one keeps its way back to the request lit.
 
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -10,10 +11,10 @@ use dioxus::prelude::*;
 use super::{AppState, Load, Selection};
 use crate::api::Backend;
 use crate::layout::clip;
-use crate::metro::{LEFT, LineKind, MAIN_Y, Metro, Route, Station};
+use crate::metro::{Band, LEFT, LineKind, MAIN_Y, Metro, Route, Station};
 
 /// Below this zoom labels get too small to read: a first view stops here.
-const READABLE: f64 = 0.85;
+const READABLE: f64 = 0.95;
 const MAX_ZOOM: f64 = 2.0;
 const MIN_ZOOM: f64 = 0.2;
 /// A press that moves less than this is a click, not a drag.
@@ -83,9 +84,27 @@ impl Camera {
 #[component]
 pub fn MetroMap() -> Element {
     let mut state = use_context::<AppState>();
+    // Folded runs the person opened, by their first Call; a new session starts folded.
+    let mut open = use_signal(HashSet::<i64>::new);
     let metro = use_memo(move || match &*state.graph.read() {
-        Load::Ready(model) => Some(Arc::new(Metro::build(model))),
+        Load::Ready(model) => Some(Arc::new(Metro::build_with(model, &open.read()))),
         _ => None,
+    });
+    use_effect(move || {
+        let _ = state.graph_of.read();
+        open.set(HashSet::new());
+    });
+    // A Call picked elsewhere (the inspector, a notification) inside a folded run opens it.
+    use_effect(move || {
+        let Selection::Node(seq) = (state.selected)() else {
+            return;
+        };
+        let Some(m) = metro.peek().clone() else {
+            return;
+        };
+        if let Some(s) = m.station(seq).filter(|s| s.folded()) {
+            open.write().insert(s.seq);
+        }
     });
     let mut camera = use_signal(|| None::<Camera>);
     let mut size = use_signal(|| (0.0_f64, 0.0_f64));
@@ -172,7 +191,7 @@ pub fn MetroMap() -> Element {
         zoom: 1.0,
     });
     let picked = match (state.selected)() {
-        Selection::Node(seq) if m.station(seq).is_some() => Some(seq),
+        Selection::Node(seq) => m.station(seq).map(|s| s.seq),
         _ => None,
     };
     let route = picked.map(|seq| m.route(seq));
@@ -227,17 +246,38 @@ pub fn MetroMap() -> Element {
                 svg {
                     width: "{m.width}",
                     height: "{m.height}",
-                    for i in 0..m.lines.len() {
+                    for b in m.bands.iter().cloned() {
+                        BandMark { band: b.clone(), y: m.lines[b.line].y, lit: route.is_none() }
+                    }
+                    for (x0, x1, agent) in m.main_segments() {
+                        path {
+                            class: if agent.is_some() { "track main agent" } else { "track main" },
+                            d: "M{x0},{MAIN_Y} H{x1}",
+                        }
+                    }
+                    for i in 1..m.lines.len() {
                         Track { metro: m.clone(), index: i, lit: route.as_ref().is_none_or(|r| r.lines.contains(&i)) }
                     }
                     for a in m.asks.iter().cloned() {
                         circle {
-                            class: if route.is_some() && a.seq != m.asks[0].seq { "terminus dim" } else { "terminus" },
+                            class: match (route.is_some() && a.seq != m.asks[0].seq, a.agent.is_some()) {
+                                (true, true) => "terminus agent dim",
+                                (true, false) => "terminus dim",
+                                (false, true) => "terminus agent",
+                                (false, false) => "terminus",
+                            },
                             cx: "{a.x}", cy: "{MAIN_Y}", r: "13",
                         }
                     }
                     for s in m.stations.iter().cloned() {
-                        StationMark { station: s.clone(), picked: picked == Some(s.seq), lit: lit(&route, s.seq), dragged }
+                        StationMark {
+                            station: s.clone(),
+                            ring: ring(&m, &s),
+                            picked: picked == Some(s.seq),
+                            lit: lit(&route, s.seq),
+                            dragged,
+                            open,
+                        }
                     }
                 }
                 for (i, line) in m.lines.iter().enumerate() {
@@ -248,7 +288,7 @@ pub fn MetroMap() -> Element {
                         div {
                             class: if route.as_ref().is_none_or(|r| r.lines.contains(&i)) { "loose-label" } else { "loose-label dim" },
                             style: "left: {m.station(line.stations[0]).map_or(0.0, |s| s.x) - 50.0}px; top: {line.y - 30.0}px",
-                            "출처 없음 · 요청에도 도구 결과에도 이어지지 않음"
+                            "출처 없음 · 요청에도 이 세션의 도구 결과에도 이어지지 않음"
                         }
                     }
                 }
@@ -257,11 +297,23 @@ pub fn MetroMap() -> Element {
                         class: if route.is_some() && n > 0 { "ask dim" } else { "ask" },
                         style: if n == 0 { format!("left: {}px; top: {}px; width: {}px", LEFT - 4.0, MAIN_Y + 26.0, crate::metro::FIRST - 40.0) } else { format!("left: {}px; top: {}px; width: 230px", a.x - 16.0, MAIN_Y + 26.0) },
                         onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(a.seq)); },
-                        div { class: "who", if n == 0 { "사용자 요청" } else { "다음 요청" } }
-                        div { class: if n == 0 { "say" } else { "say next" }, "{a.text}" }
+                        if let Some(agent) = a.agent.clone() {
+                            div { class: "who agent", "에이전트 보고 · 사람이 쓴 요청이 아님" }
+                            div { class: "say next agent", "{clip(&agent, 18)} 에이전트의 보고를 다음 턴으로 받음" }
+                        } else {
+                            div { class: "who", if n == 0 { "사용자 요청" } else { "다음 요청" } }
+                            div { class: if n == 0 { "say" } else { "say next" }, "{a.text}" }
+                        }
                         if let Some(intent) = a.intent.clone() {
                             div { class: "intent", "의도: {intent}" }
                         }
+                    }
+                }
+                for b in m.bands.iter().cloned() {
+                    div {
+                        class: if route.is_some() { "band-label dim" } else { "band-label" },
+                        style: if b.line == 0 { format!("left: {}px; top: {}px", b.x0 - 26.0, MAIN_Y + 26.0) } else { format!("left: {}px; top: {}px", b.x0 - 26.0, m.lines[b.line].y - 40.0) },
+                        "{b.agent} 에이전트가 한 일"
                     }
                 }
                 for s in m.stations.iter().cloned() {
@@ -283,6 +335,25 @@ pub fn MetroMap() -> Element {
 
 fn lit(route: &Option<Route>, seq: i64) -> bool {
     route.as_ref().is_none_or(|r| r.stations.contains(&seq))
+}
+
+/// The class of the line a station rides, for its ring: an allowed station wears its line's colour.
+fn ring(m: &Metro, s: &Station) -> &'static str {
+    match m.lines[s.line].kind {
+        LineKind::Branch => "on-branch",
+        LineKind::Loose => "on-loose",
+        LineKind::Main if m.turn_agent(s.x).is_some() => "on-agent",
+        LineKind::Main => "on-main",
+    }
+}
+
+/// The band behind a subagent's stations.
+#[component]
+fn BandMark(band: Band, y: f64, lit: bool) -> Element {
+    let (x, w) = (band.x0 - 26.0, band.x1 - band.x0 + 52.0);
+    rsx! {
+        rect { class: if lit { "band" } else { "band dim" }, x: "{x}", y: "{y - 20.0}", width: "{w}", height: "40", rx: "20" }
+    }
 }
 
 #[component]
@@ -309,12 +380,26 @@ fn Track(metro: Arc<Metro>, index: usize, lit: bool) -> Element {
 }
 
 #[component]
-fn StationMark(station: Station, picked: bool, lit: bool, dragged: Signal<bool>) -> Element {
+fn StationMark(
+    station: Station,
+    ring: &'static str,
+    picked: bool,
+    lit: bool,
+    dragged: Signal<bool>,
+    open: Signal<HashSet<i64>>,
+) -> Element {
     let mut state = use_context::<AppState>();
     let (cx, cy, seq) = (station.x, station.y, station.seq);
+    let folded = station.folded();
+    // A folded station opens; any other is picked.
     let select = move |e: MouseEvent| {
         e.stop_propagation();
-        if !dragged() {
+        if dragged() {
+            return;
+        }
+        if folded {
+            open.write().insert(seq);
+        } else {
             state.selected.set(Selection::Node(seq));
         }
     };
@@ -323,8 +408,10 @@ fn StationMark(station: Station, picked: bool, lit: bool, dragged: Signal<bool>)
         Some("REVIEW") => Some("review"),
         _ => None,
     };
+    let undecided = station.decision.is_none();
+    let count = station.members.len();
     rsx! {
-        g { class: if lit { "station" } else { "station dim" }, onclick: select,
+        g { class: if lit { "station {ring}" } else { "station {ring} dim" }, onclick: select,
             // A larger, invisible target than the mark itself.
             circle { class: "hit", cx: "{cx}", cy: "{cy}", r: "20" }
             if let Some(kind) = stop {
@@ -335,12 +422,18 @@ fn StationMark(station: Station, picked: bool, lit: bool, dragged: Signal<bool>)
                 } else {
                     path { class: "glyph", d: "M{cx},{cy - 5.0} v6 M{cx},{cy + 4.0} v0.5" }
                 }
+            } else if folded {
+                rect { class: "pass fold", x: "{cx - 19.0}", y: "{cy - 9.0}", width: "38", height: "18", rx: "9" }
+                text { class: "fold-count", x: "{cx}", y: "{cy + 4.0}", "×{count}" }
             } else {
                 if picked { circle { class: "halo", cx: "{cx}", cy: "{cy}", r: "16" } }
-                circle { class: "pass", cx: "{cx}", cy: "{cy}", r: "8" }
+                circle { class: if undecided { "pass undecided" } else { "pass" }, cx: "{cx}", cy: "{cy}", r: "8" }
                 if station.irreversible {
                     circle { class: "undo", cx: "{cx}", cy: "{cy}", r: "15" }
                 }
+            }
+            if station.failed {
+                path { class: "fail", d: "M{cx - 7.0},{cy + 7.0} L{cx + 7.0},{cy - 7.0}" }
             }
         }
     }
@@ -361,10 +454,14 @@ fn StationLabel(station: Station, main: bool, lit: bool, dragged: Signal<bool>) 
         Some("REVIEW") => "review",
         _ => "",
     };
+    // One tag, by the same order as the marks: the decision, then how it went.
     let tag = match station.decision.as_deref() {
         Some("DENY") => Some("차단"),
         Some("REVIEW") => Some("확인 요청"),
+        None => Some("판정 없음"),
         _ if station.irreversible => Some("되돌릴 수 없음 · 허용"),
+        _ if station.failed => Some("실패"),
+        _ if station.unsourced => Some("출처 결과를 찾지 못함"),
         _ => None,
     };
     let source = station.source.as_ref().map(|s| {
@@ -384,14 +481,14 @@ fn StationLabel(station: Station, main: bool, lit: bool, dragged: Signal<bool>) 
     };
     rsx! {
         div { class: "label {tone}{dim}", style: "left: {station.x - 20.0}px; top: {top}px", onclick: select,
-            div { class: "tool", "{station.tool}" }
+            div { class: "tool", if station.folded() { "{station.tool} ×{station.members.len()}" } else { "{station.tool}" } }
             div { class: "what", title: "{station.what}", "{station.what}" }
             if let Some(s) = source { div { class: "what source", "{s}" } }
             if !main { if let Some(t) = tag { div { class: "verdict", "{t}" } } }
         }
         if main {
             if let Some(t) = tag {
-                div { class: if tag == Some("되돌릴 수 없음 · 허용") { format!("label undo{dim}") } else { format!("label {tone}{dim}") },
+                div { class: match tag { Some("되돌릴 수 없음 · 허용") => format!("label undo{dim}"), Some("차단" | "확인 요청") => format!("label {tone}{dim}"), _ => format!("label quiet{dim}") },
                     style: "left: {station.x - 20.0}px; top: {tag_top}px",
                     div { class: "verdict", "{t}" }
                 }

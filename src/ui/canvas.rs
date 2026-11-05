@@ -47,11 +47,13 @@ pub fn Toolbar() -> Element {
 pub fn Legend() -> Element {
     rsx! {
         div { class: "legend",
-            span { i { class: "line", style: "border-color: var(--line-main)" } "사용자 요청이 시킨 일" }
-            span { i { class: "line", style: "border-color: var(--line-branch)" } "도구 결과의 글이 시킨 일" }
+            span { i { class: "line", style: "border-color: var(--line-main)" } "사람의 요청" }
+            span { i { class: "line", style: "border-color: var(--line-agent)" } "에이전트 보고" }
+            span { i { class: "line", style: "border-color: var(--line-branch)" } "도구 결과의 글" }
             span { i { class: "line loose" } "출처 없음" }
             span { i { style: "background: var(--deny)" } "차단" }
             span { i { style: "background: var(--review)" } "확인 요청" }
+            span { i { class: "band" } "서브에이전트가 한 일" }
         }
     }
 }

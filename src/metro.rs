@@ -1,9 +1,19 @@
-//! A session as a metro map: time runs left to right, and each line is where an instruction
-//! came from. The person's request is the main line; text in a tool result that drove the
-//! agent is a branch leaving the station of the Call that read it; a Call traced to neither
-//! runs on a dotted line of its own. Following a Call's line back is following its cause.
+//! A session as a metro map. Time runs left to right, and every visual channel answers one
+//! question only:
 //!
-//! This module only places things; the canvas draws them.
+//! - **Line: what told the agent to do it.** The main line is the turn's request: navy when a
+//!   person wrote it, teal when it is a subagent's report the engine recorded as the turn. A
+//!   branch is text in a tool result, leaving the station of the Call that read it. The dotted
+//!   line holds Calls traced to neither, or to a result whose Call is not in the session.
+//! - **Station fill: what the engine decided.** White when allowed (ringed in its line's
+//!   colour), red when denied, amber when held for review, a dotted grey ring when undecided.
+//! - **Marks on a station: how it went.** A dashed amber ring when it is hard to undo, a slash
+//!   when the tool failed.
+//! - **Band behind stations: who did it.** A subagent's Calls stay on their line and share a
+//!   band named after the agent.
+//!
+//! Four or more plain allowed stations in a row on one line fold into one; a stop, an
+//! undecided Call, a hard undo or a failure never folds. This module only places things.
 
 use std::collections::{HashMap, HashSet};
 
@@ -24,14 +34,16 @@ pub const FIRST: f64 = 330.0;
 const LOOSE_GAP: f64 = 110.0;
 /// At or above this, a Call's effect is shown as hard to undo.
 pub const IRREVERSIBLE: f64 = 0.5;
+/// This many plain stations in a row on one line fold into one.
+pub const FOLD: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LineKind {
-    /// The person's request.
+    /// The turn's request.
     Main,
     /// Text in a tool result.
     Branch,
-    /// Neither the request nor a result.
+    /// Neither the request nor a result in the session.
     Loose,
 }
 
@@ -47,6 +59,7 @@ pub struct Source {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Station {
+    /// The Call's number; a folded station carries its first Call's.
     pub seq: i64,
     pub x: f64,
     pub y: f64,
@@ -55,14 +68,34 @@ pub struct Station {
     pub what: String,
     pub decision: Option<String>,
     pub irreversible: bool,
+    /// The tool ran and came back with an error.
+    pub failed: bool,
+    /// The trace pointed at a tool result whose Call is not in the session.
+    pub unsourced: bool,
+    /// The subagent that made the Call, when one did.
+    pub agent: Option<String>,
     /// The paragraph that caused it, when it runs on a branch.
     pub source: Option<Source>,
+    /// The Calls a folded station stands for, in order; just its own otherwise.
+    pub members: Vec<i64>,
 }
 
 impl Station {
     /// Denied or held for review: what the map is read for.
     pub fn stopped(&self) -> bool {
         matches!(self.decision.as_deref(), Some("DENY" | "REVIEW"))
+    }
+
+    pub fn folded(&self) -> bool {
+        self.members.len() > 1
+    }
+
+    /// Nothing worth singling out: allowed, decided, easy to undo, and it worked.
+    fn plain(&self) -> bool {
+        self.decision.as_deref() == Some("ALLOW")
+            && !self.irreversible
+            && !self.failed
+            && !self.unsourced
     }
 }
 
@@ -79,13 +112,24 @@ pub struct Line {
     pub hot: bool,
 }
 
-/// A prompt: the first one opens the main line, a later one is a terminus on it.
+/// A turn's request: the first opens the main line, a later one is a terminus on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ask {
     pub seq: i64,
     pub x: f64,
     pub text: String,
     pub intent: Option<String>,
+    /// The subagent whose report the engine recorded as this turn; none when a person wrote it.
+    pub agent: Option<String>,
+}
+
+/// Stations on one line made in a row by one subagent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Band {
+    pub agent: String,
+    pub line: usize,
+    pub x0: f64,
+    pub x1: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -93,10 +137,13 @@ pub struct Metro {
     pub lines: Vec<Line>,
     pub stations: Vec<Station>,
     pub asks: Vec<Ask>,
+    pub bands: Vec<Band>,
     /// The agent's last message, shown where the main line ends.
     pub last_word: Option<(i64, String)>,
     pub width: f64,
     pub height: f64,
+    /// Each Call's station, folded ones included.
+    at: HashMap<i64, usize>,
 }
 
 /// What a selection keeps lit: its stations and lines, back to the request.
@@ -120,8 +167,18 @@ fn target(node: &Node) -> String {
     }
 }
 
-/// The paragraph a Call was traced to, when the trace links it to a tool result.
-fn source_of(model: &Model, trace: &Value) -> Option<Source> {
+/// The subagent a report came from, when a turn's text is one: `<agent-message from="…">`.
+pub fn report_of(prompt: &str) -> Option<String> {
+    let rest = prompt.trim_start().strip_prefix("<agent-message")?;
+    let from = rest
+        .split_once("from=\"")
+        .and_then(|(_, r)| r.split_once('"'))
+        .map(|(id, _)| id.to_owned());
+    Some(from.unwrap_or_else(|| "에이전트".into()))
+}
+
+/// The best paragraph a Call was traced to, and the Call whose result holds it, when it has one.
+fn traced(model: &Model, trace: &Value) -> Option<(Source, bool)> {
     if trace["link"] != "segment" {
         return None;
     }
@@ -130,19 +187,52 @@ fn source_of(model: &Model, trace: &Value) -> Option<Source> {
         p(a).total_cmp(&p(b))
     })?;
     let result = best["seq"].as_i64()?;
-    Some(Source {
-        result,
-        paragraph: best["paragraph"].as_i64(),
-        probability: best["probability"].as_f64().unwrap_or(0.0),
-        by: *model.call_of.get(&result)?,
-    })
+    let by = model.call_of.get(&result).copied();
+    Some((
+        Source {
+            result,
+            paragraph: best["paragraph"].as_i64(),
+            probability: best["probability"].as_f64().unwrap_or(0.0),
+            by: by.unwrap_or(-1),
+        },
+        by.is_some(),
+    ))
+}
+
+/// One event in time order: a turn opening, or a Call on its line.
+enum Item {
+    Ask(Ask),
+    Call(Station),
 }
 
 impl Metro {
+    #[cfg(test)]
     pub fn build(model: &Model) -> Self {
+        Self::build_with(model, &HashSet::new())
+    }
+
+    /// Lays the map out, leaving unfolded the runs whose first Call is in `open`.
+    pub fn build_with(model: &Model, open: &HashSet<i64>) -> Self {
         let mut nodes: Vec<&Node> = model.nodes.iter().collect();
         nodes.sort_by_key(|n| n.seq());
+        // A subagent by its id, named by the kind its start recorded.
+        let kinds: HashMap<String, String> = model
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                let id = n.props.get("agent_id")?.as_str()?;
+                let kind = n.props.get("agent_type")?.as_str()?;
+                Some((id.to_owned(), kind.to_owned()))
+            })
+            .collect();
+        let failed: HashSet<i64> = model
+            .nodes
+            .iter()
+            .filter(|n| n.kind == "Error")
+            .filter_map(|n| model.call_of.get(&n.seq()).copied())
+            .collect();
 
+        // Lines first: which line each Call rides, in the order they happened.
         let mut lines = vec![Line {
             kind: LineKind::Main,
             y: MAIN_Y,
@@ -153,73 +243,93 @@ impl Metro {
         }];
         let mut line_of_result: HashMap<i64, usize> = HashMap::new();
         let mut loose = None;
-        let mut stations: Vec<Station> = Vec::new();
-        let mut asks: Vec<Ask> = Vec::new();
+        let mut line_of_call: HashMap<i64, usize> = HashMap::new();
+        let mut items: Vec<Item> = Vec::new();
         let mut last_word = None;
-        let mut column = 0.0;
-        let mut station_line: HashMap<i64, usize> = HashMap::new();
-
+        let new_line = |lines: &mut Vec<Line>, kind, parent, source| {
+            lines.push(Line {
+                kind,
+                y: 0.0,
+                parent,
+                source,
+                stations: Vec::new(),
+                hot: false,
+            });
+            lines.len() - 1
+        };
         for node in nodes {
             match node.kind.as_str() {
                 "Request" => {
-                    let x = if asks.is_empty() {
-                        LEFT + 12.0
-                    } else {
-                        // A later prompt takes two columns: the turn changes there.
-                        let x = LEFT + FIRST + column * STEP + 40.0;
-                        column += 2.0;
-                        x
-                    };
-                    asks.push(Ask {
+                    let prompt = text(&node.summary.prompt);
+                    items.push(Item::Ask(Ask {
                         seq: node.seq(),
-                        x,
-                        text: text(&node.summary.prompt),
+                        x: 0.0,
+                        agent: report_of(&prompt).map(|id| kinds.get(&id).cloned().unwrap_or(id)),
+                        text: prompt,
                         intent: None,
-                    });
+                    }));
                 }
                 "Intent" => {
-                    if let Some(ask) = asks.last_mut().filter(|a| a.intent.is_none()) {
+                    if let Some(Item::Ask(ask)) = items
+                        .iter_mut()
+                        .rev()
+                        .find(|i| matches!(i, Item::Ask(_)))
+                        .filter(|i| matches!(i, Item::Ask(a) if a.intent.is_none()))
+                    {
                         ask.intent = node.summary.intent.clone();
                     }
                 }
                 "Message" => last_word = Some((node.seq(), text(&node.summary.text))),
                 "Call" => {
                     let trace = parse_json(node.props.get("trace_json"));
-                    let source = source_of(model, &trace);
-                    let line = match (&source, trace["link"].as_str()) {
-                        (Some(s), _) => {
-                            let parent = station_line.get(&s.by).copied().unwrap_or(0);
-                            *line_of_result.entry(s.result).or_insert_with(|| {
-                                lines.push(Line {
-                                    kind: LineKind::Branch,
-                                    y: 0.0,
-                                    parent: Some(parent),
-                                    source: Some(s.clone()),
-                                    stations: Vec::new(),
-                                    hot: false,
-                                });
-                                lines.len() - 1
-                            })
-                        }
-                        (None, Some("none")) => *loose.get_or_insert_with(|| {
-                            lines.push(Line {
-                                kind: LineKind::Loose,
-                                y: 0.0,
-                                parent: None,
-                                source: None,
-                                stations: Vec::new(),
-                                hot: false,
+                    let traced = traced(model, &trace);
+                    // Branch when the trace names a result in the session; the dotted line
+                    // when it names one that is not, or names nothing; else the main line.
+                    let (line, source, unsourced) = match traced {
+                        Some((s, true)) => {
+                            let parent = line_of_call.get(&s.by).copied().unwrap_or(0);
+                            let line = *line_of_result.entry(s.result).or_insert_with(|| {
+                                new_line(
+                                    &mut lines,
+                                    LineKind::Branch,
+                                    Some(parent),
+                                    Some(s.clone()),
+                                )
                             });
-                            lines.len() - 1
-                        }),
-                        _ => 0,
+                            (line, Some(s), false)
+                        }
+                        Some((_, false)) => (
+                            *loose.get_or_insert_with(|| {
+                                new_line(&mut lines, LineKind::Loose, None, None)
+                            }),
+                            None,
+                            true,
+                        ),
+                        None if trace["link"] == "none" => (
+                            *loose.get_or_insert_with(|| {
+                                new_line(&mut lines, LineKind::Loose, None, None)
+                            }),
+                            None,
+                            false,
+                        ),
+                        None => (0, None, false),
                     };
-                    let irreversible = trace["deviation"]["irreversible"]
-                        .as_f64()
-                        .is_some_and(|p| p >= IRREVERSIBLE);
-                    let station = Station {
+                    line_of_call.insert(node.seq(), line);
+                    let agent = node
+                        .props
+                        .get("agent_id")
+                        .and_then(Value::as_str)
+                        .filter(|a| !a.is_empty() && *a != "main")
+                        .map(|_| {
+                            node.props
+                                .get("agent_type")
+                                .and_then(Value::as_str)
+                                .unwrap_or("서브에이전트")
+                                .to_owned()
+                        });
+                    items.push(Item::Call(Station {
                         seq: node.seq(),
-                        x: LEFT + FIRST + column * STEP,
+                        x: 0.0,
                         y: 0.0,
                         line,
                         tool: node
@@ -229,28 +339,118 @@ impl Metro {
                             .unwrap_or_else(|| "Call".into()),
                         what: target(node),
                         decision: node.decision().map(str::to_owned),
-                        irreversible,
+                        irreversible: trace["deviation"]["irreversible"]
+                            .as_f64()
+                            .is_some_and(|p| p >= IRREVERSIBLE),
+                        failed: failed.contains(&node.seq()),
+                        unsourced,
+                        agent,
                         source,
-                    };
-                    column += 1.0;
-                    lines[line].hot |= station.stopped();
-                    lines[line].stations.push(station.seq);
-                    station_line.insert(station.seq, line);
-                    stations.push(station);
+                        members: vec![node.seq()],
+                    }));
                 }
                 _ => {}
             }
         }
 
+        // Folding: plain stations in a row on one line, made by the same hand, become one
+        // unless the run was opened.
+        let mut folded: Vec<Item> = Vec::new();
+        let mut run: Vec<Station> = Vec::new();
+        let flush = |run: &mut Vec<Station>, out: &mut Vec<Item>| {
+            if run.len() >= FOLD && !open.contains(&run[0].seq) {
+                let mut first = run[0].clone();
+                let same = run.iter().all(|s| s.tool == first.tool);
+                let members: Vec<i64> = run.iter().map(|s| s.seq).collect();
+                first.what = if same {
+                    format!("{}개", members.len())
+                } else {
+                    // Each tool with how many times it ran, the most used first.
+                    let mut counts: Vec<(&str, usize)> = Vec::new();
+                    for t in run.iter().map(|s| s.tool.as_str()) {
+                        match counts.iter_mut().find(|(n, _)| *n == t) {
+                            Some((_, c)) => *c += 1,
+                            None => counts.push((t, 1)),
+                        }
+                    }
+                    counts.sort_by(|a, b| b.1.cmp(&a.1));
+                    counts
+                        .iter()
+                        .map(|(t, c)| format!("{t} {c}"))
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                };
+                if !same {
+                    first.tool = "Call".into();
+                }
+                first.members = members;
+                out.push(Item::Call(first));
+            } else {
+                out.extend(run.drain(..).map(Item::Call));
+            }
+            run.clear();
+        };
+        for item in items {
+            match item {
+                Item::Call(s) if s.plain() => {
+                    let joins = run
+                        .last()
+                        .is_some_and(|r| r.line == s.line && r.agent == s.agent);
+                    if !joins {
+                        flush(&mut run, &mut folded);
+                    }
+                    run.push(s);
+                }
+                other => {
+                    flush(&mut run, &mut folded);
+                    folded.push(other);
+                }
+            }
+        }
+        flush(&mut run, &mut folded);
+
+        // Columns: one per station, two where a turn changes.
+        let mut stations: Vec<Station> = Vec::new();
+        let mut asks: Vec<Ask> = Vec::new();
+        let mut column = 0.0;
+        for item in folded {
+            match item {
+                Item::Ask(mut a) => {
+                    if asks.is_empty() {
+                        a.x = LEFT + 12.0;
+                    } else {
+                        a.x = LEFT + FIRST + column * STEP + 40.0;
+                        column += 2.0;
+                    }
+                    asks.push(a);
+                }
+                Item::Call(mut s) => {
+                    s.x = LEFT + FIRST + column * STEP;
+                    column += 1.0;
+                    stations.push(s);
+                }
+            }
+        }
+        let mut at: HashMap<i64, usize> = HashMap::new();
+        for (i, s) in stations.iter().enumerate() {
+            for &m in &s.members {
+                at.insert(m, i);
+            }
+        }
+        for s in &stations {
+            lines[s.line].hot |= s.stopped();
+            lines[s.line].stations.push(s.seq);
+        }
+
         // Rows: each branch right under the line it leaves, siblings that leave further right
         // nearer, so no branch's drop crosses another branch. The loose line goes last.
+        let x_of = |seq: i64| at.get(&seq).map_or(LEFT, |&i| stations[i].x);
         let mut next = MAIN_Y + LANE_GAP;
-        let x_of: HashMap<i64, f64> = stations.iter().map(|s| (s.seq, s.x)).collect();
-        fn place(parent: usize, lines: &mut [Line], x_of: &HashMap<i64, f64>, next: &mut f64) {
+        fn place(parent: usize, lines: &mut [Line], x_of: &dyn Fn(i64) -> f64, next: &mut f64) {
             let mut children: Vec<usize> = (0..lines.len())
                 .filter(|&i| lines[i].parent == Some(parent) && lines[i].kind == LineKind::Branch)
                 .collect();
-            let leaves = |i: &usize| lines[*i].source.as_ref().map_or(0.0, |s| x_of[&s.by]);
+            let leaves = |i: &usize| lines[*i].source.as_ref().map_or(0.0, |s| x_of(s.by));
             children.sort_by(|a, b| leaves(b).total_cmp(&leaves(a)));
             for child in children {
                 lines[child].y = *next;
@@ -266,6 +466,26 @@ impl Metro {
         for s in &mut stations {
             s.y = lines[s.line].y;
         }
+
+        // Bands: a subagent's stations in a row on one line.
+        let mut bands: Vec<Band> = Vec::new();
+        for line in 0..lines.len() {
+            for s in stations.iter().filter(|s| s.line == line) {
+                let Some(agent) = &s.agent else { continue };
+                match bands.last_mut() {
+                    Some(b) if b.line == line && &b.agent == agent && s.x - b.x1 <= STEP * 1.5 => {
+                        b.x1 = s.x
+                    }
+                    _ => bands.push(Band {
+                        agent: agent.clone(),
+                        line,
+                        x0: s.x,
+                        x1: s.x,
+                    }),
+                }
+            }
+        }
+
         let right = stations
             .iter()
             .map(|s| s.x)
@@ -275,14 +495,17 @@ impl Metro {
             lines,
             stations,
             asks,
+            bands,
             last_word,
             width: right + 320.0,
             height: next.max(MAIN_Y + 180.0),
+            at,
         }
     }
 
+    /// The station a Call is drawn at: its own, or the folded one it is part of.
     pub fn station(&self, seq: i64) -> Option<&Station> {
-        self.stations.iter().find(|s| s.seq == seq)
+        self.at.get(&seq).map(|&i| &self.stations[i])
     }
 
     /// Where the main line ends: past its last station or prompt.
@@ -295,6 +518,28 @@ impl Metro {
             + 60.0
     }
 
+    /// The main line in turns: from each request to the next, and who wrote that request.
+    pub fn main_segments(&self) -> Vec<(f64, f64, Option<String>)> {
+        let end = self.main_end();
+        self.asks
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let to = self.asks.get(i + 1).map_or(end, |n| n.x);
+                (a.x, to, a.agent.clone())
+            })
+            .collect()
+    }
+
+    /// Who wrote the request a main-line station's turn answers: none for a person.
+    pub fn turn_agent(&self, x: f64) -> Option<String> {
+        self.asks
+            .iter()
+            .rev()
+            .find(|a| a.x <= x)
+            .and_then(|a| a.agent.clone())
+    }
+
     /// A Call's way back to the request: its station, the branches it rode and the stations
     /// they left from.
     pub fn route(&self, seq: i64) -> Route {
@@ -302,16 +547,18 @@ impl Metro {
         let Some(mut station) = self.station(seq) else {
             return route;
         };
-        route.stations.insert(seq);
+        route.stations.insert(station.seq);
         loop {
             route.lines.insert(station.line);
             let line = &self.lines[station.line];
             let Some(from) = line.source.as_ref().map(|s| s.by) else {
                 break;
             };
-            route.stations.insert(from);
             match self.station(from) {
-                Some(s) => station = s,
+                Some(s) => {
+                    route.stations.insert(s.seq);
+                    station = s;
+                }
                 None => break,
             }
         }
@@ -319,8 +566,9 @@ impl Metro {
         route
     }
 
-    /// A line's track as an SVG path: a branch drops from the station it leaves, turns and
-    /// runs right to its last station.
+    /// A line's track as an SVG path. The main line is drawn turn by turn
+    /// ([`Metro::main_segments`]); a branch drops from the station it leaves, turns and runs
+    /// right to its last station.
     pub fn path(&self, index: usize) -> String {
         let line = &self.lines[index];
         let last = line
@@ -361,11 +609,13 @@ mod tests {
     use super::*;
     use crate::demo::Demo;
 
-    fn metro(session: &str) -> Metro {
+    fn model(session: &str) -> Model {
         let graph = Demo::load().graph(session).expect("fixture session");
-        Metro::build(&Model::build(
-            &serde_json::from_value(graph).expect("graph shape"),
-        ))
+        Model::build(&serde_json::from_value(graph).expect("graph shape"))
+    }
+
+    fn metro(session: &str) -> Metro {
+        Metro::build(&model(session))
     }
 
     fn session(prefix: &str) -> String {
@@ -419,12 +669,60 @@ mod tests {
         assert!(!m.station(6).unwrap().irreversible);
     }
 
+    // A subagent's Calls keep their line and share a band; the one that failed is marked.
     #[test]
-    fn a_later_prompt_opens_a_turn_on_the_main_line() {
-        let m = metro(&session("f8a97043"));
+    fn a_subagent_gets_a_band_and_a_failed_tool_a_mark() {
+        let m = metro(&session("b6380b32"));
+        assert_eq!(m.station(6).unwrap().agent.as_deref(), Some("Explore"));
+        assert!(m.station(14).unwrap().agent.is_none());
+        assert!(m.station(10).unwrap().failed);
+        let band = &m.bands[0];
+        assert_eq!(band.agent, "Explore");
+        assert_eq!(
+            (band.x0, band.x1),
+            (m.station(6).unwrap().x, m.station(10).unwrap().x)
+        );
+    }
+
+    // A subagent's report recorded as a turn is not a person's request.
+    #[test]
+    fn a_report_opens_its_turn_in_the_agents_name() {
+        let m = metro(&session("7fcbd428"));
         assert_eq!(m.asks.len(), 2);
-        assert!(m.asks[1].x > m.station(14).unwrap().x);
-        assert!(m.asks[0].intent.is_some());
+        assert!(m.asks[0].agent.is_none());
+        assert_eq!(m.asks[1].agent.as_deref(), Some("Explore"));
+        let segments = m.main_segments();
+        assert_eq!(segments.len(), 2);
+        assert!(segments[1].2.is_some());
+        assert!(m.turn_agent(m.station(21).unwrap().x).is_some());
+        assert!(m.turn_agent(m.station(4).unwrap().x).is_none());
+        assert_eq!(report_of("고쳐줘"), None);
+    }
+
+    // Four plain Bash and Edit calls in a row fold into one station, unless opened.
+    #[test]
+    fn plain_runs_fold_and_open() {
+        let model = model(&session("f8a97043"));
+        let m = Metro::build(&model);
+        let folded = m.station(4).unwrap();
+        assert_eq!(folded.members, [4, 7, 11, 14]);
+        assert_eq!(m.station(11).unwrap().seq, 4);
+        assert_eq!(folded.tool, "Call");
+        assert_eq!(folded.what, "Bash 3 · Edit 1");
+        let open = Metro::build_with(&model, &HashSet::from([4]));
+        assert!(!open.station(4).unwrap().folded());
+        assert!(open.station(11).unwrap().x > open.station(4).unwrap().x);
+    }
+
+    #[test]
+    fn stops_and_hard_undos_never_fold() {
+        let m = metro(&session("fa6576f7"));
+        assert!(
+            m.stations
+                .iter()
+                .all(|s| !s.folded() || s.members.len() >= FOLD)
+        );
+        assert!(m.station(12).is_some_and(|s| !s.folded()));
     }
 
     #[test]
