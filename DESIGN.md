@@ -50,9 +50,9 @@ withhuman-core의 `tools/graph-viewer/index.html`(브라우저용 페이지, `se
 1. ✅ 골격: 사이드바, 그래프, 인스펙터(판정·원인·문단·속성), 안내 카드, 설정 시트. iframe과 `index.html` 의존 제거.
 2. ✅ 마감: 메뉴·단축키(⌘R, ⌘,, ⌘F, ⌘1/⌘2), 창 상태 기억, 삭제 확인 네이티브 다이얼로그, 키체인에 비밀번호(Neo4j에 연결할 때만 읽음).
 3. 조건 비교 화면, 인스펙터의 이탈 게이지·2차 확인·Jev 기록.
-4. 배포
+4. ✅ 배포
    - ✅ 독립 저장소, CI(fmt·clippy·테스트·cargo-deny), 서명 없는 유니버설 .app/.dmg 패키징
-   - 서명·공증(Developer ID), cargo-packager-updater, `v*` 태그로 Releases에 올리는 워크플로
+   - ✅ 서명·공증(Developer ID), cargo-packager-updater, `v*` 태그로 Releases에 올리는 워크플로 (v0.1.0 출시)
 
 ## 배포 구조
 

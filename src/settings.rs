@@ -15,7 +15,10 @@ pub struct Settings {
     /// Read from a file written before the keychain was used, so it can be moved there.
     /// Otherwise filled from the keychain only when Neo4j is reached ([`Settings::unlocked`]),
     /// so launching, or the demo, never waits on a keychain prompt.
-    #[serde(skip_serializing)]
+    /// Empty when the file has none, not the struct default (`NEO4J_PASSWORD` or
+    /// `withhuman-e2e`): that would look like an old file's password and be moved to the
+    /// keychain on every launch, over the saved one.
+    #[serde(default, skip_serializing)]
     pub password: String,
     /// The keychain holds this account's password.
     pub password_saved: bool,
@@ -209,6 +212,14 @@ mod tests {
         let old: Settings =
             serde_json::from_str(r#"{"neo4j_url":"http://x","password":"old"}"#).unwrap();
         assert_eq!(old.password, "old");
+    }
+
+    // A file the app wrote has no password: it must not read as one to move to the keychain.
+    #[test]
+    fn a_file_without_a_password_reads_empty() {
+        let saved: Settings =
+            serde_json::from_str(r#"{"neo4j_url":"http://x","password_saved":true}"#).unwrap();
+        assert!(saved.password.is_empty());
     }
 
     // Saving the form without a new password, for the same account, leaves the keychain alone:
