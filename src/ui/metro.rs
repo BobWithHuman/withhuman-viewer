@@ -1,6 +1,8 @@
-//! The session drawn as a metro map (see `crate::metro`): lines and stations in SVG, labels
-//! and the quoted sources in HTML over them, panned by dragging or scrolling and zoomed with a
-//! pinch or ⌘-scroll. A station is a Call; picking one keeps its way back to the request lit.
+//! The session drawn as a metro map (see `crate::metro`): lines and stations in SVG, names in
+//! HTML over them, a one-line summary on top. Read at a glance: the section names say what the
+//! agent set out to do, the shapes what it did, the branches what told it, the red what stopped.
+//! Panned by dragging or scrolling, zoomed with a pinch or ⌘-scroll; picking a station keeps
+//! its way back to the request lit.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -9,12 +11,11 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use super::{AppState, Load, Selection};
-use crate::api::Backend;
 use crate::layout::clip;
-use crate::metro::{Band, LEFT, LineKind, MAIN_Y, Metro, Route, Station};
+use crate::metro::{Action, Band, LEFT, LineKind, MAIN_Y, Metro, Route, Station, file_name};
 
-/// Below this zoom labels get too small to read: a first view stops here.
-const READABLE: f64 = 0.95;
+/// Below this zoom names get too small to read: the first view shows the whole map down to here.
+const OVERVIEW: f64 = 0.65;
 const MAX_ZOOM: f64 = 2.0;
 const MIN_ZOOM: f64 = 0.2;
 /// A press that moves less than this is a click, not a drag.
@@ -28,23 +29,23 @@ struct Camera {
 }
 
 impl Camera {
-    /// The whole map when it fits at a readable size. Otherwise a readable zoom that keeps the
-    /// first stopped station in view, since that is what the map is opened for, and the start
-    /// of the session when nothing stopped.
+    /// The whole session at once, which is what the map is for, down to a zoom labels still
+    /// read at. A map longer than that opens at that zoom on the first stopped station, or on
+    /// the start when nothing stopped.
     fn first_view(metro: &Metro, width: f64, height: f64) -> Self {
         let fit = ((width - 60.0) / metro.width)
-            .min((height - 60.0) / metro.height)
+            .min((height - 120.0) / metro.height)
             .min(1.0);
-        if fit >= READABLE {
+        if fit >= OVERVIEW {
             return Camera {
                 zoom: fit,
                 x: (width - metro.width * fit) / 2.0,
-                y: (height - metro.height * fit) / 2.0,
+                y: 86.0,
             };
         }
-        let zoom = ((width - 60.0) / metro.width).clamp(READABLE, 1.0);
+        let zoom = OVERVIEW;
         let start_x = 30.0 - (LEFT - 20.0) * zoom;
-        let top_y = 30.0 - (MAIN_Y - 100.0) * zoom;
+        let top_y = 86.0;
         let Some(stop) = metro.stations.iter().find(|s| s.stopped()) else {
             return Camera {
                 zoom,
@@ -52,10 +53,8 @@ impl Camera {
                 y: top_y,
             };
         };
-        // The stop sits right of the middle, with what led to it on its left; the view never
-        // pans past the start or leaves the stop under the bottom edge.
         let x = (width * 0.62 - stop.x * zoom).min(start_x);
-        let y = top_y.min(height - 150.0 - stop.y * zoom);
+        let y = top_y.min(height - 110.0 - stop.y * zoom);
         Camera { zoom, x, y }
     }
 
@@ -112,6 +111,7 @@ pub fn MetroMap() -> Element {
     // A drag: where it started, the camera then, and whether it moved enough to count.
     let mut drag = use_signal(|| None::<(f64, f64, Camera, bool)>);
     let mut dragged = use_signal(|| false);
+    let hovered = use_signal(|| None::<i64>);
 
     let measure = move || async move {
         let el = mounted.peek().clone();
@@ -195,6 +195,14 @@ pub fn MetroMap() -> Element {
         _ => None,
     };
     let route = picked.map(|seq| m.route(seq));
+    let forks: HashSet<i64> = m
+        .lines
+        .iter()
+        .filter_map(|l| l.source.as_ref())
+        .filter_map(|s| m.station(s.by).map(|st| st.seq))
+        .collect();
+    let notes = notes(&m);
+    let hover = hovered().and_then(|seq| m.station(seq).cloned());
 
     rsx! {
         div {
@@ -240,6 +248,7 @@ pub fn MetroMap() -> Element {
                     state.selected.set(Selection::None);
                 }
             },
+            Summary { metro: m.clone() }
             div {
                 class: "metro-world",
                 style: "width: {m.width}px; height: {m.height}px; transform: translate({cam.x}px, {cam.y}px) scale({cam.zoom});",
@@ -248,6 +257,12 @@ pub fn MetroMap() -> Element {
                     height: "{m.height}",
                     for b in m.bands.iter().cloned() {
                         BandMark { band: b.clone(), y: m.lines[b.line].y, lit: route.is_none() }
+                    }
+                    for sec in m.sections.iter().cloned() {
+                        path {
+                            class: if route.is_some() { "section-tick dim" } else { "section-tick" },
+                            d: "M{sec.from - 10.0},{MAIN_Y - 26.0} V{MAIN_Y - 21.0} H{(sec.to + 10.0).max(sec.from + 24.0)} V{MAIN_Y - 26.0}",
+                        }
                     }
                     for (x0, x1, agent) in m.main_segments() {
                         path {
@@ -258,74 +273,75 @@ pub fn MetroMap() -> Element {
                     for i in 1..m.lines.len() {
                         Track { metro: m.clone(), index: i, lit: route.as_ref().is_none_or(|r| r.lines.contains(&i)) }
                     }
-                    for a in m.asks.iter().cloned() {
+                    for (n, a) in m.asks.iter().cloned().enumerate() {
                         circle {
-                            class: match (route.is_some() && a.seq != m.asks[0].seq, a.agent.is_some()) {
-                                (true, true) => "terminus agent dim",
-                                (true, false) => "terminus dim",
-                                (false, true) => "terminus agent",
-                                (false, false) => "terminus",
-                            },
-                            cx: "{a.x}", cy: "{MAIN_Y}", r: "13",
+                            class: format!(
+                                "terminus{}{}",
+                                if a.agent.is_some() { " agent" } else { "" },
+                                if route.is_some() && n > 0 { " dim" } else { "" },
+                            ),
+                            cx: "{a.x}", cy: "{MAIN_Y}", r: "10",
                         }
                     }
                     for s in m.stations.iter().cloned() {
                         StationMark {
                             station: s.clone(),
                             ring: ring(&m, &s),
+                            fork: forks.contains(&s.seq),
                             picked: picked == Some(s.seq),
                             lit: lit(&route, s.seq),
                             dragged,
                             open,
+                            hovered,
                         }
                     }
                 }
+                // What the agent said it would do, over where it did it.
+                for sec in m.sections.iter().cloned() {
+                    div {
+                        class: if route.is_some() { "section-name dim" } else { "section-name" },
+                        style: "left: {sec.at}px; bottom: calc(100% - {MAIN_Y - 30.0}px); max-width: {crate::metro::NAME_WIDTH}px",
+                        onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(sec.seq)); },
+                        "{sec.text}"
+                    }
+                }
+                // A branch is named by where its instruction came from.
                 for (i, line) in m.lines.iter().enumerate() {
                     if line.kind == LineKind::Branch {
-                        SourceQuote { metro: m.clone(), index: i, lit: route.as_ref().is_none_or(|r| r.lines.contains(&i)) }
+                        BranchName { metro: m.clone(), index: i, lit: route.as_ref().is_none_or(|r| r.lines.contains(&i)) }
                     }
                     if line.kind == LineKind::Loose {
                         div {
-                            class: if route.as_ref().is_none_or(|r| r.lines.contains(&i)) { "loose-label" } else { "loose-label dim" },
-                            style: "left: {m.station(line.stations[0]).map_or(0.0, |s| s.x) - 50.0}px; top: {line.y - 30.0}px",
-                            "출처 없음 · 요청에도 이 세션의 도구 결과에도 이어지지 않음"
+                            class: if route.as_ref().is_none_or(|r| r.lines.contains(&i)) { "line-name loose" } else { "line-name loose dim" },
+                            style: "left: {m.station(line.stations[0]).map_or(0.0, |s| s.x) - 30.0}px; top: {line.y - 26.0}px",
+                            "출처 없음"
                         }
                     }
                 }
-                for (n, a) in m.asks.iter().cloned().enumerate() {
+                for (n, a) in m.asks.iter().cloned().enumerate().skip(1) {
                     div {
-                        class: if route.is_some() && n > 0 { "ask dim" } else { "ask" },
-                        style: if n == 0 { format!("left: {}px; top: {}px; width: {}px", LEFT - 4.0, MAIN_Y + 26.0, crate::metro::FIRST - 40.0) } else { format!("left: {}px; top: {}px; width: 230px", a.x - 16.0, MAIN_Y + 26.0) },
+                        class: format!("turn-name{}{}", if a.agent.is_some() { " agent" } else { "" }, if route.is_some() && n > 0 { " dim" } else { "" }),
+                        style: "left: {a.x - 10.0}px; top: {MAIN_Y + 16.0}px",
                         onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(a.seq)); },
                         if let Some(agent) = a.agent.clone() {
-                            div { class: "who agent", "에이전트 보고 · 사람이 쓴 요청이 아님" }
-                            div { class: "say next agent", "{clip(&agent, 18)} 에이전트의 보고를 다음 턴으로 받음" }
+                            b { "에이전트 보고" }
+                            span { "{clip(&agent, 14)} · 사람이 아님" }
                         } else {
-                            div { class: "who", if n == 0 { "사용자 요청" } else { "다음 요청" } }
-                            div { class: if n == 0 { "say" } else { "say next" }, "{a.text}" }
-                        }
-                        if let Some(intent) = a.intent.clone() {
-                            div { class: "intent", "의도: {intent}" }
+                            b { "다음 요청" }
+                            span { "{clip(&a.text, 18)}" }
                         }
                     }
                 }
-                for b in m.bands.iter().cloned() {
-                    div {
-                        class: if route.is_some() { "band-label dim" } else { "band-label" },
-                        style: if b.line == 0 { format!("left: {}px; top: {}px", b.x0 - 26.0, MAIN_Y + 26.0) } else { format!("left: {}px; top: {}px", b.x0 - 26.0, m.lines[b.line].y - 40.0) },
-                        "{b.agent} 에이전트가 한 일"
-                    }
+                // Names only where something happened; any other on hover.
+                for (s, lower) in notes {
+                    StationNote { station: s.clone(), lower, lit: lit(&route, s.seq), dragged }
                 }
-                for s in m.stations.iter().cloned() {
-                    StationLabel { station: s.clone(), main: m.lines[s.line].kind == LineKind::Main, lit: lit(&route, s.seq), dragged }
-                }
-                if let Some((seq, word)) = m.last_word.clone() {
+                if let Some(s) = hover.filter(|s| !is_notable(s)) {
                     div {
-                        class: if route.is_some() { "last-word dim" } else { "last-word" },
-                        style: "left: {m.main_end() + 16.0}px; top: {MAIN_Y - 9.0}px",
-                        onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(seq)); },
-                        b { "끝" }
-                        " · {clip(&word.replace(['*', '`', '#'], \"\"), 60)}"
+                        class: "hover-name",
+                        style: "left: {s.x - 10.0}px; top: {s.y - 34.0}px",
+                        b { "{s.tool}" }
+                        " {s.what}"
                     }
                 }
             }
@@ -347,12 +363,73 @@ fn ring(m: &Metro, s: &Station) -> &'static str {
     }
 }
 
-/// The band behind a subagent's stations.
+/// Something happened here worth naming without a hover.
+fn is_notable(s: &Station) -> bool {
+    s.stopped() || s.decision.is_none() || s.irreversible || s.failed || s.unsourced || s.folded()
+}
+
+/// The stations named on the map, each with whether it drops a line to clear the name before it.
+fn notes(m: &Metro) -> Vec<(Station, bool)> {
+    let mut last: std::collections::HashMap<usize, (f64, bool)> = std::collections::HashMap::new();
+    let mut out = Vec::new();
+    for s in m.stations.iter().filter(|s| is_notable(s)) {
+        let lower = last
+            .get(&s.line)
+            .is_some_and(|(x, low)| s.x - x < 150.0 && !low);
+        last.insert(s.line, (s.x, lower));
+        out.push((s.clone(), lower));
+    }
+    out
+}
+
+/// One line over the map saying what the session did.
+#[component]
+fn Summary(metro: Arc<Metro>) -> Element {
+    let state = use_context::<AppState>();
+    let calls: usize = metro.stations.iter().map(|s| s.members.len()).sum();
+    let branches = metro
+        .lines
+        .iter()
+        .filter(|l| l.kind == LineKind::Branch)
+        .count();
+    let loose: usize = metro
+        .lines
+        .iter()
+        .filter(|l| l.kind == LineKind::Loose)
+        .map(|l| l.stations.len())
+        .sum();
+    let stops = metro.stations.iter().filter(|s| s.stopped()).count();
+    let undo = metro
+        .stations
+        .iter()
+        .filter(|s| s.irreversible && !s.stopped())
+        .count();
+    let ask = metro
+        .asks
+        .first()
+        .map(|a| a.text.clone())
+        .unwrap_or_default();
+    let _ = state;
+    rsx! {
+        div { class: "map-summary", onmousedown: move |e| e.stop_propagation(),
+            div { class: "summary-ask", "{clip(&ask, 80)}" }
+            div { class: "counts",
+                span { b { "{calls}" } "번 도구 호출" }
+                if branches > 0 { span { class: "x", b { "{branches}" } "곳의 도구 결과가 지시" } }
+                if loose > 0 { span { b { "{loose}" } "번 출처 없음" } }
+                span { class: if stops > 0 { "s" } else { "" }, b { "{stops}" } "번 멈춤" }
+                if undo > 0 { span { class: "u", b { "{undo}" } "번 되돌릴 수 없는 작업 허용" } }
+            }
+        }
+    }
+}
+
+/// The band behind a subagent's stations, and its name.
 #[component]
 fn BandMark(band: Band, y: f64, lit: bool) -> Element {
-    let (x, w) = (band.x0 - 26.0, band.x1 - band.x0 + 52.0);
+    let (x, w) = (band.x0 - 18.0, band.x1 - band.x0 + 36.0);
     rsx! {
-        rect { class: if lit { "band" } else { "band dim" }, x: "{x}", y: "{y - 20.0}", width: "{w}", height: "40", rx: "20" }
+        rect { class: if lit { "band" } else { "band dim" }, x: "{x}", y: "{y - 16.0}", width: "{w}", height: "32", rx: "16" }
     }
 }
 
@@ -364,29 +441,78 @@ fn Track(metro: Arc<Metro>, index: usize, lit: bool) -> Element {
         LineKind::Branch => "track branch",
         LineKind::Loose => "track loose",
     };
-    let end = line
-        .stations
-        .last()
-        .and_then(|&s| metro.station(s))
-        .map(|s| (s.x + 40.0, s.y));
     rsx! {
         g { class: if lit { "" } else { "dim" },
             path { class: "{class}", d: "{metro.path(index)}" }
-            if let (LineKind::Branch, Some((x, y))) = (line.kind, end) {
-                circle { class: "track-end", cx: "{x}", cy: "{y}", r: "4" }
-            }
+        }
+    }
+}
+
+/// The shape of an action, centred on (x, y): circle, square, triangle, diamond or hexagon.
+fn shape(action: Action, x: f64, y: f64, r: f64) -> String {
+    match action {
+        Action::Read | Action::Other => format!(
+            "M{},{y} a{r},{r} 0 1,0 {},0 a{r},{r} 0 1,0 {},0",
+            x - r,
+            2.0 * r,
+            -2.0 * r
+        ),
+        Action::Change => {
+            let h = r * 0.9;
+            format!(
+                "M{},{} h{} v{} h{} z",
+                x - h,
+                y - h,
+                2.0 * h,
+                2.0 * h,
+                -2.0 * h
+            )
+        }
+        Action::Run => {
+            let k = r * 1.15;
+            format!(
+                "M{x},{} L{},{} L{},{} z",
+                y - k,
+                x + k,
+                y + k * 0.75,
+                x - k,
+                y + k * 0.75
+            )
+        }
+        Action::Search => {
+            let k = r * 1.2;
+            format!(
+                "M{x},{} L{},{y} L{x},{} L{},{y} z",
+                y - k,
+                x + k,
+                y + k,
+                x - k
+            )
+        }
+        Action::Delegate => {
+            let k = r * 1.1;
+            let pts: Vec<String> = (0..6)
+                .map(|i| {
+                    let a = std::f64::consts::PI / 3.0 * i as f64;
+                    format!("{},{}", x + k * a.cos(), y + k * a.sin())
+                })
+                .collect();
+            format!("M{} z", pts.join(" L"))
         }
     }
 }
 
 #[component]
+#[allow(clippy::too_many_arguments)]
 fn StationMark(
     station: Station,
     ring: &'static str,
+    fork: bool,
     picked: bool,
     lit: bool,
     dragged: Signal<bool>,
     open: Signal<HashSet<i64>>,
+    hovered: Signal<Option<i64>>,
 ) -> Element {
     let mut state = use_context::<AppState>();
     let (cx, cy, seq) = (station.x, station.y, station.seq);
@@ -403,33 +529,39 @@ fn StationMark(
             state.selected.set(Selection::Node(seq));
         }
     };
-    let stop = match station.decision.as_deref() {
-        Some("DENY") => Some("deny"),
-        Some("REVIEW") => Some("review"),
-        _ => None,
+    let fill = match station.decision.as_deref() {
+        Some("DENY") => "mark deny",
+        Some("REVIEW") => "mark review",
+        None => "mark undecided",
+        _ => "mark pass",
     };
-    let undecided = station.decision.is_none();
+    let stop = station.stopped();
+    let r = if stop { 9.0 } else { 6.5 };
     let count = station.members.len();
     rsx! {
-        g { class: if lit { "station {ring}" } else { "station {ring} dim" }, onclick: select,
+        g {
+            class: if lit { "station {ring}" } else { "station {ring} dim" },
+            onclick: select,
+            onmouseenter: move |_| hovered.set(Some(seq)),
+            onmouseleave: move |_| hovered.set(None),
             // A larger, invisible target than the mark itself.
-            circle { class: "hit", cx: "{cx}", cy: "{cy}", r: "20" }
-            if let Some(kind) = stop {
-                if picked { circle { class: "halo {kind}", cx: "{cx}", cy: "{cy}", r: "19" } }
-                circle { class: "stop {kind}", cx: "{cx}", cy: "{cy}", r: "12" }
-                if kind == "deny" {
-                    path { class: "glyph", d: "M{cx - 4.0},{cy - 4.0} l8,8 M{cx + 4.0},{cy - 4.0} l-8,8" }
-                } else {
-                    path { class: "glyph", d: "M{cx},{cy - 5.0} v6 M{cx},{cy + 4.0} v0.5" }
-                }
-            } else if folded {
-                rect { class: "pass fold", x: "{cx - 19.0}", y: "{cy - 9.0}", width: "38", height: "18", rx: "9" }
-                text { class: "fold-count", x: "{cx}", y: "{cy + 4.0}", "×{count}" }
+            circle { class: "hit", cx: "{cx}", cy: "{cy}", r: "16" }
+            if picked { circle { class: if stop { "halo stopped" } else { "halo" }, cx: "{cx}", cy: "{cy}", r: "{r + 7.0}" } }
+            // Where a branch leaves: an interchange, ringed in the branch's colour.
+            if fork && !folded { circle { class: "interchange", cx: "{cx}", cy: "{cy}", r: "{r + 4.5}" } }
+            if folded {
+                rect { class: "mark pass fold", x: "{cx - 17.0}", y: "{cy - 8.0}", width: "34", height: "16", rx: "8" }
+                text { class: "fold-count", x: "{cx}", y: "{cy + 3.5}", "×{count}" }
             } else {
-                if picked { circle { class: "halo", cx: "{cx}", cy: "{cy}", r: "16" } }
-                circle { class: if undecided { "pass undecided" } else { "pass" }, cx: "{cx}", cy: "{cy}", r: "8" }
+                path { class: "{fill}", d: "{shape(station.action, cx, cy, r)}" }
+                if station.decision.as_deref() == Some("DENY") {
+                    path { class: "glyph", d: "M{cx - 3.2},{cy - 3.2} l6.4,6.4 M{cx + 3.2},{cy - 3.2} l-6.4,6.4" }
+                }
+                if station.decision.as_deref() == Some("REVIEW") {
+                    path { class: "glyph", d: "M{cx},{cy - 4.0} v4.5 M{cx},{cy + 3.4} v0.4" }
+                }
                 if station.irreversible {
-                    circle { class: "undo", cx: "{cx}", cy: "{cy}", r: "15" }
+                    circle { class: "undo", cx: "{cx}", cy: "{cy}", r: "{r + 5.0}" }
                 }
             }
             if station.failed {
@@ -439,60 +571,66 @@ fn StationMark(
     }
 }
 
+/// A named station: what happened, then the tool and file, under the station.
 #[component]
-fn StationLabel(station: Station, main: bool, lit: bool, dragged: Signal<bool>) -> Element {
+fn StationNote(station: Station, lower: bool, lit: bool, dragged: Signal<bool>) -> Element {
     let mut state = use_context::<AppState>();
     let seq = station.seq;
-    let select = move |e: MouseEvent| {
-        e.stop_propagation();
-        if !dragged() {
-            state.selected.set(Selection::Node(seq));
-        }
+    let (tone, head) = match station.decision.as_deref() {
+        Some("DENY") => ("deny", "차단"),
+        Some("REVIEW") => ("review", "확인"),
+        None => ("quiet", "판정 없음"),
+        _ if station.irreversible => ("undo", "되돌릴 수 없음"),
+        _ if station.failed => ("quiet", "실패"),
+        _ if station.unsourced => ("quiet", "출처 결과 없음"),
+        _ => ("quiet", ""),
     };
-    let tone = match station.decision.as_deref() {
-        Some("DENY") => "deny",
-        Some("REVIEW") => "review",
-        _ => "",
-    };
-    // One tag, by the same order as the marks: the decision, then how it went.
-    let tag = match station.decision.as_deref() {
-        Some("DENY") => Some("차단"),
-        Some("REVIEW") => Some("확인 요청"),
-        None => Some("판정 없음"),
-        _ if station.irreversible => Some("되돌릴 수 없음 · 허용"),
-        _ if station.failed => Some("실패"),
-        _ if station.unsourced => Some("출처 결과를 찾지 못함"),
-        _ => None,
-    };
-    let source = station.source.as_ref().map(|s| {
-        let p = crate::layout::percent(s.probability);
-        match s.paragraph {
-            Some(i) => format!("¶{i} · 원인 {p}"),
-            None => format!("원인 {p}"),
-        }
-    });
-    let dim = if lit { "" } else { " dim" };
-    // Main-line labels sit above the line, their verdict under the station, so the row stays
-    // level; branch labels hang under their line.
-    let (top, tag_top) = if main {
-        (station.y - 52.0, station.y + 18.0)
+    let what = if station.folded() {
+        format!(
+            "{} ×{} · {}",
+            station.tool,
+            station.members.len(),
+            station.what
+        )
     } else {
-        (station.y + 20.0, 0.0)
+        format!("{} {}", station.tool, file_name(&station.what))
+    };
+    let top = station.y + if lower { 38.0 } else { 16.0 };
+    rsx! {
+        div {
+            class: if lit { format!("note {tone}") } else { format!("note {tone} dim") },
+            style: "left: {station.x - 10.0}px; top: {top}px",
+            onclick: move |e| {
+                e.stop_propagation();
+                if !dragged() {
+                    state.selected.set(Selection::Node(seq));
+                }
+            },
+            if !head.is_empty() { b { "{head}" } " · " }
+            "{what}"
+        }
+    }
+}
+
+/// A branch's name where it turns into its row: the file or tool whose result told the agent.
+#[component]
+fn BranchName(metro: Arc<Metro>, index: usize, lit: bool) -> Element {
+    let mut state = use_context::<AppState>();
+    let line = metro.lines[index].clone();
+    let source = line.source.clone().expect("a branch has a source");
+    let x = metro.station(source.by).map_or(0.0, |s| s.x) + crate::metro::CHAMFER + 8.0;
+    let result = source.result;
+    let class = match (line.hot, lit) {
+        (true, true) => "line-name branch hot",
+        (true, false) => "line-name branch hot dim",
+        (false, true) => "line-name branch",
+        (false, false) => "line-name branch dim",
     };
     rsx! {
-        div { class: "label {tone}{dim}", style: "left: {station.x - 20.0}px; top: {top}px", onclick: select,
-            div { class: "tool", if station.folded() { "{station.tool} ×{station.members.len()}" } else { "{station.tool}" } }
-            div { class: "what", title: "{station.what}", "{station.what}" }
-            if let Some(s) = source { div { class: "what source", "{s}" } }
-            if !main { if let Some(t) = tag { div { class: "verdict", "{t}" } } }
-        }
-        if main {
-            if let Some(t) = tag {
-                div { class: match tag { Some("되돌릴 수 없음 · 허용") => format!("label undo{dim}"), Some("차단" | "확인 요청") => format!("label {tone}{dim}"), _ => format!("label quiet{dim}") },
-                    style: "left: {station.x - 20.0}px; top: {tag_top}px",
-                    div { class: "verdict", "{t}" }
-                }
-            }
+        div { class, style: "left: {x}px; top: {line.y - 27.0}px",
+            onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(result)); },
+            "{line.name}"
+            if line.hot { " · 멈춤" }
         }
     }
 }
@@ -503,58 +641,6 @@ pub(super) fn excerpt(text: &str) -> String {
     match flat.find("<!--") {
         Some(i) => flat[i..].to_owned(),
         None => flat,
-    }
-}
-
-/// A branch's source, quoted where it leaves its line: which result, which paragraph, and its
-/// text, read from the result's own record.
-#[component]
-fn SourceQuote(metro: Arc<Metro>, index: usize, lit: bool) -> Element {
-    let backend = use_context::<Arc<Backend>>();
-    let mut state = use_context::<AppState>();
-    let line = metro.lines[index].clone();
-    let source = line.source.clone().expect("a branch has a source");
-    let by = metro.station(source.by).cloned();
-    let (result, paragraph) = (source.result, source.paragraph);
-    let found = use_resource(move || {
-        let backend = backend.clone();
-        let session = state.current.peek().clone();
-        async move {
-            let detail = backend.node(&session?, result).await.ok().flatten()?;
-            detail
-                .paragraphs
-                .iter()
-                .find(|p| p.index == paragraph)
-                .or_else(|| detail.paragraphs.first())
-                .and_then(|p| p.text.clone())
-        }
-    });
-    let text = match &*found.read() {
-        Some(Some(t)) => excerpt(t),
-        Some(None) => String::new(),
-        None => "불러오는 중…".into(),
-    };
-    let x = by.as_ref().map_or(0.0, |s| s.x) + 30.0;
-    let name = by.as_ref().map_or_else(String::new, |s| {
-        if s.what.is_empty() {
-            s.tool.clone()
-        } else {
-            s.what.clone()
-        }
-    });
-    let mark = paragraph.map(|p| format!(" ¶{p}")).unwrap_or_default();
-    let class = match (line.hot, lit) {
-        (true, true) => "quote hot",
-        (true, false) => "quote hot dim",
-        (false, true) => "quote",
-        (false, false) => "quote dim",
-    };
-    rsx! {
-        div { class, style: "left: {x}px; top: {line.y - 84.0}px",
-            onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(result)); },
-            div { class: "src", "{name} 결과{mark}가 시킴" }
-            if !text.is_empty() { div { class: "txt", "{text}" } }
-        }
     }
 }
 

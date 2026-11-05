@@ -334,3 +334,50 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .metro .ask .say.agent { color: var(--line-agent); }
 .metro .label.quiet .verdict { color: var(--muted); font-weight: 600; }
 .legend i.band { width: 16px; height: 9px; border-radius: 5px; background: var(--agent-soft); border: 1px solid var(--line-agent); }
+
+/* The map at a glance: bold single-colour lines, plain shapes, red only where something stopped. */
+.metro { background: var(--map-bg); }
+.track.main { stroke-width: 7; stroke-linejoin: round; }
+.track.branch { stroke-width: 6; stroke-linejoin: round; }
+.track.loose { stroke-width: 4; stroke-dasharray: 1 9; }
+.terminus { fill: var(--panel); stroke: var(--line-main); stroke-width: 5; }
+.station .mark { stroke-width: 3.5; stroke-linejoin: round; }
+.station .mark.pass { fill: var(--panel); }
+.station.on-main .mark.pass { stroke: var(--line-main); }
+.station.on-branch .mark.pass { stroke: var(--line-branch); }
+.station.on-loose .mark.pass { stroke: var(--line-loose); }
+.station.on-agent .mark.pass { stroke: var(--line-agent); }
+.station .mark.deny { fill: var(--deny); stroke: var(--panel); stroke-width: 2.5; }
+.station .mark.review { fill: var(--review); stroke: var(--panel); stroke-width: 2.5; }
+.station .mark.undecided { fill: var(--panel); stroke: var(--line-loose); stroke-width: 2.5; stroke-dasharray: 3 2.5; }
+.station .glyph { stroke: #fff; stroke-width: 2.2; stroke-linecap: round; fill: none; }
+.station .interchange { fill: var(--panel); stroke: var(--line-branch); stroke-width: 2.5; }
+.station .halo { fill: none; stroke: var(--accent); stroke-width: 2.5; opacity: .6; }
+.station .halo.stopped { stroke: var(--deny); }
+.station:hover .mark.pass { stroke-width: 4.5; }
+.section-tick { fill: none; stroke: color-mix(in srgb, var(--muted) 45%, transparent); stroke-width: 1.2; }
+.metro .section-name { position: absolute; font-size: 15px; font-weight: 650; line-height: 1.3; color: var(--text); cursor: pointer;
+                        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.metro .line-name { position: absolute; font-size: 13.5px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.metro .line-name.branch { color: var(--line-branch); }
+.metro .line-name.branch.hot { color: var(--deny); }
+.metro .line-name.loose { color: var(--line-loose); }
+.metro .turn-name { position: absolute; font-size: 13px; white-space: nowrap; display: flex; flex-direction: column; cursor: pointer; }
+.metro .turn-name b { font-weight: 700; color: var(--text); }
+.metro .turn-name span { color: var(--muted); }
+.metro .turn-name.agent b, .metro .turn-name.agent span { color: var(--line-agent); }
+.metro .note { position: absolute; font-size: 13px; white-space: nowrap; cursor: pointer; color: var(--muted); }
+.metro .note b { font-weight: 700; }
+.metro .note.deny, .metro .note.deny b { color: var(--deny); }
+.metro .note.review, .metro .note.review b { color: var(--review); }
+.metro .note.undo b { color: var(--review); }
+.metro .hover-name { position: absolute; font-size: 13px; white-space: nowrap; pointer-events: none; background: var(--panel);
+                     border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; box-shadow: var(--shadow); }
+.metro .hover-name b { font-weight: 650; }
+.map-summary { position: absolute; left: 14px; top: 10px; right: 14px; z-index: 2; pointer-events: none; }
+.map-summary .summary-ask { font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-summary .counts { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 2px; flex-wrap: wrap; }
+.map-summary .counts b { color: var(--text); font-size: 13.5px; margin-right: 3px; }
+.map-summary .counts .x b { color: var(--line-branch); }
+.map-summary .counts .s b { color: var(--deny); }
+.map-summary .counts .u b { color: var(--review); }
