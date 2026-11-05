@@ -8,10 +8,10 @@ use serde_json::Value;
 
 use super::{AppState, Load, Selection};
 use crate::api::Backend;
-use crate::layout::{Model, clip, decision_color, label, percent};
+use crate::layout::{Model, decision_color, label, percent};
 use crate::model::{NodeDetail, parse_json};
 
-use super::trace::{Check, Context, Deviation, JevLog, Preview, TracePath};
+use super::trace::{Check, Context, Deviation, JevLog, Preview, Story, TracePath};
 
 /// A verdict as a coloured badge: 허용, 확인 or 차단.
 pub(super) fn decision_badge(decision: &str) -> Element {
@@ -128,13 +128,12 @@ pub fn Inspector() -> Element {
     let state = use_context::<AppState>();
     let mut detail = use_signal(|| None::<Load<Option<NodeDetail>>>);
 
-    // The selected node's (or a cause edge's target's) paragraphs and full properties.
+    // The selected node's paragraphs and full properties.
     use_effect(move || {
         let selected = (state.selected)();
         let session = state.current.peek().clone();
         let seq = match selected {
             Selection::Node(seq) => seq,
-            Selection::Edge { to, .. } => to,
             Selection::None => {
                 detail.set(None);
                 return;
@@ -145,8 +144,7 @@ pub fn Inspector() -> Element {
         let backend = backend.clone();
         spawn(async move {
             let found = backend.node(&session, seq).await;
-            if !matches!(&*state.selected.peek(), Selection::Node(s) | Selection::Edge { to: s, .. } if *s == seq)
-            {
+            if !matches!(&*state.selected.peek(), Selection::Node(s) if *s == seq) {
                 return;
             }
             detail.set(Some(match found {
@@ -165,14 +163,11 @@ pub fn Inspector() -> Element {
         Selection::None => rsx! {
             div { class: "empty-state",
                 p { "노드를 누르면 여기에 자세한 내용이 나옵니다." }
-                p { class: "muted", "Call을 누르면 그 Call이 어디서 비롯됐는지 원인선이 빨갛게 이어집니다. 원인선을 누르면 원인이 된 문단을 봅니다." }
+                p { class: "muted", "역(Call)을 누르면 그 Call이 어디서 비롯됐는지, 사용자 요청까지 이어진 노선만 남습니다. 지선 머리의 인용을 누르면 그 도구 결과의 문단을 봅니다." }
             }
         },
         Selection::Node(seq) => {
             rsx! { NodeView { key: "{seq}", model: model.clone(), seq, detail } }
-        }
-        Selection::Edge { call, to, .. } => {
-            rsx! { EdgeView { model: model.clone(), call, to, detail } }
         }
     };
     rsx! { aside { class: "inspector", style: "width: {width}px", {body} } }
@@ -228,6 +223,13 @@ fn NodeView(
         div { class: "inspector-body",
             match tab() {
                 Tab::Verdict => rsx! {
+                    Story {
+                        model: model.clone(),
+                        seq,
+                        payload: full_payload(&detail, &node.props),
+                        trace: trace.clone(),
+                        decision: node.decision().unwrap_or("").to_owned(),
+                    }
                     Verdict { model: model.clone(), seq, fields: node.props.clone(), trace: trace.clone() }
                     Deviation { trace: trace.clone() }
                 },
@@ -541,68 +543,14 @@ fn PropValue(name: String, value: Value) -> Element {
     }
 }
 
-#[component]
-fn EdgeView(
-    model: Arc<Model>,
-    call: i64,
-    to: i64,
-    detail: Signal<Option<Load<Option<NodeDetail>>>>,
-) -> Element {
-    let state = use_context::<AppState>();
-    let causes: Vec<_> = model
-        .causes
-        .iter()
-        .filter(|c| c.from == call && c.to == to)
-        .cloned()
-        .collect();
-    let paragraph = causes.iter().find_map(|c| c.paragraph);
-    let probability = causes.iter().find_map(|c| c.probability);
-    let trace = model
-        .node(call)
-        .map(|n| parse_json(n.props.get("trace_json")))
-        .unwrap_or(Value::Null);
-    let (m1, m2) = (model.clone(), model.clone());
-    rsx! {
-        div { class: "inspector-head",
-            span { class: "kind", "원인선" }
-            h2 { "{clip(&node_name(&model, call), 40)}" }
-        }
-        div { class: "inspector-body",
-            div { class: "card",
-                dl { class: "facts",
-                    dt { "Call" }
-                    dd { button { class: "link", onclick: move |_| state.go_to(call), "{node_name(&m1, call)}" } }
-                    dt { "원인" }
-                    dd { button { class: "link", onclick: move |_| state.go_to(to), "{node_name(&m2, to)}" } }
-                    if let Some(p) = paragraph {
-                        dt { "문단" }
-                        dd { "¶{p}" }
-                    }
-                    if let Some(p) = probability {
-                        dt { "확률" }
-                        dd { "{percent(p)}" }
-                    }
-                }
-            }
-            if paragraph.is_some() {
-                h3 { "원인 문단" }
-                Paragraphs { model: model.clone(), seq: to, detail, only: paragraph }
-            }
-            if trace.is_null() {
-                p { class: "muted", "판정 기록이 없습니다." }
-            } else {
-                h3 { "이 Call의 판정" }
-                Cause { model: model.clone(), trace: trace.clone() }
-                Deviation { trace: trace.clone() }
-                if !trace["check"].is_null() {
-                    Check { model: model.clone(), trace: trace.clone() }
-                }
-                details { class: "section", open: true,
-                    summary { "Jev 원본 (state · question · answer)" }
-                    JevLog { model: model.clone(), trace: trace.clone(), highlight: Some(to) }
-                }
-            }
-        }
+/// The Call's payload, whole from its record once read; cut short from the graph until then.
+fn full_payload(
+    detail: &Signal<Option<Load<Option<NodeDetail>>>>,
+    fallback: &serde_json::Map<String, Value>,
+) -> Value {
+    match &*detail.read() {
+        Some(Load::Ready(Some(d))) => parse_json(d.props.get("payload_json")),
+        _ => parse_json(fallback.get("payload_json")),
     }
 }
 

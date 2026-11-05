@@ -590,7 +590,7 @@ pub fn Preview(seq: i64, paragraph: Option<i64>) -> Element {
     if text.is_empty() {
         return rsx! {};
     }
-    rsx! { div { class: "preview", "{clip(&text, 240)}" } }
+    rsx! { div { class: "preview", "{clip(&super::metro::excerpt(&text), 240)}" } }
 }
 
 /// What the agent was asked and has done, as the verdict saw it.
@@ -618,7 +618,34 @@ pub fn Context(trace: Value) -> Element {
 mod tests {
     use serde_json::json;
 
-    use super::{change_lines, check_cut, option_seq, sorted};
+    use super::{attempt, change_lines, check_cut, option_seq, reasons, sorted};
+
+    #[test]
+    fn an_edit_shows_what_it_adds_against_what_it_keeps() {
+        let payload = json!({"tool_name": "Edit", "tool_input": {"old_string": "import os", "new_string": "# MARK\nimport os"}});
+        let (lines, command) = attempt(&payload);
+        assert_eq!(
+            lines,
+            [('+', "# MARK".to_owned()), (' ', "import os".to_owned())]
+        );
+        assert!(command.is_none());
+        let bash = json!({"tool_name": "Bash", "tool_input": {"command": "rm -rf data"}});
+        assert_eq!(attempt(&bash).1.as_deref(), Some("rm -rf data"));
+    }
+
+    #[test]
+    fn reasons_read_the_breach_the_check_and_the_undo() {
+        let trace = json!({
+            "deviation": {"worst": "hijacked_goal", "expected": {"hijacked_goal": 0.83}, "irreversible": 0.94},
+            "check": {"branch": "file", "unwanted": 0.6},
+        });
+        let why = reasons(&trace);
+        assert_eq!(why.len(), 3);
+        assert!(why[0].0.contains("새 목표") && why[0].1 == "확률 0.83");
+        assert!(why[1].0.contains("추가한 내용"));
+        assert!(why[2].0.contains("되돌리기"));
+        assert!(reasons(&json!({"deviation": {"worst": "none"}})).is_empty());
+    }
 
     #[test]
     fn options_name_a_result_or_its_paragraph() {
@@ -648,5 +675,172 @@ mod tests {
             rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),
             ["b", "c", "a"]
         );
+    }
+}
+
+/// What a Call tried to do, from its tool input: the lines an edit adds and removes, what a
+/// write puts in, the command a shell runs, or the target of anything else.
+fn attempt(payload: &Value) -> (Vec<(char, String)>, Option<String>) {
+    let input = &payload["tool_input"];
+    let lines = |text: &Value, sign: char| -> Vec<(char, String)> {
+        text.as_str()
+            .map(|t| t.lines().map(|l| (sign, l.to_owned())).collect())
+            .unwrap_or_default()
+    };
+    match payload["tool_name"].as_str().unwrap_or("") {
+        "Edit" => {
+            let (old, new) = (&input["old_string"], &input["new_string"]);
+            let old_lines = lines(old, '-');
+            let new_lines = lines(new, '+');
+            // Lines on both sides read as context rather than a change.
+            let kept: Vec<String> = old_lines
+                .iter()
+                .filter(|(_, l)| new_lines.iter().any(|(_, n)| n == l))
+                .map(|(_, l)| l.clone())
+                .collect();
+            let mut out: Vec<(char, String)> = old_lines
+                .into_iter()
+                .filter(|(_, l)| !kept.contains(l))
+                .collect();
+            out.extend(
+                new_lines
+                    .into_iter()
+                    .map(|(s, l)| if kept.contains(&l) { (' ', l) } else { (s, l) }),
+            );
+            (out, None)
+        }
+        "Write" => (
+            lines(&input["content"], '+').into_iter().take(12).collect(),
+            None,
+        ),
+        "Bash" => (Vec::new(), input["command"].as_str().map(str::to_owned)),
+        _ => (
+            Vec::new(),
+            ["file_path", "path", "pattern", "url", "query"]
+                .iter()
+                .find_map(|k| input[*k].as_str().map(str::to_owned)),
+        ),
+    }
+}
+
+/// Why the engine stopped a Call, as sentences from its trace: the worst breach of the first
+/// question, what the second check found, and how hard it is to undo.
+fn reasons(trace: &Value) -> Vec<(String, String)> {
+    let d = &trace["deviation"];
+    let mut out = Vec::new();
+    if let Some(worst) = d["worst"].as_str().filter(|w| *w != "none") {
+        let p = if worst == "explicit" {
+            d["explicit"].as_f64()
+        } else {
+            d["expected"][worst].as_f64()
+        };
+        out.push((
+            format!("{}.", breach_text(worst)),
+            p.map(|p| format!("확률 {}", percent(p)))
+                .unwrap_or_default(),
+        ));
+    }
+    let c = &trace["check"];
+    if let Some(u) = c["unwanted"].as_f64() {
+        let what = match c["branch"].as_str() {
+            Some("file") => "추가한 내용이 요청 밖의 것입니다.",
+            Some("run") => "실행되는 코드가 요청 밖의 일을 합니다.",
+            _ => "요청 밖의 목표를 위한 호출이거나 사용자에게 반합니다.",
+        };
+        out.push((what.to_owned(), format!("2차 확인 확률 {}", percent(u))));
+    } else if c["branch"] == "safeguard" {
+        out.push((
+            "에이전트 설정이나 훅을 바꾸려 했습니다.".into(),
+            "규칙".into(),
+        ));
+    }
+    if let Some(i) = d["irreversible"]
+        .as_f64()
+        .filter(|i| *i >= crate::metro::IRREVERSIBLE)
+    {
+        out.push((
+            "되돌리기 어려운 작업입니다.".into(),
+            format!("확률 {}", percent(i)),
+        ));
+    }
+    out
+}
+
+/// The story of one Call at the top of the inspector, in the order a person asks: what it tried,
+/// why it was stopped (or let through), and what told the agent to do it.
+#[component]
+pub fn Story(
+    model: Arc<Model>,
+    seq: i64,
+    payload: Value,
+    trace: Value,
+    decision: String,
+) -> Element {
+    let state = use_context::<AppState>();
+    let (lines, command) = attempt(&payload);
+    let stopped = matches!(decision.as_str(), "DENY" | "REVIEW");
+    let why = reasons(&trace);
+    let link = trace["link"].as_str().unwrap_or("").to_owned();
+    let cause = trace["segments"]
+        .as_array()
+        .and_then(|s| {
+            s.iter().max_by(|a, b| {
+                let p = |x: &Value| x["probability"].as_f64().unwrap_or(0.0);
+                p(a).total_cmp(&p(b))
+            })
+        })
+        .and_then(|x| {
+            Some((
+                x["seq"].as_i64()?,
+                x["paragraph"].as_i64(),
+                x["probability"].as_f64().unwrap_or(0.0),
+            ))
+        });
+    let from_call = cause.and_then(|(r, ..)| model.call_of.get(&r).copied());
+    let verdict_note = match decision.as_str() {
+        "DENY" => "막았습니다",
+        "REVIEW" => "사용자 확인을 요청했습니다",
+        _ => "허용했습니다",
+    };
+    rsx! {
+        div { class: if stopped { "story stopped" } else { "story" },
+            h4 { "하려던 일" }
+            if !lines.is_empty() {
+                div { class: "lines",
+                    for (sign, line) in lines {
+                        span { class: match sign { '+' => "add", '-' => "del", _ => "ctx" }, "{sign} {line}" }
+                    }
+                }
+            } else if let Some(cmd) = command {
+                div { class: "lines", span { "{cmd}" } }
+            }
+            h4 { if stopped { "{verdict_note}: 이유" } else { "{verdict_note}" } }
+            if why.is_empty() {
+                p { class: "muted", if stopped { "기록된 이유가 없습니다." } else { "요청한 일의 한 단계로 판단했습니다." } }
+            } else {
+                ul { class: "why",
+                    for (text, p) in why {
+                        li { "{text} " span { class: "muted", "{p}" } }
+                    }
+                }
+            }
+            h4 { "시킨 것" }
+            match (link.as_str(), cause) {
+                ("segment", Some((result, paragraph, p))) => rsx! {
+                    div { class: "cause-quote",
+                        button { class: "link", onclick: move |_| state.go_to(from_call.unwrap_or(result)),
+                            "{from_call.map(|c| node_name(&model, c)).unwrap_or_else(|| node_name(&model, result))}"
+                        }
+                        " 결과"
+                        if let Some(i) = paragraph { " ¶{i}" }
+                        span { class: "muted", " · 원인일 확률 {percent(p)}" }
+                        Preview { key: "{result}-{paragraph:?}", seq: result, paragraph }
+                    }
+                },
+                ("request", _) => rsx! { p { "사용자 요청의 다음 단계입니다." } },
+                ("none", _) => rsx! { p { "요청에도 도구 결과에도 이어지지 않습니다." } },
+                _ => rsx! { p { class: "muted", "원인 추적 기록이 없습니다." } },
+            }
+        }
     }
 }
