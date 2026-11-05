@@ -29,8 +29,8 @@ use crate::model::{Node, parse_json};
 /// Space between two stations along a line.
 pub const STEP: f64 = 64.0;
 /// Where the main line runs (below the section names), and the space to each branch below.
-pub const MAIN_Y: f64 = 92.0;
-pub const LANE_GAP: f64 = 84.0;
+pub const MAIN_Y: f64 = 200.0;
+pub const LANE_GAP: f64 = 112.0;
 /// The first terminus, and the room before the first station.
 pub const LEFT: f64 = 30.0;
 pub const FIRST: f64 = 40.0;
@@ -115,6 +115,47 @@ pub struct Station {
 }
 
 impl Station {
+    /// The station's name on the map, short as a metro station's: what it did, to what.
+    pub fn name(&self) -> String {
+        if self.folded() {
+            return self.what.clone();
+        }
+        let short = |t: &str, n: usize| {
+            if t.chars().count() > n {
+                format!("{}…", t.chars().take(n).collect::<String>())
+            } else {
+                t.to_owned()
+            }
+        };
+        let file = short(file_name(&self.what), 16);
+        match (self.tool.as_str(), self.action) {
+            ("Write", _) => format!("{file} 작성"),
+            (_, Action::Change) => format!("{file} 수정"),
+            (_, Action::Read) => format!("{file} 읽기"),
+            ("SubagentHandback", _) => "보고 받음".into(),
+            (_, Action::Delegate) => "에이전트에 맡김".into(),
+            (_, Action::Search) => format!("‘{}’ 찾기", short(&self.what, 12)),
+            (_, Action::Run) => {
+                // A command by its first words, past an environment assignment.
+                let words: Vec<&str> = self
+                    .what
+                    .split_whitespace()
+                    .filter(|w| !w.contains('='))
+                    .take(2)
+                    .collect();
+                let cmd = words.join(" ");
+                let cmd = cmd.trim_end_matches([';', '&', '|']);
+                if cmd.is_empty() {
+                    self.tool.clone()
+                } else {
+                    short(file_name(cmd), 16)
+                }
+            }
+            _ if self.what.is_empty() => self.tool.clone(),
+            _ => short(&self.what, 16),
+        }
+    }
+
     /// Denied or held for review: what the map is read for.
     pub fn stopped(&self) -> bool {
         matches!(self.decision.as_deref(), Some("DENY" | "REVIEW"))
@@ -651,6 +692,7 @@ impl Metro {
     }
 
     /// The main line in turns: from each request to the next, and who wrote that request.
+    #[cfg(test)]
     pub fn main_segments(&self) -> Vec<(f64, f64, Option<String>)> {
         let end = self.main_end();
         self.asks
@@ -661,6 +703,32 @@ impl Metro {
                 (a.x, to, a.agent.clone())
             })
             .collect()
+    }
+
+    /// The main line in stretches, and whether the agent rode it through each: solid between
+    /// main-line stops it went to one after another, faint where it was off on a branch.
+    pub fn main_runs(&self) -> Vec<(f64, f64, bool, Option<String>)> {
+        let mut points: Vec<f64> = self.asks.iter().map(|a| a.x).collect();
+        points.extend(self.stations.iter().filter(|s| s.line == 0).map(|s| s.x));
+        points.sort_by(f64::total_cmp);
+        points.dedup();
+        let off: Vec<f64> = self
+            .stations
+            .iter()
+            .filter(|s| s.line != 0)
+            .map(|s| s.x)
+            .collect();
+        let mut out = Vec::new();
+        for w in points.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let solid = !off.iter().any(|&x| x > a && x < b);
+            out.push((a, b, solid, self.turn_agent(a)));
+        }
+        if let Some(&last) = points.last() {
+            let solid = !off.iter().any(|&x| x > last);
+            out.push((last, self.main_end(), solid, self.turn_agent(last)));
+        }
+        out
     }
 
     /// Who wrote the request a main-line station's turn answers: none for a person.
@@ -917,6 +985,31 @@ mod tests {
         assert_eq!(line_of(&m, 12).name, "README.md의 지시");
         assert_eq!(m.station(12).unwrap().action, Action::Change);
         assert_eq!(m.station(7).unwrap().action, Action::Run);
+        assert_eq!(m.station(5).unwrap().name(), "README.md 읽기");
+        assert_eq!(m.station(12).unwrap().name(), "app.py 수정");
+        assert_eq!(m.station(11).unwrap().name(), "notes.md 작성");
+        assert_eq!(m.station(7).unwrap().name(), "make test");
+    }
+
+    // The main line is solid where the agent went from one main stop to the next, faint where
+    // it was off on a branch in between.
+    #[test]
+    fn the_main_line_shows_where_the_agent_rode_it() {
+        let m = metro(&session("fa6576f7"));
+        let runs = m.main_runs();
+        let (r5, r7, r18) = (
+            m.station(5).unwrap().x,
+            m.station(7).unwrap().x,
+            m.station(18).unwrap().x,
+        );
+        assert!(
+            runs.iter()
+                .any(|&(a, b, solid, _)| a == r5 && b == r7 && solid)
+        );
+        assert!(
+            runs.iter()
+                .any(|&(a, b, solid, _)| a == r7 && b == r18 && !solid)
+        );
     }
 
     #[test]

@@ -255,7 +255,7 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .hit .muted { flex: none; }
 
 /* The metro map: the request is the main line, tool results that drove the agent branch off it. */
-:root { --line-main: #2a3240; --line-branch: #7b5bd6; --branch-soft: #f3effd; --line-loose: #9aa2ae; --line-agent: #1f9e8f; --agent-soft: #e3f4f1; --map-bg: #fbfbfa; }
+:root { --line-main: #5b6577; --line-branch: #7b5bd6; --branch-soft: #f3effd; --line-loose: #9aa2ae; --line-agent: #1f9e8f; --agent-soft: #e3f4f1; --map-bg: #fbfbfa; }
 @media (prefers-color-scheme: dark) {
   :root { --line-main: #c9d0da; --line-branch: #a58cf0; --branch-soft: #2a2440; --line-loose: #6f7886; --line-agent: #45c2b1; --agent-soft: #17302d; --map-bg: #171a20; }
 }
@@ -381,3 +381,10 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .map-summary .counts .x b { color: var(--line-branch); }
 .map-summary .counts .s b { color: var(--deny); }
 .map-summary .counts .u b { color: var(--review); }
+
+/* Station names, slanted; the main line is faint where the agent was off on a branch. */
+.track.main.idle { stroke-width: 3; stroke-dasharray: 2 7; opacity: .45; }
+.metro .station-name { position: absolute; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text);
+                       transform: rotate(-38deg); transform-origin: 0 100%; pointer-events: none; }
+.metro .station-name.deny { color: var(--deny); font-weight: 750; }
+.metro .station-name.review { color: var(--review); font-weight: 750; }

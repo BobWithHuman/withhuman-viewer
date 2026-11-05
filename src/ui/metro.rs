@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 
 use super::{AppState, Load, Selection};
 use crate::layout::clip;
-use crate::metro::{Action, Band, LEFT, LineKind, MAIN_Y, Metro, Route, Station, file_name};
+use crate::metro::{Action, Band, LEFT, LineKind, MAIN_Y, Metro, Route, Station};
 
 /// Below this zoom names get too small to read: the first view shows the whole map down to here.
 const OVERVIEW: f64 = 0.65;
@@ -202,7 +202,6 @@ pub fn MetroMap() -> Element {
         .filter_map(|s| m.station(s.by).map(|st| st.seq))
         .collect();
     let notes = notes(&m);
-    let hover = hovered().and_then(|seq| m.station(seq).cloned());
 
     rsx! {
         div {
@@ -261,12 +260,16 @@ pub fn MetroMap() -> Element {
                     for sec in m.sections.iter().cloned() {
                         path {
                             class: if route.is_some() { "section-tick dim" } else { "section-tick" },
-                            d: "M{sec.from - 10.0},{MAIN_Y - 26.0} V{MAIN_Y - 21.0} H{(sec.to + 10.0).max(sec.from + 24.0)} V{MAIN_Y - 26.0}",
+                            d: "M{sec.from - 10.0},{MAIN_Y - 88.0} V{MAIN_Y - 83.0} H{(sec.to + 10.0).max(sec.from + 24.0)} V{MAIN_Y - 88.0}",
                         }
                     }
-                    for (x0, x1, agent) in m.main_segments() {
+                    for (x0, x1, solid, agent) in m.main_runs() {
                         path {
-                            class: if agent.is_some() { "track main agent" } else { "track main" },
+                            class: format!(
+                                "track main{}{}",
+                                if agent.is_some() { " agent" } else { "" },
+                                if solid { "" } else { " idle" },
+                            ),
                             d: "M{x0},{MAIN_Y} H{x1}",
                         }
                     }
@@ -300,7 +303,7 @@ pub fn MetroMap() -> Element {
                 for sec in m.sections.iter().cloned() {
                     div {
                         class: if route.is_some() { "section-name dim" } else { "section-name" },
-                        style: "left: {sec.at}px; bottom: calc(100% - {MAIN_Y - 30.0}px); max-width: {crate::metro::NAME_WIDTH}px",
+                        style: "left: {sec.at}px; bottom: calc(100% - {MAIN_Y - 92.0}px); max-width: {crate::metro::NAME_WIDTH}px",
                         onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(sec.seq)); },
                         "{sec.text}"
                     }
@@ -313,7 +316,7 @@ pub fn MetroMap() -> Element {
                     if line.kind == LineKind::Loose {
                         div {
                             class: if route.as_ref().is_none_or(|r| r.lines.contains(&i)) { "line-name loose" } else { "line-name loose dim" },
-                            style: "left: {m.station(line.stations[0]).map_or(0.0, |s| s.x) - 30.0}px; top: {line.y - 26.0}px",
+                            style: "left: {m.station(line.stations[0]).map_or(0.0, |s| s.x) - 120.0}px; top: {line.y - 8.0}px",
                             "출처 없음"
                         }
                     }
@@ -332,17 +335,22 @@ pub fn MetroMap() -> Element {
                         }
                     }
                 }
+                // Every station's short name, slanted like a metro map's so close ones clear.
+                for s in m.stations.iter().cloned() {
+                    div {
+                        class: format!(
+                            "station-name{}{}",
+                            match s.decision.as_deref() { Some("DENY") => " deny", Some("REVIEW") => " review", _ => "" },
+                            if lit(&route, s.seq) { "" } else { " dim" },
+                        ),
+                        style: "left: {s.x + 9.0}px; top: {s.y - 27.0}px",
+                        title: "{s.tool} {s.what}",
+                        "{s.name()}"
+                    }
+                }
                 // Names only where something happened; any other on hover.
                 for (s, lower) in notes {
                     StationNote { station: s.clone(), lower, lit: lit(&route, s.seq), dragged }
-                }
-                if let Some(s) = hover.filter(|s| !is_notable(s)) {
-                    div {
-                        class: "hover-name",
-                        style: "left: {s.x - 10.0}px; top: {s.y - 34.0}px",
-                        b { "{s.tool}" }
-                        " {s.what}"
-                    }
                 }
             }
         }
@@ -586,14 +594,9 @@ fn StationNote(station: Station, lower: bool, lit: bool, dragged: Signal<bool>) 
         _ => ("quiet", ""),
     };
     let what = if station.folded() {
-        format!(
-            "{} ×{} · {}",
-            station.tool,
-            station.members.len(),
-            station.what
-        )
+        "펼치기".to_owned()
     } else {
-        format!("{} {}", station.tool, file_name(&station.what))
+        String::new()
     };
     let top = station.y + if lower { 38.0 } else { 16.0 };
     rsx! {
@@ -606,8 +609,8 @@ fn StationNote(station: Station, lower: bool, lit: bool, dragged: Signal<bool>) 
                     state.selected.set(Selection::Node(seq));
                 }
             },
-            if !head.is_empty() { b { "{head}" } " · " }
-            "{what}"
+            if !head.is_empty() { b { "{head}" } }
+            if !what.is_empty() { "{what}" }
         }
     }
 }
