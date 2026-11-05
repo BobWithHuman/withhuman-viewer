@@ -253,3 +253,66 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .hit .badge { font: 600 11px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; padding: 0 6px; flex: none; }
 .hit .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hit .muted { flex: none; }
+
+/* The metro map: the request is the main line, tool results that drove the agent branch off it. */
+:root { --line-main: #2a3240; --line-branch: #7b5bd6; --branch-soft: #f3effd; --line-loose: #9aa2ae; --map-bg: #fbfbfa; }
+@media (prefers-color-scheme: dark) {
+  :root { --line-main: #c9d0da; --line-branch: #a58cf0; --branch-soft: #2a2440; --line-loose: #6f7886; --map-bg: #171a20; }
+}
+.metro { position: absolute; inset: 0; overflow: hidden; background: var(--map-bg); cursor: default; }
+.metro.dragging { cursor: grabbing; }
+.metro-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.metro-world svg { position: absolute; left: 0; top: 0; overflow: visible; }
+.track { fill: none; stroke-linecap: round; }
+.track.main { stroke: var(--line-main); stroke-width: 5; }
+.track.branch { stroke: var(--line-branch); stroke-width: 4; }
+.track.loose { stroke: var(--line-loose); stroke-width: 3; stroke-dasharray: 2 7; }
+.track-end { fill: var(--line-branch); }
+.terminus { fill: var(--panel); stroke: var(--line-main); stroke-width: 5; }
+.station { cursor: pointer; }
+.station .hit { fill: transparent; }
+.station .pass { fill: var(--panel); stroke: var(--line-main); stroke-width: 4; }
+.station:hover .pass { stroke-width: 5; }
+.station .stop { stroke: var(--panel); stroke-width: 3; }
+.station .stop.deny { fill: var(--deny); }
+.station .stop.review { fill: var(--review); }
+.station .glyph { stroke: #fff; stroke-width: 2.4; stroke-linecap: round; fill: none; }
+.station .halo { fill: none; stroke: var(--accent); stroke-width: 2; opacity: .55; }
+.station .halo.deny { stroke: var(--deny); }
+.station .halo.review { stroke: var(--review); }
+.station .undo { fill: none; stroke: var(--review); stroke-width: 2; stroke-dasharray: 3 3; }
+.dim { opacity: .22; }
+.metro .label { position: absolute; width: 132px; cursor: pointer; line-height: 1.35; }
+.metro .label .tool { font-weight: 650; font-size: 12.5px; }
+.metro .label .what { font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metro .label .what.source { color: var(--line-branch); }
+.metro .label .verdict { font-size: 11px; font-weight: 700; }
+.metro .label.deny .tool, .metro .label.deny .verdict { color: var(--deny); }
+.metro .label.review .tool, .metro .label.review .verdict { color: var(--review); }
+.metro .label.undo .verdict { color: var(--review); }
+.metro .ask { position: absolute; cursor: pointer; }
+.metro .ask .who { font-size: 11.5px; color: var(--muted); }
+.metro .ask .say { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.35; }
+.metro .ask .say.next { font-size: 13.5px; }
+.metro .ask .intent { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.metro .quote { position: absolute; max-width: 330px; background: var(--branch-soft); border-radius: 8px; padding: 5px 9px 6px;
+                box-shadow: inset 2px 0 0 var(--line-branch); cursor: pointer; }
+.metro .quote .src { font-size: 11px; color: var(--line-branch); font-weight: 650; }
+.metro .quote .txt { font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); opacity: .8;
+                     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.metro .quote.hot { background: color-mix(in srgb, var(--deny) 10%, var(--panel)); box-shadow: inset 2px 0 0 var(--deny); }
+.metro .quote.hot .src { color: var(--deny); }
+.metro .loose-label { position: absolute; font-size: 11px; color: var(--line-loose); font-weight: 650; white-space: nowrap; }
+.metro .last-word { position: absolute; font-size: 11.5px; color: var(--muted); max-width: 260px; cursor: pointer; }
+.metro .last-word b { color: var(--text); }
+.legend .line { display: inline-block; width: 18px; height: 0; border-top: 4px solid; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.legend .line.loose { border-top: 3px dotted var(--line-loose); }
+
+/* The story of one Call, above its verdict. */
+.story { padding: 2px 0 6px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.story h4:first-child { margin-top: 4px; }
+.story.stopped h4 { color: var(--text); }
+.story .lines .ctx { color: var(--muted); }
+.story ul.why { margin: 2px 0 4px; padding-left: 18px; }
+.story ul.why li { margin: 2px 0; }
+.story .cause-quote .preview { margin-top: 4px; }

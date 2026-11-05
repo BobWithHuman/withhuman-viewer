@@ -81,10 +81,6 @@ impl Node {
         self.props.get("seq").and_then(Value::as_i64).unwrap_or(-1)
     }
 
-    pub fn order(&self) -> i64 {
-        self.props.get("order").and_then(Value::as_i64).unwrap_or(0)
-    }
-
     pub fn decision(&self) -> Option<&str> {
         self.props.get("decision").and_then(Value::as_str)
     }

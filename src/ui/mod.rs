@@ -4,6 +4,7 @@
 mod canvas;
 mod compare;
 mod inspector;
+mod metro;
 mod settings;
 mod sidebar;
 mod trace;
@@ -15,7 +16,7 @@ use std::time::Duration;
 use dioxus::prelude::*;
 
 use crate::api::Backend;
-use crate::layout::{Model, View};
+use crate::layout::Model;
 use crate::menu;
 use crate::model::Session;
 use crate::prefs::{Prefs, WindowPlace};
@@ -35,12 +36,6 @@ pub enum Load<T> {
 pub enum Selection {
     None,
     Node(i64),
-    /// A cause edge, from a Call to what it was traced to.
-    Edge {
-        call: i64,
-        to: i64,
-        id: String,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,7 +55,6 @@ pub struct AppState {
     pub graph_of: Signal<Option<String>>,
     /// The graph or the comparison.
     pub mode: Signal<Mode>,
-    pub view: Signal<View>,
     pub selected: Signal<Selection>,
     /// A node for the canvas to bring into view.
     pub focus: Signal<Option<i64>>,
@@ -113,11 +107,6 @@ impl AppState {
 pub fn App() -> Element {
     let backend = use_context::<Arc<Backend>>();
     let prefs = use_hook(Prefs::load);
-    let view = if prefs.flow_view {
-        View::Flow
-    } else {
-        View::Tree
-    };
     let width = prefs.inspector_width.unwrap_or(INSPECTOR_WIDTH.1);
     let mut state = use_context_provider(|| AppState {
         public: Signal::new(backend.settings()),
@@ -127,7 +116,6 @@ pub fn App() -> Element {
         graph: Signal::new(Load::Loading),
         graph_of: Signal::new(None),
         mode: Signal::new(Mode::Graph),
-        view: Signal::new(view),
         selected: Signal::new(Selection::None),
         focus: Signal::new(None),
         settings_open: Signal::new(false),
@@ -177,7 +165,7 @@ pub fn App() -> Element {
                 main { class: "stage",
                     canvas::Toolbar {}
                     div { class: "canvas-wrap",
-                        canvas::Canvas {}
+                        metro::MetroMap {}
                         StageNotice {}
                         canvas::Legend {}
                     }
@@ -219,8 +207,6 @@ fn use_menu(backend: Arc<Backend>, mut state: AppState) {
                 "const s = document.getElementById('session-search'); s?.focus(); s?.select();",
             );
         }
-        menu::TREE => state.view.set(View::Tree),
-        menu::FLOW => state.view.set(View::Flow),
         menu::FIT => state.fit += 1,
         menu::DEMO => state.toggle_demo(&backend),
         menu::CHECK_UPDATES => state.check_updates += 1,
@@ -378,12 +364,6 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
     });
 
     // What to remember between launches.
-    use_effect(move || {
-        let flow = (state.view)() == View::Flow;
-        if state.prefs.peek().flow_view != flow {
-            state.prefs.write().flow_view = flow;
-        }
-    });
     use_effect(move || state.prefs.read().save());
 }
 
