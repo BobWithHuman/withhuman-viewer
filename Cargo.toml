@@ -1,0 +1,54 @@
+[package]
+name = "withhuman-viewer"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+description = "Desktop viewer for the WithHuman execution graph"
+repository = "https://github.com/BobWithHuman/withhuman-viewer"
+
+# Its own workspace, so it builds the same when checked out inside another Cargo workspace.
+[workspace]
+
+[[bin]]
+name = "withhuman-viewer"
+path = "src/main.rs"
+
+[dependencies]
+dioxus = { version = "0.7.10", features = ["desktop"] }
+tokio = { version = "1", features = ["time"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+rfd = "0.17.2"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+regex = "1"
+base64 = "0.22"
+dirs = "6"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+
+# `cargo packager --release` makes the macOS app and disk image. The app is universal: the build
+# script compiles for Apple Silicon and Intel and joins the two with `lipo`.
+[package.metadata.packager]
+productName = "WithHuman Viewer"
+identifier = "dev.withhuman.viewer"
+description = "WithHuman 실행 그래프 뷰어"
+homepage = "https://github.com/BobWithHuman/withhuman-viewer"
+publisher = "BobWithHuman"
+copyright = "Copyright (c) 2026 BobWithHuman"
+category = "DeveloperTool"
+outDir = "dist"
+formats = ["app", "dmg"]
+binariesDir = "target/universal-apple-darwin/release"
+binaries = [{ path = "withhuman-viewer", main = true }]
+beforePackagingCommand = "scripts/build-universal.sh"
+icons = ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns"]
+
+[package.metadata.packager.macos]
+minimumSystemVersion = "11.0"

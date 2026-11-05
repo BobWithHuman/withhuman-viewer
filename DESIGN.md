@@ -1,6 +1,6 @@
 # WithHuman Viewer: 앱 설계
 
-`index.html`(브라우저용 페이지, `server.py`가 띄움)을 Dioxus 데스크톱 앱으로 새로 만든다.
+withhuman-core의 `tools/graph-viewer/index.html`(브라우저용 페이지, `server.py`가 띄움, 개발용으로 남아 있음)을 Dioxus 데스크톱 앱으로 새로 만든다.
 외부 사용자에게 배포한다. UI와 로직은 Rust로 쓰고, 그래프 그리기만 당분간 Cytoscape(JS)에 맡긴다.
 
 ## 기존 페이지의 기능 목록

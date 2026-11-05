@@ -20,7 +20,7 @@ pub struct Settings {
 }
 
 impl Default for Settings {
-    /// The same defaults as `server.py`, so a local `deploy/docker` stack answers out of the box.
+    /// The same defaults as withhuman-core's `server.py`, so its local `deploy/docker` stack answers.
     fn default() -> Self {
         let env =
             |key: &str, fallback: &str| std::env::var(key).unwrap_or_else(|_| fallback.to_owned());

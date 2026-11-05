@@ -1,5 +1,5 @@
 //! The viewer's reads over Neo4j's HTTP query endpoint, the same queries and shaping as
-//! `tools/graph-viewer/server.py` so the page reads one format from either.
+//! `tools/graph-viewer/server.py` in withhuman-core, so both read one format.
 
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};

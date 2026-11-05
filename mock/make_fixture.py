@@ -2,7 +2,7 @@
 graph, its SubGraph tree and cause edges can be looked at without Neo4j.
 
 Each session is a list of events in order; the API shaping (summary, call rows, session
-counts) follows tools/graph-viewer/desktop/src/graph.rs. Run: python3 mock/make_fixture.py
+counts) follows src/graph.rs. Run: python3 mock/make_fixture.py
 """
 
 import json
