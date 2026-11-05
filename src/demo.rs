@@ -21,7 +21,12 @@ impl Demo {
             }),
             Err(_) => FIXTURE.to_owned(),
         };
-        let data = serde_json::from_str(&text).unwrap_or_else(|e| {
+        Self::parse(&text)
+    }
+
+    /// A demo from fixture text; an unreadable one is an empty demo.
+    pub fn parse(text: &str) -> Self {
+        let data = serde_json::from_str(text).unwrap_or_else(|e| {
             eprintln!("데모 데이터 형식이 잘못됐습니다: {e}");
             json!({"sessions": [], "graphs": {}, "nodes": {}, "calls": {}})
         });

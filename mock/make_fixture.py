@@ -1,4 +1,4 @@
-"""Writes mock/fixture.json: the viewer API's answers for a few made-up sessions, so the
+"""Writes mock/layout_cases.json: the viewer API's answers for a few made-up sessions, so the
 graph, its SubGraph tree and cause edges can be looked at without Neo4j.
 
 Each session is a list of events in order; the API shaping (summary, call rows, session
@@ -207,6 +207,6 @@ for sid, start, cwd, events in [
     out["sessions"].append(row)
     out["graphs"][sid], out["nodes"][sid], out["calls"][sid] = graph, details, calls
 
-path = Path(__file__).with_name("fixture.json")
+path = Path(__file__).with_name("layout_cases.json")
 path.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
 print(f"wrote {path}: {len(out['sessions'])} sessions")

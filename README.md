@@ -25,7 +25,7 @@ cargo test                     # 테스트
 cargo packager --release --target universal-apple-darwin   # 유니버설 .app/.dmg (dist/)
 ```
 
-- 데모 데이터는 `mock/fixture.json`입니다. `python3 mock/make_fixture.py`로 다시 만들고, `VIEWER_FIXTURE=<파일>`로 다른 파일을 쓸 수 있습니다.
+- 데모 데이터 `mock/fixture.json`은 로컬에 띄운 엔진이 기록한 세션을 앱의 쿼리로 내보낸 것입니다. 다시 만드는 방법은 [mock/README.md](mock/README.md)에 있습니다. `VIEWER_FIXTURE=<파일>`로 다른 파일을 쓸 수 있습니다.
 - 화면 구성과 진행 계획은 [DESIGN.md](DESIGN.md)에 있습니다.
 - 엔진 쪽 브라우저용 뷰어(`withhuman-core`의 `tools/graph-viewer`)는 개발용으로 남아 있고, 같은 쿼리로 같은 형식을 읽습니다.
 

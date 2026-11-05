@@ -1,0 +1,6 @@
+# Laid over withhuman-core's root compose.yaml to record the demo: publishes Neo4j's HTTP port,
+# on loopback only, so the viewer and its fixture export can read it. See mock/README.md.
+services:
+  neo4j:
+    ports:
+      - "127.0.0.1:${VIEWER_NEO4J_PORT:-7475}:7474"
