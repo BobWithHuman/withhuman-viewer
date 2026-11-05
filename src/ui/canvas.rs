@@ -85,8 +85,11 @@ pub fn Canvas() -> Element {
         }
     });
 
+    // Waits for the open session's own graph: the last one stays on screen while it loads.
     use_effect(move || {
-        if let Some(seq) = (state.focus)() {
+        let Some(seq) = (state.focus)() else { return };
+        let ready = matches!(&*state.graph.read(), Load::Ready(_));
+        if ready && *state.graph_of.read() == *state.current.read() {
             let _ = eval.send(json!({"type": "focus", "id": format!("n{seq}")}));
             state.focus.set(None);
         }

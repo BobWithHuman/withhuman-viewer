@@ -2,6 +2,7 @@
 //! open, its graph, and what is selected in it.
 
 mod canvas;
+mod compare;
 mod inspector;
 mod settings;
 mod sidebar;
@@ -42,6 +43,12 @@ pub enum Selection {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mode {
+    Graph,
+    Compare,
+}
+
 #[derive(Clone, Copy)]
 pub struct AppState {
     pub public: Signal<Public>,
@@ -49,6 +56,10 @@ pub struct AppState {
     pub sessions: Signal<Load<Vec<Session>>>,
     pub current: Signal<Option<String>>,
     pub graph: Signal<Load<Arc<Model>>>,
+    /// The session `graph` was read for: it stays on screen while the next one loads.
+    pub graph_of: Signal<Option<String>>,
+    /// The graph or the comparison.
+    pub mode: Signal<Mode>,
     pub view: Signal<View>,
     pub selected: Signal<Selection>,
     /// A node for the canvas to bring into view.
@@ -69,6 +80,13 @@ impl AppState {
     pub fn go_to(mut self, seq: i64) {
         self.selected.set(Selection::Node(seq));
         self.focus.set(Some(seq));
+    }
+
+    /// Opens a Call of any session in the graph, from the comparison.
+    pub fn open_call(mut self, session: String, seq: i64) {
+        self.mode.set(Mode::Graph);
+        self.open_session(session);
+        self.go_to(seq);
     }
 
     pub fn open_session(mut self, id: String) {
@@ -107,6 +125,8 @@ pub fn App() -> Element {
         sessions: Signal::new(Load::Loading),
         current: Signal::new(None),
         graph: Signal::new(Load::Loading),
+        graph_of: Signal::new(None),
+        mode: Signal::new(Mode::Graph),
         view: Signal::new(view),
         selected: Signal::new(Selection::None),
         focus: Signal::new(None),
@@ -149,7 +169,10 @@ pub fn App() -> Element {
             onmouseleave: drop,
             TopBar {}
             update::UpdateBanner {}
-            div { class: "columns",
+            if (state.mode)() == Mode::Compare {
+                compare::Compare {}
+            }
+            div { class: "columns", hidden: (state.mode)() == Mode::Compare,
                 sidebar::Sidebar {}
                 main { class: "stage",
                     canvas::Toolbar {}
@@ -337,6 +360,9 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
             if *state.graph.peek() != next {
                 state.graph.set(next);
             }
+            if state.graph_of.peek().as_deref() != Some(id.as_str()) {
+                state.graph_of.set(Some(id));
+            }
         });
     });
 
@@ -366,6 +392,7 @@ fn TopBar() -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let p = (state.public)();
+    let mode = (state.mode)();
     // The dot says whether the source answered: waiting, reached, or not reached.
     let (source_state, source_title) = match (p.demo, &*state.sessions.read()) {
         (true, _) => ("demo", "데모 데이터 · 연결 설정 열기"),
@@ -376,6 +403,10 @@ fn TopBar() -> Element {
     rsx! {
         header { class: "topbar",
             span { class: "brand", "WithHuman Viewer" }
+            div { class: "segmented",
+                button { class: if mode == Mode::Graph { "on" } else { "" }, onclick: move |_| state.mode.set(Mode::Graph), "그래프" }
+                button { class: if mode == Mode::Compare { "on" } else { "" }, onclick: move |_| state.mode.set(Mode::Compare), "조건 비교" }
+            }
             div { class: "spacer" }
             button {
                 class: "source {source_state}",
