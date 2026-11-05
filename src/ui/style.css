@@ -167,3 +167,32 @@ table.props td:first-child { color: var(--muted); width: 34%; }
 .update-banner .notes { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .update-banner > span:first-child { flex: none; }
 .sessions:focus { outline: none; }
+
+/* The trace beyond the verdict: gauges, the second check, Jev exchanges. */
+h4 { font-size: 11px; font-weight: 600; color: var(--muted); margin: 12px 0 4px; }
+.card h3 { margin-top: 0; }
+.callline { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; margin-top: 8px; word-break: break-all; }
+.tag.check { background: color-mix(in srgb, var(--review) 18%, transparent); color: var(--review); }
+.card.check { border-color: color-mix(in srgb, var(--review) 45%, var(--line)); }
+.bar.this i { background: var(--cause); opacity: .7; }
+.gauge { position: relative; padding-top: 18px; margin: 6px 0 4px; }
+.gauge .zones { display: flex; height: 8px; border-radius: 4px; overflow: hidden; opacity: .75; }
+.gauge .zones i { display: block; height: 100%; }
+.gauge .marker { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.gauge .marker::after { content: ""; position: absolute; left: 50%; top: 15px; width: 2px; height: 14px; margin-left: -1px; background: var(--text); }
+table.breach { margin-top: 10px; }
+table.breach td { padding: 3px 0; border-top: 1px solid var(--line); }
+table.breach .num { text-align: right; width: 44px; font-variant-numeric: tabular-nums; }
+table.breach tr.worst td { font-weight: 600; }
+table.breach tr.zero td { color: var(--muted); }
+.lines { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all;
+         background: var(--hover); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; }
+.lines .add { color: var(--allow); }
+.lines .del { color: var(--deny); }
+.preview { font-size: 11px; color: var(--muted); background: var(--hover); border-radius: 6px; padding: 4px 8px; margin: 2px 0 6px;
+           white-space: pre-wrap; word-break: break-word; }
+details { margin: 2px 0; }
+details > summary { cursor: pointer; font-size: 12px; padding: 2px 0; }
+details > pre { font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto;
+                background: var(--hover); border-radius: 6px; padding: 6px 8px; margin: 4px 0; }
+details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 10px; }

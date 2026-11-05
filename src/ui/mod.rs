@@ -5,6 +5,7 @@ mod canvas;
 mod inspector;
 mod settings;
 mod sidebar;
+mod trace;
 mod update;
 
 use std::sync::Arc;

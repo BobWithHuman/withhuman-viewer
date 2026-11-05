@@ -11,6 +11,15 @@ use crate::api::Backend;
 use crate::layout::{Model, clip, decision_color, label, percent};
 use crate::model::{NodeDetail, parse_json};
 
+use super::trace::{Check, Context, Deviation, JevLog, Preview, TracePath};
+
+/// A verdict as a coloured badge: 허용, 확인 or 차단.
+pub(super) fn decision_badge(decision: &str) -> Element {
+    rsx! {
+        span { class: "badge solid", style: "background: var({decision_color(decision)})", "{verdict_text(decision)}" }
+    }
+}
+
 fn rule_text(rule: &str) -> Option<&'static str> {
     Some(match rule {
         "intent::mismatch" => "의도에서 벗어난 행동으로 차단",
@@ -25,7 +34,7 @@ fn rule_text(rule: &str) -> Option<&'static str> {
     })
 }
 
-fn link_text(link: &str) -> &str {
+pub(super) fn link_text(link: &str) -> &str {
     match link {
         "request" => "사용자 요청의 다음 단계",
         "segment" => "도구 결과의 내용",
@@ -34,7 +43,7 @@ fn link_text(link: &str) -> &str {
     }
 }
 
-fn breach_text(breach: &str) -> &str {
+pub(super) fn breach_text(breach: &str) -> &str {
     match breach {
         "none" => "위반 없음",
         "explicit" => "사용자가 말한 목표·조건을 어김",
@@ -57,7 +66,7 @@ fn verdict_text(decision: &str) -> &str {
     }
 }
 
-fn subgraph_name(key: &str) -> String {
+pub(super) fn subgraph_name(key: &str) -> String {
     match key {
         "none" | "" => "해당 없음".into(),
         k if k.starts_with('s') && k[1..].chars().all(|c| c.is_ascii_digit()) => {
@@ -68,7 +77,7 @@ fn subgraph_name(key: &str) -> String {
 }
 
 /// "#7 Edit src/app.py": a node by its number and caption.
-fn node_name(model: &Model, seq: i64) -> String {
+pub(super) fn node_name(model: &Model, seq: i64) -> String {
     model
         .node(seq)
         .map_or_else(|| format!("#{seq}"), |n| format!("#{seq} {}", label(n)))
@@ -107,6 +116,8 @@ fn cause_shares(trace: &Value) -> Option<[(&'static str, f64); 3]> {
 enum Tab {
     Verdict,
     Cause,
+    Check,
+    Jev,
     Paragraphs,
     Props,
 }
@@ -189,6 +200,8 @@ fn NodeView(
         vec![
             (Tab::Verdict, "판정"),
             (Tab::Cause, "원인"),
+            (Tab::Check, "확인"),
+            (Tab::Jev, "Jev"),
             (Tab::Paragraphs, "문단"),
             (Tab::Props, "속성"),
         ]
@@ -214,8 +227,17 @@ fn NodeView(
         }
         div { class: "inspector-body",
             match tab() {
-                Tab::Verdict => rsx! { Verdict { fields: node.props.clone(), trace: trace.clone() } },
-                Tab::Cause => rsx! { Cause { model: model.clone(), trace: trace.clone() } },
+                Tab::Verdict => rsx! {
+                    Verdict { model: model.clone(), seq, fields: node.props.clone(), trace: trace.clone() }
+                    Deviation { trace: trace.clone() }
+                },
+                Tab::Cause => rsx! {
+                    Cause { model: model.clone(), trace: trace.clone() }
+                    TracePath { model: model.clone(), seq }
+                    Context { trace: trace.clone() }
+                },
+                Tab::Check => rsx! { Check { model: model.clone(), trace: trace.clone() } },
+                Tab::Jev => rsx! { JevLog { model: model.clone(), trace: trace.clone(), highlight: None } },
                 Tab::Paragraphs => rsx! { Paragraphs { model: model.clone(), seq, detail, only: None } },
                 Tab::Props => rsx! { Props { detail, fallback: node.props.clone() } },
             }
@@ -224,7 +246,12 @@ fn NodeView(
 }
 
 #[component]
-fn Verdict(fields: serde_json::Map<String, Value>, trace: Value) -> Element {
+fn Verdict(
+    model: Arc<Model>,
+    seq: i64,
+    fields: serde_json::Map<String, Value>,
+    trace: Value,
+) -> Element {
     let text = |key: &str| {
         fields
             .get(key)
@@ -236,17 +263,54 @@ fn Verdict(fields: serde_json::Map<String, Value>, trace: Value) -> Element {
     let rule = text("decision_rule");
     let reason = text("decision_reason");
     let error = text("trace_error");
-    let deviation = &trace["deviation"];
-    let score = deviation["score"].as_f64();
-    let worst = deviation["worst"].as_str().unwrap_or("").to_owned();
+    // The call itself: its tool and what it acts on, whole.
+    let payload = parse_json(fields.get("payload_json"));
+    let tool = payload["tool_name"].as_str().unwrap_or("").to_owned();
+    let brief = model
+        .node(seq)
+        .and_then(|n| n.summary.brief.clone())
+        .unwrap_or_default();
+    let call = match (tool.is_empty(), brief.is_empty()) {
+        (false, false) => format!("{tool}: {brief}"),
+        (false, true) => tool,
+        (true, _) => brief,
+    };
+    let score = trace["deviation"]["score"]
+        .as_f64()
+        .map(|s| format!("이탈 {}", percent(s)))
+        .or_else(|| {
+            fields
+                .get("intent_score")
+                .and_then(Value::as_f64)
+                .map(|s| format!("score {}", percent(s)))
+        });
+    let second = match (
+        trace["check"]["unwanted"].as_f64(),
+        trace["check"]["branch"].as_str(),
+    ) {
+        (Some(u), _) => Some(format!("2차 {}", percent(u))),
+        (None, Some("safeguard")) => Some("설정 변경".to_owned()),
+        _ => None,
+    };
     let judge_ms = trace.pointer("/jev_ms/judge").and_then(Value::as_i64);
+    let check_ms = trace.pointer("/jev_ms/check").and_then(Value::as_i64);
+    let judge_text = judge_ms.map_or_else(|| "–".to_owned(), |m| format!("{m}ms"));
     rsx! {
         div { class: "card",
             div { class: "verdict",
                 if !decision.is_empty() {
-                    span { class: "badge solid", style: "background: var({decision_color(&decision)})", "{verdict_text(&decision)}" }
+                    {decision_badge(&decision)}
                 }
                 strong { "{rule_text(&rule).unwrap_or(&rule)}" }
+                if let Some(score) = score {
+                    span { class: "muted", "{score}" }
+                }
+                if let Some(second) = second {
+                    span { class: "tag check", "{second}" }
+                }
+            }
+            if !call.is_empty() {
+                div { class: "callline", "{call}" }
             }
             if !reason.is_empty() {
                 p { "{reason}" }
@@ -255,21 +319,16 @@ fn Verdict(fields: serde_json::Map<String, Value>, trace: Value) -> Element {
                 p { class: "error", "판정 실패: {error}" }
             }
             dl { class: "facts",
-                if let Some(score) = score {
-                    dt { "이탈 점수" }
-                    dd { "{percent(score)}" }
-                }
-                if !worst.is_empty() {
-                    dt { "가장 큰 위반" }
-                    dd { "{breach_text(&worst)}" }
-                }
                 if !rule.is_empty() {
                     dt { "규칙" }
                     dd { code { "{rule}" } }
                 }
-                if let Some(ms) = judge_ms {
-                    dt { "Jev 판정" }
-                    dd { "{ms}ms" }
+                if judge_ms.is_some() || check_ms.is_some() {
+                    dt { "Jev 시간" }
+                    dd {
+                        "판정 {judge_text}"
+                        if let Some(ms) = check_ms { " · 2차 {ms}ms" }
+                    }
                 }
             }
         }
@@ -303,7 +362,12 @@ fn Cause(model: Arc<Model>, trace: Value) -> Element {
         div { class: "card",
             dl { class: "facts",
                 dt { "연결" }
-                dd { strong { "{link_text(&link)}" } }
+                dd {
+                    strong { "{link_text(&link)}" }
+                    if trace["picked"] == Value::Bool(false) {
+                        span { class: "muted", " (Jev 답 없음 · 가장 가까운 SubGraph로 대체)" }
+                    }
+                }
                 dt { "부모" }
                 dd { "{parent}" }
             }
@@ -334,6 +398,7 @@ fn Cause(model: Arc<Model>, trace: Value) -> Element {
                     if let Some(p) = p {
                         span { class: "muted", " · p={percent(p)}" }
                     }
+                    Preview { key: "{seq}-{paragraph:?}", seq, paragraph }
                 }
             }
         }
@@ -492,6 +557,10 @@ fn EdgeView(
         .collect();
     let paragraph = causes.iter().find_map(|c| c.paragraph);
     let probability = causes.iter().find_map(|c| c.probability);
+    let trace = model
+        .node(call)
+        .map(|n| parse_json(n.props.get("trace_json")))
+        .unwrap_or(Value::Null);
     let (m1, m2) = (model.clone(), model.clone());
     rsx! {
         div { class: "inspector-head",
@@ -518,6 +587,20 @@ fn EdgeView(
             if paragraph.is_some() {
                 h3 { "원인 문단" }
                 Paragraphs { model: model.clone(), seq: to, detail, only: paragraph }
+            }
+            if trace.is_null() {
+                p { class: "muted", "판정 기록이 없습니다." }
+            } else {
+                h3 { "이 Call의 판정" }
+                Cause { model: model.clone(), trace: trace.clone() }
+                Deviation { trace: trace.clone() }
+                if !trace["check"].is_null() {
+                    Check { model: model.clone(), trace: trace.clone() }
+                }
+                details { class: "section", open: true,
+                    summary { "Jev 원본 (state · question · answer)" }
+                    JevLog { model: model.clone(), trace: trace.clone(), highlight: Some(to) }
+                }
             }
         }
     }
