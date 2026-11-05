@@ -365,17 +365,20 @@ fn TopBar() -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let p = (state.public)();
+    // The dot says whether the source answered: waiting, reached, or not reached.
+    let (source_state, source_title) = match (p.demo, &*state.sessions.read()) {
+        (true, _) => ("demo", "데모 데이터 · 연결 설정 열기"),
+        (false, Load::Ready(_)) => ("ok", "연결됨 · 연결 설정 열기"),
+        (false, Load::Failed(_)) => ("down", "연결되지 않음 · 연결 설정 열기"),
+        (false, Load::Loading) => ("wait", "연결하는 중 · 연결 설정 열기"),
+    };
     rsx! {
         header { class: "topbar",
             span { class: "brand", "WithHuman Viewer" }
-            div { class: "segmented",
-                button { class: "on", "그래프" }
-                button { disabled: true, title: "준비 중", "조건 비교" }
-            }
             div { class: "spacer" }
             button {
-                class: if p.demo { "source demo" } else { "source" },
-                title: "연결 설정",
+                class: "source {source_state}",
+                title: "{source_title}",
                 onclick: move |_| state.settings_open.set(true),
                 span { class: "dot" }
                 if p.demo { "데모 데이터" } else { "Neo4j · {p.neo4j_url}" }
@@ -396,6 +399,7 @@ fn StageNotice() -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let demo = (state.public)().demo;
+    let first_run = (state.public)().first_run;
     let sessions = (state.sessions)();
     let graph = (state.graph)();
     let retry = move |_| state.reload += 1;
@@ -406,6 +410,15 @@ fn StageNotice() -> Element {
         }
     };
     match (sessions, graph) {
+        // Nothing was set up yet: a greeting, not a failed connection.
+        (Load::Failed(_), _) if first_run && !demo => rsx! {
+            Notice {
+                title: "WithHuman Viewer에 오신 걸 환영합니다",
+                message: "WithHuman 엔진이 기록한 에이전트 세션을 그래프로 봅니다. 엔진의 Neo4j에 연결하거나, 엔진 없이 데모 데이터로 먼저 둘러보세요.",
+                button { class: "primary", onclick: move |_| state.settings_open.set(true), "엔진에 연결" }
+                {demo_button}
+            }
+        },
         (Load::Failed(message), _) => rsx! {
             Notice { title: if demo { "데모 데이터를 읽지 못했습니다" } else { "Neo4j에 연결할 수 없습니다" }, message,
                 button { class: "primary", onclick: move |_| state.settings_open.set(true), "연결 설정" }

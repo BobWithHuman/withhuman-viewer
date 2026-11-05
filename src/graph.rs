@@ -121,6 +121,10 @@ impl ApiError {
 
 pub type Rows = Vec<Map<String, Value>>;
 
+/// What a 401 from Neo4j means to the person at the settings.
+pub const UNAUTHORIZED: &str = "Neo4j가 사용자 이름이나 비밀번호를 받지 않았습니다. 엔진의 .env에 있는 \
+                                NEO4J_PASSWORD를 연결 설정에 넣어 주세요.";
+
 pub struct Neo4j<'a> {
     pub client: &'a reqwest::Client,
     pub settings: &'a Settings,
@@ -151,7 +155,12 @@ impl Neo4j<'_> {
             .map_err(|e| {
                 ApiError::new(
                     502,
-                    format!("Neo4j에 연결하지 못했습니다 ({url}): {}", root_cause(&e)),
+                    format!(
+                        "{}에서 Neo4j가 응답하지 않습니다. WithHuman 엔진이 실행 중인지, Neo4j 포트가 \
+                         열려 있는지 확인해 주세요. ({})",
+                        s.neo4j_url,
+                        root_cause(&e)
+                    ),
                 )
             })?;
         let status = response.status();
@@ -171,8 +180,10 @@ impl Neo4j<'_> {
                 .filter_map(|e| e.get("message").and_then(Value::as_str))
                 .collect::<Vec<_>>()
                 .join("; ");
-            let status = if status.as_u16() == 401 { 401 } else { 500 };
-            return Err(ApiError::new(status, message));
+            if status.as_u16() == 401 {
+                return Err(ApiError::new(401, UNAUTHORIZED));
+            }
+            return Err(ApiError::new(500, message));
         }
         let data = &body["data"];
         let fields: Vec<String> = data["fields"]
