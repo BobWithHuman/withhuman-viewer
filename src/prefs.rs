@@ -15,6 +15,12 @@ pub struct Prefs {
     pub flow_view: bool,
     pub inspector_width: Option<f64>,
     pub window: Option<WindowPlace>,
+    /// The comparison: the case search, the conditions seen and chosen, and the names given
+    /// to condition folders.
+    pub compare_case: String,
+    pub compare_known: Vec<String>,
+    pub compare_chosen: Option<Vec<String>>,
+    pub condition_names: std::collections::BTreeMap<String, String>,
 }
 
 /// Where the window was, in logical points.

@@ -188,6 +188,23 @@ pub fn parse_json(value: Option<&Value>) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// A Call as the comparison reads it: its verdict and score, without payload or trace.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct CallRow {
+    pub seq: i64,
+    pub tool_name: Option<String>,
+    pub brief: Option<String>,
+    pub decision: Option<String>,
+    pub error: Option<String>,
+    pub rule: Option<String>,
+    pub score: Option<f64>,
+    /// The call carries the benchmark's attack (its marker line or command).
+    pub attack: bool,
+    /// The tool ran: a result or an error came back.
+    pub ran: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::Paragraph;
