@@ -1,12 +1,12 @@
 //! The demo graph: the API's answers stored whole in `mock/fixture.json`, so the app can be
-//! tried, and its screens worked on, without Neo4j. Read at launch rather than compiled in, so
-//! the app still builds while the fixture is missing; without one the demo has no sessions.
+//! tried, and its screens worked on, without Neo4j. The fixture ships inside the app;
+//! `VIEWER_FIXTURE` points at another one, such as a graph the engine's tests exported.
 
 use serde_json::{Map, Value, json};
 
 use crate::graph::{ApiError, check_idle};
 
-const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../mock/fixture.json");
+static FIXTURE: &str = include_str!("../mock/fixture.json");
 
 pub struct Demo {
     data: Value,
@@ -14,14 +14,17 @@ pub struct Demo {
 
 impl Demo {
     pub fn load() -> Self {
-        let path = std::env::var("VIEWER_FIXTURE").unwrap_or_else(|_| FIXTURE.to_owned());
-        let data = std::fs::read_to_string(&path)
-            .map_err(|e| e.to_string())
-            .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
-            .unwrap_or_else(|e| {
+        let text = match std::env::var("VIEWER_FIXTURE") {
+            Ok(path) => std::fs::read_to_string(&path).unwrap_or_else(|e| {
                 eprintln!("데모 데이터를 읽지 못했습니다 ({path}): {e}");
-                json!({"sessions": [], "graphs": {}, "nodes": {}, "calls": {}})
-            });
+                FIXTURE.to_owned()
+            }),
+            Err(_) => FIXTURE.to_owned(),
+        };
+        let data = serde_json::from_str(&text).unwrap_or_else(|e| {
+            eprintln!("데모 데이터 형식이 잘못됐습니다: {e}");
+            json!({"sessions": [], "graphs": {}, "nodes": {}, "calls": {}})
+        });
         Self { data }
     }
 

@@ -1,6 +1,6 @@
 # WithHuman Viewer: 앱 설계
 
-`index.html`(브라우저용 페이지, `server.py`가 띄움)을 Dioxus 데스크톱 앱으로 새로 만든다.
+withhuman-core의 `tools/graph-viewer/index.html`(브라우저용 페이지, `server.py`가 띄움, 개발용으로 남아 있음)을 Dioxus 데스크톱 앱으로 새로 만든다.
 외부 사용자에게 배포한다. UI와 로직은 Rust로 쓰고, 그래프 그리기만 당분간 Cytoscape(JS)에 맡긴다.
 
 ## 기존 페이지의 기능 목록
@@ -47,7 +47,17 @@
 
 ## 단계
 
-1. 골격: 사이드바, 그래프, 인스펙터(판정·원인·문단·속성), 안내 카드, 설정 시트. iframe과 `index.html` 의존 제거.
-2. 마감: 메뉴·단축키(⌘R, ⌘,, ⌘F, ⌘1/⌘2), 창 상태·마지막 세션 기억, 삭제 확인 네이티브 다이얼로그, 키체인에 비밀번호.
+1. ✅ 골격: 사이드바, 그래프, 인스펙터(판정·원인·문단·속성), 안내 카드, 설정 시트. iframe과 `index.html` 의존 제거.
+2. ✅ 마감: 메뉴·단축키(⌘R, ⌘,, ⌘F, ⌘1/⌘2), 창 상태 기억, 삭제 확인 네이티브 다이얼로그, 키체인에 비밀번호(Neo4j에 연결할 때만 읽음).
 3. 조건 비교 화면, 인스펙터의 이탈 게이지·2차 확인·Jev 기록.
-4. 배포: cargo-packager로 서명·공증된 .dmg, cargo-packager-updater, CI.
+4. 배포
+   - ✅ 독립 저장소, CI(fmt·clippy·테스트·cargo-deny), 서명 없는 유니버설 .app/.dmg 패키징
+   - 서명·공증(Developer ID), cargo-packager-updater, `v*` 태그로 Releases에 올리는 워크플로
+
+## 배포 구조
+
+- 태그 `v*.*.*`를 push하면 릴리스 워크플로가 유니버설 앱을 서명·공증해 .dmg로 만들고, 업데이트 파일과
+  `latest.json`, `SHA256SUMS`, 빌드 출처 증명과 함께 GitHub Releases에 올린다.
+- 앱은 실행할 때 `releases/latest/download/latest.json`을 읽어 새 버전을 묻고, 서명을 검증한 뒤 설치한다.
+- 엔진(withhuman-core)이 기록 형식을 바꾸면 알 수 있도록, 엔진 E2E가 내보낸 그래프로 이 저장소 CI를
+  돌리는 장치를 둔다(예정).
