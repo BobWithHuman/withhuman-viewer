@@ -612,7 +612,7 @@ pub fn label(node: &Node) -> String {
             &format!(
                 "{} {}",
                 if tool.is_empty() { "Call" } else { &tool },
-                text(&s.brief)
+                short_path(&text(&s.brief))
             ),
             28,
         ),
@@ -625,6 +625,16 @@ pub fn label(node: &Node) -> String {
         "ConfigChange" => format!("{} {}", icon("ConfigChange"), clip(&text(&s.file_path), 24)),
         kind => format!("{} {kind}", icon(kind)).trim().to_owned(),
     }
+}
+
+/// An absolute path as its last two parts (`src/refund.py`), so a node's label shows the file
+/// rather than the folders every call shares; anything else as it is.
+pub fn short_path(text: &str) -> String {
+    if !text.starts_with('/') || text.contains(char::is_whitespace) {
+        return text.to_owned();
+    }
+    let parts: Vec<&str> = text.split('/').filter(|p| !p.is_empty()).collect();
+    parts[parts.len().saturating_sub(2)..].join("/")
 }
 
 /// Whitespace folded to single spaces, cut to `n` characters with an ellipsis.
@@ -716,6 +726,13 @@ mod tests {
     #[test]
     fn labels_and_numbers_read_like_the_page() {
         assert_eq!(clip("a  b\nc", 3), "a b…");
+        assert_eq!(
+            short_path("/Users/dev/src/payments-service/src/refund.py"),
+            "src/refund.py"
+        );
+        assert_eq!(short_path("/README.md"), "README.md");
+        assert_eq!(short_path("make test"), "make test");
+        assert_eq!(short_path("/bin/ls -la /tmp"), "/bin/ls -la /tmp");
         assert_eq!(percent(0.70), "0.7");
         assert_eq!(percent(1.0), "1");
         assert_eq!(percent(0.0), "0");
