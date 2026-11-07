@@ -25,8 +25,8 @@ pub(super) const LEGEND_H: f64 = 70.0;
 const PANEL_ROOM: f64 = 0.0;
 /// The room the main line's badge takes left of its first terminal.
 const BADGE_ROOM: f64 = 30.0;
-/// The width the zoom buttons take at the canvas's right edge.
-const CONTROLS: f64 = 64.0;
+/// The width the zoom buttons and the turn rail take at the canvas's right edge.
+const CONTROLS: f64 = 110.0;
 /// The scale a map app keeps in its corner, in stations: a round count whose length on
 /// screen is between 60 and 150 pixels.
 fn scale(zoom: f64) -> (usize, f64) {
@@ -125,9 +125,21 @@ pub fn MetroMap() -> Element {
         _ => None,
     });
     // The map draws the places the agents went to on the lines of what told them to.
-    let net = use_memo(move || match &*state.graph.read() {
-        Load::Ready(model) => Some(Arc::new(crate::network::Net::build(model))),
-        _ => None,
+    // Only the turn being looked at and its neighbours, however many turns the session has.
+    let net = use_memo(move || {
+        let Load::Ready(model) = &*state.graph.read() else {
+            return None;
+        };
+        let cm = metro()?;
+        let call = match (state.selected)() {
+            Selection::Node(seq) => cm.station(seq).map(|_| seq),
+            Selection::None => None,
+        }
+        .or_else(|| cm.default_dest());
+        let t = turn_at_call(&cm, call);
+        let last = cm.asks.len().saturating_sub(1);
+        let window = (t.saturating_sub(WINDOW), (t + WINDOW).min(last));
+        Some(Arc::new(crate::network::Net::window(model, Some(window))))
     });
     use_effect(move || {
         let _ = state.graph_of.read();
@@ -163,6 +175,26 @@ pub fn MetroMap() -> Element {
             size.set((rect.width(), rect.height()));
         }
     };
+
+    // A new window of turns is a new map: fit it.
+    let fitted = use_signal(|| None::<(usize, usize)>);
+    use_effect(move || {
+        let Some(n) = net() else { return };
+        let mut fitted = fitted;
+        if *fitted.peek() == Some(n.turns) {
+            return;
+        }
+        let first = fitted.peek().is_none();
+        fitted.set(Some(n.turns));
+        if first {
+            return;
+        }
+        spawn(async move {
+            measure().await;
+            let (w, h) = *size.peek();
+            camera.set(Some(Camera::fit_net(&n, w, h)));
+        });
+    });
 
     // A new session starts from its first view; a refresh of the same one keeps the camera.
     // The detail column: open on a route, closed with its ✕ while the list stays.
@@ -371,6 +403,7 @@ pub fn MetroMap() -> Element {
             onmouseleave: move |_| drag.set(None),
             super::net::NetWorld { net: nm.clone(), calls: cm.clone(), call, cam, dragged, open, hovered }
             super::net::NetLegend { net: nm.clone(), calls: cm.clone() }
+            super::net::TurnRail { net: nm.clone(), calls: cm.clone(), call }
             {
                 let (n, w) = scale(cam.zoom);
                 rsx! {
@@ -940,6 +973,42 @@ pub(super) fn line_colour(m: &Metro, line: usize, x: f64) -> &'static str {
 }
 
 /// The turn a station belongs to: the last request before it.
+/// How many turns either side of the one being looked at the map draws.
+pub(super) const WINDOW: usize = 1;
+
+/// The Call a turn is picked by: its gravest (denied, then held), else its first.
+pub(super) fn turn_pick(m: &Metro, t: usize) -> Option<i64> {
+    let mut on: Vec<&Station> = m.stations.iter().filter(|s| turn_of(m, s) == t).collect();
+    on.sort_by(|a, b| a.x.total_cmp(&b.x));
+    let weight = |s: &Station| match s.decision.as_deref() {
+        Some("DENY") => 2,
+        Some("REVIEW") => 1,
+        _ => 0,
+    };
+    let best = on.iter().map(|s| weight(s)).max().unwrap_or(0);
+    on.into_iter().find(|s| weight(s) == best).map(|s| s.seq)
+}
+
+/// Each turn's gravest verdict: 2 denied, 1 held, 0 neither.
+pub(super) fn turn_marks(m: &Metro) -> Vec<u8> {
+    let mut out = vec![0u8; m.asks.len().max(1)];
+    for s in &m.stations {
+        let w = match s.decision.as_deref() {
+            Some("DENY") => 2,
+            Some("REVIEW") => 1,
+            _ => 0,
+        };
+        let t = turn_of(m, s).min(out.len() - 1);
+        out[t] = out[t].max(w);
+    }
+    out
+}
+
+/// The turn the Call being looked at is in.
+pub(super) fn turn_at_call(m: &Metro, call: Option<i64>) -> usize {
+    call.and_then(|c| m.station(c)).map_or(0, |s| turn_of(m, s))
+}
+
 pub(super) fn turn_of(m: &Metro, s: &Station) -> usize {
     m.asks.iter().rposition(|a| a.x <= s.x).unwrap_or(0)
 }
@@ -1084,6 +1153,10 @@ fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> 
     let mut filter = use_signal(|| Filter::All);
     // Folded runs of allowed Calls the person opened, by their first Call.
     let mut unfolded = use_signal(HashSet::<i64>::new);
+    // Turns the person opened or closed against the default, and runs of plain turns they
+    // spread out, by their first turn.
+    let mut toggled = use_signal(HashSet::<usize>::new);
+    let mut spread = use_signal(HashSet::<usize>::new);
     let m = &metro;
     let found: Vec<Station> = if searching() {
         m.find(&query()).into_iter().cloned().collect()
@@ -1163,6 +1236,39 @@ fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> 
         flush(&mut run, &mut out);
         *entries = out;
     }
+    // A turn shows its Calls when it is the one being looked at or something in it stopped, or
+    // the person opened it; plain turns in a row read as one line until spread out.
+    let here = turn_at_call(m, dest);
+    let marks = turn_marks(m);
+    let mark = |t: usize| marks.get(t).copied().unwrap_or(0);
+    let open_by_default = |t: usize| t == here || mark(t) > 0;
+    let is_open = |t: usize| open_by_default(t) ^ toggled().contains(&t);
+    let mut rows: Vec<Row> = Vec::new();
+    for (t, entries) in turns.iter().cloned() {
+        let plain = filter() == Filter::All && !is_open(t) && mark(t) == 0;
+        match rows.last_mut() {
+            Some(Row::Plain(run)) if plain && !spread().contains(&run[0].0) => {
+                run.push((t, entries))
+            }
+            _ if plain && !spread().contains(&t) => rows.push(Row::Plain(vec![(t, entries)])),
+            _ => rows.push(Row::Turn(t, entries, is_open(t))),
+        }
+    }
+    // A run of one plain turn is just that turn, folded.
+    let rows: Vec<Row> = rows
+        .into_iter()
+        .map(|r| match r {
+            Row::Plain(mut run) if run.len() == 1 => {
+                let (t, e) = run.remove(0);
+                Row::Turn(t, e, false)
+            }
+            other => other,
+        })
+        .collect();
+    let picks: HashMap<usize, i64> = turns
+        .iter()
+        .filter_map(|(t, _)| Some((*t, turn_pick(m, *t)?)))
+        .collect();
     // The region to search in: the session, by its folder and what was asked.
     let sessions: Vec<(String, String)> = match &*state.sessions.read() {
         Load::Ready(list) => list
@@ -1294,8 +1400,31 @@ fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> 
                 }
             }
             div { class: "groups",
-                for (t, entries) in turns.iter().cloned() {
-                    {
+                for row in rows.iter().cloned() {
+                    match row {
+                        Row::Plain(run) => {
+                            let (a, b) = (run[0].0, run[run.len() - 1].0);
+                            let calls: usize = run.iter().flat_map(|(_, e)| e.iter()).map(|e| match e {
+                                Entry::Call(s) => s.members.len(),
+                                Entry::Fold(_, v) => v.iter().map(|s| s.members.len()).sum(),
+                            }).sum();
+                            rsx! {
+                                div {
+                                    key: "plain-{a}",
+                                    class: "turn plain-run",
+                                    onclick: move |_| { spread.write().insert(a); },
+                                    div { class: "t-head",
+                                        div { class: "t-top",
+                                            span { class: "t-no", "턴 {a + 1}–{b + 1}" }
+                                            span { class: "t-who", "경고 없는 턴 {run.len()}개" }
+                                            span { class: "g-counts", span { class: "c pass", Icon { name: "allow", size: 12.0 } "{calls}" } }
+                                        }
+                                        div { class: "t-said", "허용 {calls}개 · 눌러서 펼치기" }
+                                    }
+                                }
+                            }
+                        }
+                        Row::Turn(t, entries, opened) => {
                         let ask = m.asks.get(t).cloned();
                         let colour = turn_colour(t);
                         let calls: Vec<&Station> = entries.iter().flat_map(|e| match e {
@@ -1310,9 +1439,22 @@ fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> 
                             None => "사람의 요청".to_owned(),
                         };
                         let said = ask.as_ref().map(|a| report_words(&a.text)).unwrap_or_default();
+                        let pick = picks.get(&t).copied();
+                        let looked = t == here;
                         rsx! {
-                            div { class: "turn", style: "--turn: {colour}",
-                                div { class: "t-head",
+                            div { key: "turn-{t}", class: format!("turn{}{}", if opened { " open" } else { " shut" }, if looked { " here" } else { "" }), style: "--turn: {colour}",
+                                // The head picks the turn; on the turn being looked at it opens and
+                                // closes it.
+                                div {
+                                    class: "t-head",
+                                    onclick: move |_| {
+                                        if looked {
+                                            let mut t2 = toggled.write();
+                                            if !t2.remove(&t) { t2.insert(t); }
+                                        } else if let Some(q) = pick {
+                                            state.selected.set(Selection::Node(q));
+                                        }
+                                    },
                                     div { class: "t-top",
                                         span { class: "t-no", "턴 {t + 1}" }
                                         span { class: "t-who", "{who}" }
@@ -1321,9 +1463,11 @@ fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> 
                                             if review > 0 { span { class: "c review", Icon { name: "review", size: 12.0 } "{review}" } }
                                             if allowed > 0 { span { class: "c pass", Icon { name: "allow", size: 12.0 } "{allowed}" } }
                                         }
+                                        span { class: "t-caret", if opened { "접기" } else { "펼치기" } }
                                     }
                                     div { class: "t-said", title: "{said}", "{said}" }
                                 }
+                                if opened {
                                 for e in entries.iter().cloned() {
                                     match e {
                                         Entry::Call(s) => rsx! {
@@ -1353,7 +1497,9 @@ fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> 
                                         }
                                     }
                                 }
+                                }
                             }
+                        }
                         }
                     }
                 }
@@ -1363,6 +1509,13 @@ fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> 
             }
         }
     }
+}
+
+/// A row of the list: a turn (and whether it shows its Calls), or plain turns in a row.
+#[derive(Clone, PartialEq)]
+enum Row {
+    Turn(usize, Vec<Entry>, bool),
+    Plain(Vec<(usize, Vec<Entry>)>),
 }
 
 /// One Call in a group, on one line: its verdict, its name, what it acted on, when. The one
@@ -1530,7 +1683,8 @@ fn RoutePanel(
                 "file" => "바뀌는 줄을 보고, 요청하지 않은 변경인지 물었습니다".to_owned(),
                 "purpose" => "이 호출의 목적이 사용자의 요청에 반하는지 물었습니다".to_owned(),
                 "clear" => "의도에서 벗어날 의심이 낮아 더 묻지 않고 허용했습니다".to_owned(),
-                other => other.to_owned(),
+                // A check this viewer does not know says nothing it could explain.
+                _ => return None,
             })
         }),
         _ => None,
@@ -1764,6 +1918,31 @@ mod tests {
         );
         // The whole width in view.
         assert!(c.x >= 0.0 && c.x + m.width * c.zoom <= w + 0.5);
+    }
+
+    // Picking a turn picks a Call in that turn, its gravest: so the map's window and the list
+    // follow whichever turn the minimap or a fold picked.
+    #[test]
+    fn a_turn_is_picked_by_its_gravest_call() {
+        let demo = crate::demo::Demo::parse(
+            &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mock/long.json"))
+                .unwrap(),
+        );
+        let model = crate::layout::Model::build(
+            &serde_json::from_value(demo.graph("c4000a1b-4444-4b5c-8d6e-000000000004").unwrap())
+                .unwrap(),
+        );
+        let m = Metro::build(&model);
+        let marks = turn_marks(&m);
+        assert_eq!(marks.len(), 40);
+        assert_eq!(marks.iter().filter(|&&w| w == 2).count(), 1);
+        for (t, &mark) in marks.iter().enumerate() {
+            let q = turn_pick(&m, t).expect("a Call");
+            assert_eq!(turn_at_call(&m, Some(q)), t, "turn {t}");
+            if mark == 2 {
+                assert_eq!(m.station(q).unwrap().decision.as_deref(), Some("DENY"));
+            }
+        }
     }
 
     #[test]

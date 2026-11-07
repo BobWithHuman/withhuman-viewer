@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 
-use super::metro::{Camera, Side, StationMark, map_names, name_width, place_sub, turn_colour};
+use super::metro::{
+    Camera, Side, StationMark, map_names, name_width, place_sub, turn_at_call, turn_colour,
+    turn_marks, turn_pick,
+};
 use super::{AppState, Selection};
 use crate::layout::clip;
 use crate::metro::{Ask, Metro, Station, place_label};
@@ -342,6 +345,69 @@ pub(super) fn NetLegend(net: Arc<Net>, calls: Arc<Metro>) -> Element {
                 span { class: "lg",
                     svg { width: "20", height: "14", view_box: "-10 -7 20 14", path { class: "lg-glow", d: "M-8,0 H8" } }
                     "고른 행동까지의 길"
+                }
+            }
+        }
+    }
+}
+
+/// The turns the map leaves out, folded over and under it, and every turn of the session down
+/// the right edge as a bar in its verdict's colour: red where something was denied, amber where
+/// held, grey otherwise. A fold or a bar picks its turn.
+#[component]
+pub(super) fn TurnRail(net: Arc<Net>, calls: Arc<Metro>, call: Option<i64>) -> Element {
+    let mut state = use_context::<AppState>();
+    let (first, last) = net.turns;
+    let count = net.turn_count;
+    let before = first;
+    let after = count.saturating_sub(last + 1);
+    let here = turn_at_call(&calls, call);
+    let marks = turn_marks(&calls);
+    let pick_before = (before > 0).then(|| turn_pick(&calls, first - 1)).flatten();
+    let pick_after = (after > 0).then(|| turn_pick(&calls, last + 1)).flatten();
+    let bars: Vec<(usize, &'static str, bool, bool, Option<i64>)> = marks
+        .iter()
+        .enumerate()
+        .map(|(t, &w)| {
+            let tone = match w {
+                2 => "deny",
+                1 => "review",
+                _ => "plain",
+            };
+            (
+                t,
+                tone,
+                t >= first && t <= last,
+                t == here,
+                turn_pick(&calls, t),
+            )
+        })
+        .collect();
+    rsx! {
+        if before > 0 {
+            button {
+                class: "turn-fold up",
+                onmousedown: move |e| e.stop_propagation(),
+                onclick: move |_| if let Some(q) = pick_before { state.selected.set(Selection::Node(q)); },
+                "이전 {before}개 턴 ▲"
+            }
+        }
+        if after > 0 {
+            button {
+                class: "turn-fold down",
+                onmousedown: move |e| e.stop_propagation(),
+                onclick: move |_| if let Some(q) = pick_after { state.selected.set(Selection::Node(q)); },
+                "다음 {after}개 턴 ▼"
+            }
+        }
+        if count > 1 {
+            div { class: "turn-rail", onmousedown: move |e| e.stop_propagation(),
+                for (t, tone, shown, on, pick) in bars {
+                    button {
+                        class: format!("tr-bar {tone}{}{}", if shown { " shown" } else { "" }, if on { " on" } else { "" }),
+                        title: "턴 {t + 1}",
+                        onclick: move |_| if let Some(q) = pick { state.selected.set(Selection::Node(q)); },
+                    }
                 }
             }
         }

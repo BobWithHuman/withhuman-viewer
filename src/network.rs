@@ -65,6 +65,9 @@ pub struct Net {
     pub width: f64,
     pub top: f64,
     pub bottom: f64,
+    /// The turns drawn, first and last, and how many the session has.
+    pub turns: (usize, usize),
+    pub turn_count: usize,
     /// Each Call's station.
     station_of: HashMap<i64, usize>,
     /// Each Call's line; none when the engine traced it to nothing.
@@ -74,13 +77,26 @@ pub struct Net {
 }
 
 impl Net {
+    #[cfg(test)]
     pub fn build(model: &Model) -> Self {
+        Self::window(model, None)
+    }
+
+    /// The map of the turns `first..=last` alone, so a session of hundreds of turns draws as
+    /// few as one. A words' line whose words were read before the window starts from a
+    /// terminal of its own.
+    pub fn window(model: &Model, turns: Option<(usize, usize)>) -> Self {
         let all: HashSet<i64> = model.nodes.iter().map(|n| n.seq()).collect();
         let m = Metro::build_with(model, &all);
-        let mut order: Vec<&Station> = m.stations.iter().collect();
+        let in_window = |s: &Station| {
+            let t = m.asks.iter().rposition(|a| a.x <= s.x).unwrap_or(0);
+            turns.is_none_or(|(a, b)| t >= a && t <= b)
+        };
+        let mut order: Vec<&Station> = m.stations.iter().filter(|s| in_window(s)).collect();
         order.sort_by(|a, b| a.x.total_cmp(&b.x));
         let turn_of = |s: &Station| m.asks.iter().rposition(|a| a.x <= s.x).unwrap_or(0);
         let through = |s: &Station| -> Option<Through> {
+            // Words read before the window are still their line: it starts from a terminal.
             match &s.source {
                 Some(src) if src.by != s.seq && m.station(src.by).is_some() => {
                     Some(Through::Told(src.by))
@@ -244,7 +260,10 @@ impl Net {
         } else {
             lost_row.max(1)
         };
+        let turn_count = m.asks.len().max(1);
         Net {
+            turns: turns.unwrap_or((0, turn_count - 1)),
+            turn_count,
             stations,
             lines,
             width,
@@ -421,6 +440,34 @@ mod tests {
         assert_eq!(
             n.stations.iter().map(|s| s.calls.len()).sum::<usize>(),
             calls
+        );
+    }
+
+    // A window of turns draws those turns alone; words read before it still make their line.
+    #[test]
+    fn a_window_draws_only_its_turns() {
+        let demo = crate::demo::Demo::parse(
+            &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mock/long.json"))
+                .unwrap(),
+        );
+        let id = "c4000a1b-4444-4b5c-8d6e-000000000004";
+        let model = Model::build(&serde_json::from_value(demo.graph(id).unwrap()).unwrap());
+        let whole = Net::build(&model);
+        let part = Net::window(&model, Some((5, 7)));
+        let turns = |n: &Net| {
+            n.lines
+                .iter()
+                .filter(|l| matches!(l.through, Through::Turn(_)))
+                .count()
+        };
+        assert!(turns(&whole) >= 40);
+        assert_eq!(turns(&part), 3);
+        assert!(part.stations.len() < whole.stations.len());
+        // Turn 7's fix followed turn 5's test output, read before the window: still its line.
+        assert!(
+            part.lines
+                .iter()
+                .any(|l| matches!(l.through, Through::Told(_)))
         );
     }
 

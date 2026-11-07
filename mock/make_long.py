@@ -362,9 +362,37 @@ def very_long():
     return s
 
 
+def many_turns():
+    """Forty turns of a day's work in one session, most of them plain; a few hold a review or a
+    deny, and one turn's test output tells a fix two turns later."""
+    s = Session("c4000a1b-4444-4b5c-8d6e-000000000004", 1793882000000, 4)
+    asks = ["환불 모듈 테스트 돌려줘", "실패한 테스트 고쳐줘", "로그 형식 바꿔줘", "주석 정리해줘",
+            "타입 힌트 추가해줘", "README 업데이트해줘", "린트 오류 고쳐줘", "의존성 확인해줘"]
+    kept = None
+    for t in range(40):
+        s.request(asks[t % len(asks)] + f" ({t + 1})", asks[t % len(asks)])
+        s.say("진행하겠습니다.")
+        for f in s.rng.sample(FILES, 3):
+            read(s, f)
+        if t % 5 == 1:
+            edit(s, s.rng.choice(FILES))
+        _, out = test(s, ok=t % 9 != 4)
+        if t % 9 == 4:
+            kept = out
+        if t % 9 == 6 and kept is not None:
+            edit(s, "src/refund.py", cause=(kept, 1, 0.71))
+        if t in (12, 27):
+            s.call("Bash", "pip install --upgrade pytest", {"command": "pip install --upgrade pytest"}, "ok",
+                   decision="REVIEW", reason="패키지 설치는 사용자 확인이 필요합니다.")
+        if t == 33:
+            s.call("Bash", "git push --force origin main", {"command": "git push --force origin main"}, "",
+                   decision="DENY", irreversible=0.9, reason="되돌릴 수 없는 강제 푸시라 차단했습니다.")
+    return s
+
+
 def main():
     fixture = json.loads((HERE / "fixture.json").read_text())
-    for build in (long_normal, long_attack, very_long):
+    for build in (long_normal, long_attack, very_long, many_turns):
         session, graph, details, calls = build().export()
         fixture["sessions"].insert(0, session)
         fixture["graphs"][session["id"]] = graph

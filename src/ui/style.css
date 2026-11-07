@@ -1481,3 +1481,29 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .map-legend .lg-tag { padding: 0 5px; border-radius: 4px; color: #fff; font-size: 10px; font-weight: 800; line-height: 16px; flex: none; }
 .map-legend .lg-said { overflow: hidden; text-overflow: ellipsis; max-width: 220px; font-weight: 600; }
 .routes .metro .track.told-line { stroke-width: calc(4.6px * var(--k, 1)); fill: none; stroke-linejoin: round; stroke-linecap: round; }
+
+/* The turns left out of the map, and every turn down the right edge. */
+.routes .metro .turn-fold { position: absolute; left: 50%; z-index: 4; transform: translateX(-50%); padding: 5px 12px; border: 1px solid #e2e4e8;
+  border-radius: 14px; background: rgb(255 255 255 / .95); color: #4a4f57; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 1px 4px rgb(20 24 30 / .08); }
+.routes .metro .turn-fold:hover { background: #f4f5f7; }
+.routes .metro .turn-fold.up { top: 14px; }
+.routes .metro .turn-fold.down { bottom: 16px; }
+.routes .metro .turn-rail { position: absolute; right: 74px; top: 50%; z-index: 4; transform: translateY(-50%); display: flex; flex-direction: column; gap: 2px;
+  width: 16px; max-height: 60%; padding: 5px 3px; border-radius: 6px; background: rgb(255 255 255 / .92); box-shadow: 0 0 0 1px #e8e9ec; }
+.routes .metro .tr-bar { flex: 1 1 0; min-height: 2px; max-height: 8px; width: 100%; padding: 0; border: 0; border-radius: 1px; background: #d3d6db; cursor: pointer; }
+.routes .metro .tr-bar.review { background: #e0a100; }
+.routes .metro .tr-bar.deny { background: var(--sig-red); }
+.routes .metro .tr-bar.shown { box-shadow: 0 0 0 1px #2b2f3a; }
+.routes .metro .tr-bar.on { transform: scaleX(1.5); }
+.routes .metro .tr-bar:hover { filter: brightness(.85); }
+
+/* The list folded by turn: a head each, the Calls of the turns worth them. */
+.route-list .turn.shut { padding-bottom: 2px; }
+.route-list .turn .t-head { cursor: pointer; }
+.route-list .turn .t-caret { margin-left: 6px; font-size: 11px; font-weight: 600; color: #9aa0a8; flex: none; }
+.route-list .turn.here > .t-head { background: color-mix(in srgb, var(--turn) 8%, transparent); }
+.route-list .turn.shut .t-said { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-list .turn.plain-run { --turn: #c9ccd1; cursor: pointer; }
+.route-list .turn.plain-run .t-no { color: #7b828c; }
+.route-list .turn.plain-run .t-said { color: #9aa0a8; font-size: 12px; }
+.route-list .turn.plain-run:hover .t-head { background: #f6f7f8; }
