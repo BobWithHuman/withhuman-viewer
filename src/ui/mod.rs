@@ -4,6 +4,7 @@
 mod compare;
 mod inspector;
 mod metro;
+mod net;
 mod settings;
 // The session list, kept while sessions are picked in the route list's region.
 #[allow(dead_code)]

@@ -30,9 +30,6 @@ pub const STEP: f64 = 120.0;
 /// Where the main line runs, and the space to each lane below it.
 pub const MAIN_Y: f64 = 200.0;
 pub const LANE_GAP: f64 = 120.0;
-/// The space between a branch's stations on the map of places, where branches run across the
-/// main line.
-pub const VSTEP: f64 = 70.0;
 /// The first terminus, and the room before the first station.
 pub const LEFT: f64 = 30.0;
 pub const FIRST: f64 = 40.0;
@@ -285,13 +282,6 @@ pub struct Leg {
     pub alight: i64,
 }
 
-/// What a route lights: its stations and lines, back to the request.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Route {
-    pub stations: HashSet<i64>,
-    pub lines: HashSet<usize>,
-}
-
 /// Calls by verdict, as the route list's tabs count them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Verdicts {
@@ -314,33 +304,6 @@ pub fn place_key(s: &Station) -> String {
     }
 }
 
-/// How wide a name is drawn, at the map's 11.5px.
-fn label_width(text: &str) -> f64 {
-    text.chars()
-        .map(|c| if c.is_ascii() { 7.0 } else { 12.5 })
-        .sum::<f64>()
-        + 10.0
-}
-
-/// A station's name for a group of Calls: the places they went to in the order they went,
-/// two of them and how many more.
-fn group_label(group: &[&Station]) -> String {
-    let mut names: Vec<String> = Vec::new();
-    let mut sorted: Vec<&&Station> = group.iter().collect();
-    sorted.sort_by(|a, b| a.x.total_cmp(&b.x));
-    for s in sorted {
-        let n = place_label(s);
-        if !n.is_empty() && !names.contains(&n) {
-            names.push(n);
-        }
-    }
-    match names.len() {
-        0 => String::new(),
-        1 | 2 => names.join(" · "),
-        n => format!("{} · {} 외 {}", names[0], names[1], n - 2),
-    }
-}
-
 /// A place's name on the map: the file or page, the command, the search.
 pub fn place_label(s: &Station) -> String {
     if let Some(l) = &s.label {
@@ -359,13 +322,15 @@ pub fn place_label(s: &Station) -> String {
             let c = command_name(&s.what);
             if c.is_empty() {
                 s.tool.clone()
+            } else if !c.contains(' ') && c.contains('.') {
+                // A script run is told apart from the script read.
+                format!("{} 실행", short(&c, 16))
             } else {
                 short(&c, 20)
             }
         }
         Action::Search => format!("{} 검색", s.tool),
-        // A run's report coming back is where its line ends: its terminus says so.
-        Action::Delegate if s.tool == "SubagentHandback" => String::new(),
+        Action::Delegate if s.tool == "SubagentHandback" => "보고 받음".to_owned(),
         Action::Delegate if s.what.trim().is_empty() => "에이전트에 맡김".to_owned(),
         Action::Delegate => format!("맡김 · {}", short(&s.what, 14)),
         _ => s.tool.clone(),
@@ -1001,290 +966,6 @@ impl Metro {
         self.lines[line].badge.clone()
     }
 
-    /// The session as a metro map of places, the way a city's map is drawn: a station is a
-    /// thing the agents touched (a file, a command, a page), and a line is who moved through
-    /// them, stopping at each in the order it first went there. A Call to a file the line has
-    /// been to before is the same station again, so a station is all the Calls one line made
-    /// there, judged by the gravest of them. The main agent is the main line; each subagent run
-    /// is a branch leaving it at the station that handed the run its work. And where words in
-    /// a tool result told the agent to do what was then stopped, those Calls are a line of
-    /// their own (the words' line), leaving the station where the words were read: the change
-    /// a route finder shows as a transfer.
-    /// The session as a metro map of the engine's own steps: a station is a SubGraph (an
-    /// assistant message and the Calls that followed it, or a subagent's turn at the tools),
-    /// each agent's line runs through its steps in the order it took them, and a Call's way
-    /// there is the path the engine traced back from it, changing at the step whose result
-    /// held the words that caused it.
-    pub fn steps(model: &Model) -> Self {
-        Self::map_of(model, true)
-    }
-
-    fn map_of(model: &Model, steps: bool) -> Self {
-        let all: HashSet<i64> = model.nodes.iter().map(|n| n.seq()).collect();
-        let calls = Self::build_with(model, &all);
-        let mut order: Vec<&Station> = calls.stations.iter().collect();
-        order.sort_by(|a, b| a.x.total_cmp(&b.x));
-        // The results whose words told the agent to do something that was stopped.
-        let mut caused: HashMap<i64, Vec<&Station>> = HashMap::new();
-        for s in &order {
-            if let Some(src) = &s.source
-                && src.by != s.seq
-            {
-                caused.entry(src.by).or_default().push(s);
-            }
-        }
-        // On the map of steps the words' line is the route itself, not a line of its own.
-        let told: HashSet<i64> = caused
-            .iter()
-            .filter(|(_, v)| !steps && v.iter().any(|s| s.stopped()))
-            .map(|(b, _)| *b)
-            .collect();
-        // The line a Call rides on this map: the words' line it followed, else its agent's.
-        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-        enum Ride {
-            Agent(usize),
-            Told(i64),
-        }
-        let ride = |s: &Station| match &s.source {
-            Some(src) if told.contains(&src.by) && src.by != s.seq => Ride::Told(src.by),
-            _ => Ride::Agent(s.line),
-        };
-        // Each line's stations, as (place, its Calls) in the order the line first went there.
-        let mut rides: Vec<Ride> = Vec::new();
-        let mut stops: HashMap<Ride, Vec<(String, Vec<&Station>)>> = HashMap::new();
-        for s in &order {
-            let r = ride(s);
-            if !rides.contains(&r) {
-                rides.push(r);
-            }
-            let list = stops.entry(r).or_default();
-            let key = if steps {
-                format!("g:{}", s.subgraph.unwrap_or(-s.seq))
-            } else {
-                place_key(s)
-            };
-            match list.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, v)) => v.push(s),
-                None => list.push((key, vec![*s])),
-            }
-        }
-        rides.sort_by_key(|r| match r {
-            Ride::Agent(0) => (0, 0),
-            Ride::Agent(i) => (1, *i as i64),
-            Ride::Told(b) => (2, *b),
-        });
-        let mut lines: Vec<Line> = Vec::new();
-        let mut stations: Vec<Station> = Vec::new();
-        let mut at: HashMap<i64, usize> = HashMap::new();
-        let station = |line: usize, x: f64, group: &[&Station]| -> Station {
-            let grave = |s: &&&Station| match s.decision.as_deref() {
-                Some("DENY") => 3,
-                Some("REVIEW") => 2,
-                None => 1,
-                _ => 0,
-            };
-            let rep: &Station = group
-                .iter()
-                .max_by(|a, b| grave(a).cmp(&grave(b)).then(a.x.total_cmp(&b.x)))
-                .unwrap();
-            Station {
-                x,
-                y: MAIN_Y,
-                line,
-                members: group.iter().map(|s| s.seq).collect(),
-                irreversible: group.iter().any(|s| s.irreversible),
-                failed: group.iter().any(|s| s.failed),
-                unsourced: group.iter().any(|s| s.unsourced),
-                loose: group.iter().any(|s| s.loose),
-                at: group.iter().filter_map(|s| s.at).max(),
-                label: Some(group_label(group)),
-                ..rep.clone()
-            }
-        };
-        let push = |st: Station, stations: &mut Vec<Station>, at: &mut HashMap<i64, usize>| {
-            let i = stations.len();
-            for &m in &st.members {
-                at.insert(m, i);
-            }
-            stations.push(st);
-            i
-        };
-        // The main line: every place the main agent went, a column apart.
-        let main = &calls.lines[0];
-        lines.push(Line {
-            x0: LEFT,
-            x1: LEFT,
-            stations: Vec::new(),
-            hot: false,
-            ..main.clone()
-        });
-        // Each place on the main line: its station, and every Call any line made there.
-        let mut main_at: HashMap<String, (usize, Vec<&Station>)> = HashMap::new();
-        if let Some(list) = stops.get(&Ride::Agent(0)) {
-            // A column apart at least, and further where two names would meet, as a metro map
-            // spaces its stations for their names.
-            let mut x = LEFT + FIRST;
-            let mut prev_half = 0.0;
-            for (k, (key, group)) in list.iter().enumerate() {
-                let half = label_width(&group_label(group)) / 2.0;
-                if k > 0 {
-                    x += STEP.max(prev_half + half + 28.0);
-                }
-                prev_half = half;
-                let st = station(0, x, group);
-                lines[0].stations.push(st.seq);
-                let i = push(st, &mut stations, &mut at);
-                main_at.insert(key.clone(), (i, group.clone()));
-            }
-        }
-        // Branches and the words' lines, each out from its junction on the main line, on the
-        // first lane free there.
-        for r in rides.iter().copied().filter(|r| *r != Ride::Agent(0)) {
-            let Some(list) = stops.get(&r) else { continue };
-            let junction = match r {
-                Ride::Agent(i) => calls
-                    .delegated_at(i)
-                    .and_then(|d| at.get(&d.seq))
-                    .map(|&j| stations[j].x)
-                    .or_else(|| {
-                        // Else the main line's station last gone to before the run began.
-                        let first = list.first()?.1.first()?.x;
-                        order
-                            .iter()
-                            .filter(|s| s.line == 0 && s.x < first)
-                            .filter_map(|s| at.get(&s.seq))
-                            .map(|&j| stations[j].x)
-                            .next_back()
-                    }),
-                Ride::Told(b) => at.get(&b).map(|&j| stations[j].x),
-            }
-            .unwrap_or(LEFT + FIRST);
-            // The places it shares with the main line are the main line's own stations: it
-            // runs beside the main line through them, as two lines share a stretch of track,
-            // and leaves it at right angles for the places only it went to, down and up by
-            // turns.
-            let (shared, own): (Vec<_>, Vec<_>) =
-                list.iter().partition(|(key, _)| main_at.contains_key(key));
-            let turn_no = lines.len() - 1;
-            let sign = if turn_no.is_multiple_of(2) { 1.0 } else { -1.0 };
-            // It crosses the main line once, at its junction: what it shares with the main line
-            // shows at the main line's own stations, as its dot in their transfer pills.
-            let off = 0.0;
-            // Out at 45° from the junction, then straight on, to the right and the left by
-            // turns so neighbours spread apart.
-            let lean = if (turn_no / 2).is_multiple_of(2) {
-                1.0
-            } else {
-                -1.0
-            };
-            let index = lines.len();
-            let (name, badge, agent_id) = match r {
-                Ride::Agent(i) => (
-                    calls.lines[i].name.clone(),
-                    calls.lines[i].badge.clone(),
-                    calls.lines[i].agent_id.clone(),
-                ),
-                Ride::Told(b) => {
-                    let by = calls.station(b).map(|s| s.cause_name()).unwrap_or_default();
-                    (format!("{by}에 적힌 글"), "글".to_owned(), None)
-                }
-            };
-            let mut line = Line {
-                kind: LineKind::Branch,
-                y: MAIN_Y + sign * VSTEP * (own.len() as f64 + 0.5),
-                agent_id,
-                x0: junction,
-                x1: junction,
-                stations: Vec::new(),
-                hot: false,
-                name,
-                badge,
-                off,
-                shares: Vec::new(),
-            };
-            for (key, group) in &shared {
-                let entry = main_at.get_mut(key).expect("shared");
-                entry.1.extend(group.iter().copied());
-                line.shares.push(stations[entry.0].seq);
-                line.hot |= group.iter().any(|s| s.stopped());
-            }
-            for (k, (_, group)) in own.iter().enumerate() {
-                let mut st = station(index, junction + lean * VSTEP, group);
-                st.y = MAIN_Y + sign * VSTEP * (k + 1) as f64;
-                line.hot |= st.stopped();
-                line.stations.push(st.seq);
-                push(st, &mut stations, &mut at);
-            }
-            lines.push(line);
-        }
-        // The main line's stations again, now with every line's Calls at them.
-        for (i, group) in main_at.into_values() {
-            let (x, seq) = (stations[i].x, stations[i].seq);
-            let mut st = station(0, x, &group);
-            st.seq = seq;
-            for &m in &st.members {
-                at.insert(m, i);
-            }
-            stations[i] = st;
-        }
-        lines[0].hot = stations.iter().any(|s| s.line == 0 && s.stopped());
-        // Each turn where the main line first went somewhere new in it: just before the first
-        // station first gone to in that turn; a turn that went nowhere new sits just after the
-        // one before.
-        let turn_of = |x: f64| calls.asks.iter().rposition(|a| a.x <= x).unwrap_or(0);
-        let first_turn = |st: &Station| {
-            let x = st
-                .members
-                .iter()
-                .filter_map(|m| calls.station(*m))
-                .map(|c| c.x)
-                .fold(f64::MAX, f64::min);
-            turn_of(x)
-        };
-        let mut asks = calls.asks.clone();
-        let mut prev = LEFT;
-        for (n, a) in asks.iter_mut().enumerate() {
-            if n == 0 {
-                a.x = LEFT;
-                continue;
-            }
-            let x = stations
-                .iter()
-                .filter(|st| st.line == 0 && first_turn(st) == n)
-                .map(|st| st.x)
-                .fold(f64::MAX, f64::min);
-            a.x = if x < f64::MAX {
-                (x - STEP * 0.5).max(prev + 1.0)
-            } else {
-                prev + 1.0
-            };
-            prev = a.x;
-        }
-        lines[0].x1 = stations
-            .iter()
-            .filter(|s| s.line == 0)
-            .map(|s| s.x)
-            .fold(LEFT, f64::max);
-        let right = stations
-            .iter()
-            .map(|s| s.x)
-            .chain(lines.iter().map(|l| l.x1))
-            .fold(LEFT + FIRST, f64::max);
-        let bottom = lines.iter().map(|l| l.y).fold(MAIN_Y, f64::max);
-        Metro {
-            lines,
-            stations,
-            asks,
-            bands: Vec::new(),
-            sections: Vec::new(),
-            capsules: Vec::new(),
-            last_word: calls.last_word.clone(),
-            width: right + 240.0,
-            height: bottom + 110.0,
-            at,
-        }
-    }
-
     /// Stations whose name or target holds `query`, for the destination search.
     pub fn find(&self, query: &str) -> Vec<&Station> {
         let q = query.trim().to_lowercase();
@@ -1338,76 +1019,6 @@ impl Metro {
     /// The station a Call is drawn at: its own, or the folded one it is part of.
     pub fn station(&self, seq: i64) -> Option<&Station> {
         self.at.get(&seq).map(|&i| &self.stations[i])
-    }
-
-    /// The stations whose results caused a later Call: the interchanges.
-    pub fn interchanges(&self) -> HashSet<i64> {
-        self.stations
-            .iter()
-            .filter_map(|s| s.source.as_ref())
-            .filter_map(|src| self.station(src.by).map(|b| b.seq))
-            .collect()
-    }
-
-    /// Where the main line ends: past its last station or prompt.
-    pub fn main_end(&self) -> f64 {
-        self.stations
-            .iter()
-            .map(|s| s.x)
-            .chain(self.asks.iter().map(|a| a.x))
-            .chain(self.lines.iter().skip(1).map(|l| l.x1))
-            .fold(LEFT + FIRST, f64::max)
-            + STEP * 0.5
-    }
-
-    /// The main line in turns: from each request to the next, and who wrote that request.
-    #[cfg(test)]
-    pub fn main_segments(&self) -> Vec<(f64, f64, Option<String>)> {
-        let end = self.main_end();
-        self.asks
-            .iter()
-            .enumerate()
-            .map(|(i, a)| {
-                let to = self.asks.get(i + 1).map_or(end, |n| n.x);
-                (a.x, to, a.agent.clone())
-            })
-            .collect()
-    }
-
-    /// The main line in stretches, and whether the main agent rode it through each: solid
-    /// between its own stops, faint where a subagent was working in between.
-    pub fn main_runs(&self) -> Vec<(f64, f64, bool, Option<String>)> {
-        let mut points: Vec<f64> = self.asks.iter().map(|a| a.x).collect();
-        points.extend(self.stations.iter().filter(|s| s.line == 0).map(|s| s.x));
-        for l in self.lines.iter().skip(1) {
-            points.extend([l.x0, l.x1]);
-        }
-        points.sort_by(f64::total_cmp);
-        points.dedup();
-        let away = |a: f64, b: f64| {
-            self.lines
-                .iter()
-                .skip(1)
-                .any(|l| l.x0 <= a + 0.5 && l.x1 >= b - 0.5)
-        };
-        let mut out = Vec::new();
-        for w in points.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            out.push((a, b, !away(a, b), self.turn_agent(a)));
-        }
-        if let Some(&last) = points.last() {
-            out.push((last, self.main_end(), true, self.turn_agent(last)));
-        }
-        out
-    }
-
-    /// Who wrote the request a main-line station's turn answers: none for a person.
-    pub fn turn_agent(&self, x: f64) -> Option<String> {
-        self.asks
-            .iter()
-            .rev()
-            .find(|a| a.x <= x)
-            .and_then(|a| a.agent.clone())
     }
 
     /// The Calls on the engine's path to a Call: those in the subgraphs its trace names.
@@ -1504,49 +1115,6 @@ impl Metro {
         }
         Some(legs)
     }
-
-    /// A Call's way back to the request, as the engine found it: its station, the Calls on its
-    /// path, the interchange its cause link leaves, and the lines they ride.
-    pub fn route(&self, seq: i64) -> Route {
-        let mut route = Route::default();
-        let Some(legs) = self.journey(seq) else {
-            return route;
-        };
-        for leg in &legs {
-            route.lines.insert(leg.line);
-            route.stations.insert(leg.alight);
-            route.stations.extend(leg.passed.iter().copied());
-            if let Board::Station(b) = leg.board {
-                route.stations.insert(b);
-            }
-        }
-        if let Some(dest) = self.station(seq) {
-            route.stations.extend(self.on_path(dest));
-        }
-        route
-    }
-
-    /// Where a station is drawn across from the main line.
-    pub fn drawn_y(&self, s: &Station) -> f64 {
-        s.y
-    }
-
-    /// The corners of a branch's spur on the map of places: from where it leaves the main
-    /// line (or the stretch it runs beside it) out through its own stations, nearest first,
-    /// to a terminus half a station past the last.
-    pub fn branch_points(&self, index: usize) -> Vec<(f64, f64)> {
-        let l = &self.lines[index];
-        let mut on: Vec<&Station> = self.stations.iter().filter(|s| s.line == index).collect();
-        on.sort_by(|a, b| (a.y - MAIN_Y).abs().total_cmp(&(b.y - MAIN_Y).abs()));
-        let mut pts = vec![(l.x1, MAIN_Y + l.off)];
-        // In at 45° to its first station, as far across as it is out.
-        pts.extend(on.iter().map(|s| (s.x, s.y)));
-        if let Some(last) = on.last() {
-            let sign = (last.y - MAIN_Y).signum();
-            pts.push((last.x, last.y + sign * VSTEP * 0.5));
-        }
-        pts
-    }
 }
 
 #[cfg(test)]
@@ -1589,8 +1157,6 @@ mod tests {
             assert_eq!(line_of(&m, seq).kind, LineKind::Main, "{seq}");
         }
         assert!(m.lines[0].hot);
-        assert!(m.interchanges().contains(&5));
-        assert!(!m.interchanges().contains(&11));
         // Columns follow the engine's order.
         let xs: Vec<f64> = [5, 7, 11, 12]
             .iter()
@@ -1614,13 +1180,6 @@ mod tests {
         assert_eq!(line_of(&m, 14).kind, LineKind::Main);
         assert!(m.station(10).unwrap().failed);
         assert!(m.station(14).unwrap().irreversible);
-        assert!(
-            m.main_runs()
-                .iter()
-                .any(|&(a, b, solid, _)| !solid && a >= explore.x0 && b <= explore.x1)
-        );
-        let corners = m.branch_points(m.station(6).unwrap().line);
-        assert_eq!(corners[0].1, MAIN_Y);
     }
 
     // Runs one after another share a lane; only overlapping runs take another.
@@ -1655,7 +1214,6 @@ mod tests {
         assert_eq!(m.badge(0), "메");
         assert_eq!(m.find("app.py")[0].seq, 12);
         assert!(m.find("  ").is_empty());
-        assert!(m.interchanges().contains(&5));
         // The way there: the request, a change at the README's result, the Edit.
         let legs = m.journey(12).unwrap();
         assert_eq!(legs.len(), 2);
@@ -1663,9 +1221,6 @@ mod tests {
         assert_eq!(legs[0].alight, 5);
         assert_eq!(legs[1].board, Board::Station(5));
         assert_eq!(legs[1].alight, 12);
-        let route = m.route(12);
-        assert!(route.stations.contains(&5) && route.stations.contains(&7));
-        assert!(!route.stations.contains(&11) && !route.stations.contains(&18));
         // A Call the request asked for is one leg; one traced to nothing starts nowhere.
         assert_eq!(m.journey(7).unwrap().len(), 1);
         let loose = metro(&session("b6380b32"));
@@ -1681,11 +1236,6 @@ mod tests {
         assert_eq!(m.asks.len(), 2);
         assert!(m.asks[0].agent.is_none());
         assert_eq!(m.asks[1].agent.as_deref(), Some("Explore"));
-        let segments = m.main_segments();
-        assert_eq!(segments.len(), 2);
-        assert!(segments[1].2.is_some());
-        assert!(m.turn_agent(m.station(21).unwrap().x).is_some());
-        assert!(m.turn_agent(m.station(4).unwrap().x).is_none());
         assert_eq!(report_of("고쳐줘"), None);
     }
 
@@ -1946,70 +1496,7 @@ mod tests {
                     .any(|s| s.folded() && s.x > issue.x && s.x < d.x)
             );
         }
-        assert!(m.interchanges().contains(&issue.seq));
         assert_eq!(issue.cause_name(), "issues/42");
-    }
-
-    // The map of steps for the recorded README session: one station a SubGraph. The README
-    // read and the test run share a step; the Write and the Edit the README's hidden comment
-    // told the agent to make (both denied) are the next step, and their way there changes at
-    // the first step, where the words were read.
-    #[test]
-    fn a_step_is_a_station_and_the_way_changes_where_the_words_were_read() {
-        let m = Metro::steps(&model(&session("fa6576f7")));
-        let main: Vec<&Station> = m.stations.iter().filter(|s| s.line == 0).collect();
-        assert_eq!(main.len(), 3, "s1, s2, s3");
-        let read = m.station(5).unwrap();
-        assert_eq!(
-            read.seq,
-            m.station(7).unwrap().seq,
-            "the README read and make test: one step"
-        );
-        let denied = m.station(11).unwrap();
-        assert_eq!(
-            denied.seq,
-            m.station(12).unwrap().seq,
-            "the Write and the Edit: one step"
-        );
-        assert_eq!(denied.decision.as_deref(), Some("DENY"));
-        let legs = m.journey(11).unwrap();
-        assert_eq!(legs.first().unwrap().board, Board::Ask(0));
-        assert_eq!(legs.last().unwrap().board, Board::Station(read.seq));
-        assert!(m.interchanges().contains(&read.seq));
-        // Every Call is at a station.
-        let calls = model(&session("fa6576f7"))
-            .nodes
-            .iter()
-            .filter(|n| n.kind == "Call")
-            .count();
-        assert_eq!(
-            m.stations.iter().map(|s| s.members.len()).sum::<usize>(),
-            calls
-        );
-    }
-
-    // A subagent's steps are a branch off the main agent's step that handed it the work.
-    #[test]
-    fn a_subagents_steps_branch_off_the_step_that_handed_it_the_work() {
-        let m = Metro::steps(&model(&session("7fcbd428")));
-        let handoff = m.station(4).unwrap();
-        assert_eq!(handoff.line, 0);
-        let branch: Vec<&Station> = m.stations.iter().filter(|s| s.line != 0).collect();
-        assert_eq!(branch.len(), 3, "the run's three steps");
-        let l = &m.lines[branch[0].line];
-        assert_eq!(l.x1, handoff.x, "it leaves at the hand-off");
-    }
-
-    // A Call the engine traced to nothing in the session sets out from nowhere.
-    #[test]
-    fn a_call_traced_to_nothing_sets_out_from_nowhere() {
-        let m = Metro::steps(&model(&session("b6380b32")));
-        let rm = m
-            .stations
-            .iter()
-            .find(|s| s.decision.as_deref() == Some("DENY"))
-            .unwrap();
-        assert_eq!(m.journey(rm.seq).unwrap()[0].board, Board::Nowhere);
     }
 
     // A long live session that grows never moves what is drawn.

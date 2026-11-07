@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 
 use super::{AppState, Load, Selection};
 use crate::layout::clip;
-use crate::metro::{Board, LineKind, MAIN_Y, Metro, Station};
+use crate::metro::{Board, LineKind, Metro, Station};
 
 const MAX_ZOOM: f64 = 2.0;
 pub(super) const MIN_ZOOM: f64 = 0.2;
@@ -23,145 +23,10 @@ pub(super) const SUMMARY_H: f64 = 130.0;
 pub(super) const LEGEND_H: f64 = 70.0;
 /// The route panel on the left of the canvas, and the room the map leaves it.
 const PANEL_ROOM: f64 = 0.0;
-/// The right end of what is drawn: the last station, line end or turn, short of the margin the
-/// map keeps for what is still to come.
-fn right(metro: &Metro) -> f64 {
-    let stations = metro.stations.iter().map(|s| s.x);
-    let lines = metro.lines.iter().map(|l| l.x1);
-    let asks = metro.asks.iter().map(|a| a.x);
-    stations
-        .chain(lines)
-        .chain(asks)
-        .chain([metro.main_end() + 40.0])
-        .fold(0.0, f64::max)
-        + 40.0
-}
 /// The room the main line's badge takes left of its first terminal.
 const BADGE_ROOM: f64 = 30.0;
 /// The width the zoom buttons take at the canvas's right edge.
 const CONTROLS: f64 = 64.0;
-/// The map under the lines, as a map app draws the land: streets everywhere, a river where
-/// one turn gives way to the next, a park around each subagent's run. Drawn from the map's
-/// own shape, so the same session always gets the same land.
-struct Land {
-    streets: Vec<String>,
-    avenues: Vec<String>,
-    rivers: Vec<String>,
-    parks: Vec<String>,
-}
-
-fn land(m: &Metro, snake: &Snake) -> Land {
-    // A small fixed scramble, so the streets wander without changing between draws.
-    let wob = |i: i64, j: i64| -> f64 {
-        let h = (i.wrapping_mul(73_856_093) ^ j.wrapping_mul(19_349_663)).rem_euclid(1000);
-        h as f64 / 1000.0 - 0.5
-    };
-    let (x0, x1) = (-2400.0, snake.right() + 2400.0);
-    let low = snake.bottom();
-    let (y0, y1) = (MAIN_Y - 1600.0, low + 1600.0);
-    let mut streets = Vec::new();
-    let mut avenues = Vec::new();
-    // Cross streets about every 160, broken into blocks: each stretch drawn or not, bending a
-    // little its own way, as a town's streets do.
-    let mut i = 0;
-    let mut x = x0;
-    while x < x1 {
-        let mut y = y0;
-        let mut k = 0;
-        while y < y1 {
-            let len = 260.0 + (wob(i, k) + 0.5) * 360.0;
-            if wob(i, k + 50) > -0.25 {
-                let dx = wob(i, k + 100) * 70.0;
-                let d = format!(
-                    "M{},{} Q{},{} {},{}",
-                    x,
-                    y,
-                    x + dx,
-                    y + len / 2.0,
-                    x + dx * 0.4,
-                    y + len
-                );
-                if i % 6 == 3 {
-                    avenues.push(d)
-                } else {
-                    streets.push(d)
-                }
-            }
-            y += len;
-            k += 1;
-        }
-        x += 160.0 + wob(i, 3) * 80.0;
-        i += 1;
-    }
-    // Long streets between the lanes and over and under them, broken the same way.
-    let mut j = 0;
-    let mut y = y0;
-    while y < y1 {
-        let mut x = x0;
-        let mut k = 0;
-        while x < x1 {
-            let len = 320.0 + (wob(k, j) + 0.5) * 520.0;
-            if wob(k + 70, j) > -0.3 {
-                let dy = wob(k + 130, j) * 60.0;
-                let d = format!(
-                    "M{},{} Q{},{} {},{}",
-                    x,
-                    y,
-                    x + len / 2.0,
-                    y + dy,
-                    x + len,
-                    y + dy * 0.3
-                );
-                if j % 4 == 1 {
-                    avenues.push(d)
-                } else {
-                    streets.push(d)
-                }
-            }
-            x += len;
-            k += 1;
-        }
-        y += 140.0 + wob(j, 8) * 50.0;
-        j += 1;
-    }
-    // A river along each turn's border, meandering.
-    let rivers = districts(m)
-        .into_iter()
-        .skip(1)
-        .enumerate()
-        .map(|(n, (bx, _))| {
-            // Across the row the turn changes in, from the row over it to the row under it.
-            let (rx, ry) = snake.at(bx, MAIN_Y);
-            let mut d = String::new();
-            let mut y = ry - snake.v * 0.5;
-            let mut k = 0;
-            while y <= ry + snake.v * 0.5 {
-                let x =
-                    rx - 6.0 + 22.0 * ((y / 150.0) + n as f64 * 1.7).sin() + wob(n as i64, k) * 8.0;
-                d.push_str(&format!("{}{x},{y} ", if k == 0 { "M" } else { "L" }));
-                y += 40.0;
-                k += 1;
-            }
-            d
-        })
-        .collect();
-    let parks = (1..m.lines.len())
-        .filter_map(|i| {
-            // Along the branch, from its first station to its last.
-            let pts = m.branch_points(i);
-            let (a, b) = (pts.get(1)?, pts.get(pts.len().checked_sub(2)?)?);
-            let ((ax, ay), (bx, by)) = (snake.at(a.0, a.1), snake.at(b.0, b.1));
-            Some(format!("M{ax},{ay} L{bx},{by}"))
-        })
-        .collect();
-    Land {
-        streets,
-        avenues,
-        rivers,
-        parks,
-    }
-}
-
 /// The scale a map app keeps in its corner, in stations: a round count whose length on
 /// screen is between 60 and 150 pixels.
 fn scale(zoom: f64) -> (usize, f64) {
@@ -173,255 +38,12 @@ fn scale(zoom: f64) -> (usize, f64) {
         .unwrap_or((100, 100.0 * step))
 }
 
-/// Each turn's stretch of the map, from a little before its request to the next turn's, the
-/// first and last running on past the map's ends.
-fn districts(m: &Metro) -> Vec<(f64, f64)> {
-    let starts: Vec<f64> = m
-        .asks
-        .iter()
-        .enumerate()
-        .map(|(n, a)| if n == 0 { -6000.0 } else { a.x - 40.0 })
-        .collect();
-    (0..starts.len())
-        .map(|n| {
-            (
-                starts[n],
-                starts.get(n + 1).copied().unwrap_or(m.width + 6000.0),
-            )
-        })
-        .collect()
-}
 /// The room on screen the map keeps over the main line for the turn band and the names, and
 /// under the lowest lane for its names: screen pixels, as those are drawn at their own size.
 pub(super) const OVER: f64 = 112.0;
 pub(super) const UNDER: f64 = 44.0;
 /// A press that moves less than this is a click, not a drag.
 pub(super) const CLICK_SLOP: f64 = 4.0;
-
-/// The main line folded to fill the canvas, as a city's metro map winds a long line across
-/// the sheet: it runs right, turns down at the edge, runs back left, turns down again. Each
-/// row is a stretch of the session in order; rows break only where no subagent's run is
-/// under way, so a run always sits in one row. What is drawn moves; what the map means (the
-/// order, the turns, the way back) does not, so everything else keeps the unfolded places.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct Snake {
-    /// Each row's stretch of the unfolded map.
-    rows: Vec<(f64, f64)>,
-    /// How wide a row is, and how far apart the rows are.
-    w: f64,
-    v: f64,
-    depth: f64,
-    above: f64,
-}
-
-impl Snake {
-    /// Folded into as many rows as make the map about as wide for its height as a `cw` × `ch`
-    /// canvas.
-    pub(super) fn new(m: &Metro, cw: f64, ch: f64) -> Self {
-        let (start, end) = (crate::metro::LEFT, m.main_end());
-        // How far the branches reach over and under the main line, terminus and badge included.
-        let offs: Vec<f64> = (1..m.lines.len())
-            .filter_map(|i| m.branch_points(i).last().map(|p| p.1 - MAIN_Y))
-            .map(|d| d + d.signum() * 40.0)
-            .collect();
-        // A row running back is the one over it turned over, so each row needs room both sides
-        // for the farthest a branch reaches either way.
-        let reach = offs.iter().map(|o| o.abs()).fold(0.0, f64::max);
-        let (depth, above) = (reach, reach);
-        let v = depth + above + 260.0;
-        let total = (end - start).max(1.0);
-        let aspect = if cw > 0.0 && ch > 0.0 {
-            (cw - CONTROLS - BADGE_ROOM - 40.0).max(300.0) / (ch - SUMMARY_H - LEGEND_H).max(200.0)
-        } else {
-            1e9
-        };
-        let ideal = ((total / (aspect * v)).sqrt().round() as usize).clamp(1, 12);
-        // Where a row may end: halfway between two of the main line's stations.
-        let mut xs: Vec<f64> = m
-            .stations
-            .iter()
-            .filter(|s| s.line == 0)
-            .map(|s| s.x)
-            .collect();
-        xs.sort_by(f64::total_cmp);
-        let breaks: Vec<f64> = xs
-            .windows(2)
-            .filter(|w| w[1] - w[0] > 1.0)
-            .map(|w| (w[0] + w[1]) / 2.0)
-            // Never where a branch comes in beside the main line or leaves it: a stretch beside
-            // it keeps beside it through a turn, but a junction stays on its row.
-            .filter(|&b| {
-                let near = |x: f64| (b - x).abs() < crate::metro::STEP * 0.75;
-                m.lines.iter().skip(1).all(|l| !near(l.x0) && !near(l.x1))
-            })
-            .collect();
-        // Rows about as long as each other: fewer rows when the only places a row may end
-        // would leave one row much longer than the rest.
-        let fold = |n: usize| {
-            let mut cuts: Vec<f64> = Vec::new();
-            for i in 1..n {
-                let target = start + total * i as f64 / n as f64;
-                let floor = cuts.last().copied().unwrap_or(start) + crate::metro::STEP;
-                if let Some(&b) = breaks
-                    .iter()
-                    .filter(|&&b| b > floor && b < end - crate::metro::STEP)
-                    .min_by(|a, b| (*a - target).abs().total_cmp(&(*b - target).abs()))
-                {
-                    cuts.push(b);
-                }
-            }
-            let mut rows = Vec::new();
-            let mut a = start;
-            for c in cuts {
-                rows.push((a, c));
-                a = c;
-            }
-            rows.push((a, end));
-            rows
-        };
-        let mut rows = fold(1);
-        for n in (2..=ideal).rev() {
-            let r = fold(n);
-            let longest = r.iter().map(|(a, b)| b - a).fold(0.0, f64::max);
-            if longest <= 1.35 * total / r.len() as f64 {
-                rows = r;
-                break;
-            }
-        }
-        let w = rows.iter().map(|(a, b)| b - a).fold(0.0, f64::max);
-        Snake {
-            rows,
-            w,
-            v,
-            depth,
-            above,
-        }
-    }
-
-    fn row_of(&self, x: f64) -> usize {
-        self.rows
-            .iter()
-            .position(|&(_, b)| x <= b + 0.01)
-            .unwrap_or(self.rows.len() - 1)
-    }
-
-    /// Where a point of the unfolded map is drawn.
-    pub(super) fn at(&self, x: f64, y: f64) -> (f64, f64) {
-        let r = self.row_of(x);
-        let u = x - self.rows[r].0;
-        let left = crate::metro::LEFT;
-        let dx = if r.is_multiple_of(2) {
-            left + u
-        } else {
-            left + self.w - u
-        };
-        // A row running back is turned over, so what was over the line on the way out is
-        // under it on the way back, and a stretch beside the line stays on its side of the turn.
-        let flip = if r.is_multiple_of(2) { 1.0 } else { -1.0 };
-        (dx, MAIN_Y + (y - MAIN_Y) * flip + r as f64 * self.v)
-    }
-
-    /// The points of a stretch `off` beside the main line from `a` to `b`, keeping beside it
-    /// through the turns between rows.
-    fn beside(&self, a: f64, b: f64, off: f64) -> Vec<(f64, f64)> {
-        let left = crate::metro::LEFT;
-        let mut pts = vec![self.at(a, MAIN_Y + off)];
-        let (ra, rb) = (self.row_of(a), self.row_of(b));
-        for r in ra..rb {
-            let flip = if r.is_multiple_of(2) { 1.0 } else { -1.0 };
-            let o = off * flip;
-            let y = MAIN_Y + r as f64 * self.v;
-            let edge = if r.is_multiple_of(2) {
-                left + self.w - o
-            } else {
-                left + o
-            };
-            pts.push((edge, y + o));
-            pts.push((edge, y + self.v - o));
-        }
-        pts.push(self.at(b, MAIN_Y + off));
-        pts
-    }
-
-    /// Whether the main line runs right to left at `x`.
-    pub(super) fn backward(&self, x: f64) -> bool {
-        self.row_of(x) % 2 == 1
-    }
-
-    /// The main line from `a` to `b`, turning down at the edges between rows.
-    pub(super) fn main_path(&self, a: f64, b: f64) -> String {
-        let left = crate::metro::LEFT;
-        let mut pts = vec![self.at(a, MAIN_Y)];
-        let (ra, rb) = (self.row_of(a), self.row_of(b));
-        for r in ra..rb {
-            let edge = if r % 2 == 0 { left + self.w } else { left };
-            let y = MAIN_Y + r as f64 * self.v;
-            pts.push((edge, y));
-            pts.push((edge, y + self.v));
-        }
-        pts.push(self.at(b, MAIN_Y));
-        crate::metro::rounded(&pts)
-    }
-
-    /// A subagent's run, its corners folded with the rest.
-    pub(super) fn branch_path(&self, m: &Metro, index: usize) -> String {
-        let l = &m.lines[index];
-        // Beside the main line through the stations it shares, then out on its own.
-        let mut pts = if l.off != 0.0 {
-            // In from the junction's side, a short way before the first shared station.
-            let lead = 24.0;
-            let mut p = vec![self.at(l.x0 - lead, MAIN_Y)];
-            p.extend(self.beside(l.x0, l.x1, l.off));
-            p
-        } else {
-            Vec::new()
-        };
-        let spur: Vec<(f64, f64)> = m
-            .branch_points(index)
-            .into_iter()
-            .map(|(x, y)| self.at(x, y))
-            .collect();
-        if spur.len() > 1 || l.off == 0.0 {
-            pts.extend(if l.off != 0.0 {
-                spur[1..].to_vec()
-            } else {
-                spur
-            });
-        } else if let Some(&(x, y)) = pts.last() {
-            // Sharing all it went to: it ends a little past the last shared station.
-            let ahead = if self.backward(l.x1) { -24.0 } else { 24.0 };
-            pts.push((x + ahead, y));
-        }
-        crate::metro::rounded(&pts)
-    }
-
-    /// Where a branch's terminus is drawn, and whether its track runs across the row there.
-    pub(super) fn terminus(&self, m: &Metro, index: usize) -> ((f64, f64), bool) {
-        let l = &m.lines[index];
-        let spur = m.branch_points(index);
-        if spur.len() > 1 || l.off == 0.0 {
-            let (x, y) = spur.last().copied().unwrap_or((l.x1, MAIN_Y));
-            (self.at(x, y), false)
-        } else {
-            let (x, y) = self.at(l.x1, MAIN_Y + l.off);
-            let ahead = if self.backward(l.x1) { -24.0 } else { 24.0 };
-            ((x + ahead, y), true)
-        }
-    }
-
-    /// The right edge of what is drawn, and the bottom.
-    pub(super) fn right(&self) -> f64 {
-        crate::metro::LEFT + self.w + 60.0
-    }
-
-    pub(super) fn top(&self) -> f64 {
-        MAIN_Y - self.above
-    }
-
-    pub(super) fn bottom(&self) -> f64 {
-        MAIN_Y + (self.rows.len() - 1) as f64 * self.v + self.depth
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Camera {
@@ -431,19 +53,9 @@ pub(super) struct Camera {
 }
 
 impl Camera {
-    /// The whole session at once, which is what the map is for, down to a zoom labels still
-    /// read at. A map longer than that opens at that zoom on the first stopped station, or on
-    /// the start when nothing stopped.
-    fn first_view(metro: &Metro, width: f64, height: f64) -> Self {
-        // The map is the session at a glance: all of it, whatever is picked.
-        Camera::fit(metro, width, height)
-    }
-
-    /// The whole map, centred in the room between the summary and the legend: what is drawn,
-    /// not the empty margin around it.
-    fn fit(metro: &Metro, width: f64, height: f64) -> Self {
-        let snake = Snake::new(metro, width, height);
-        Camera::fit_box(snake.right(), snake.top(), snake.bottom(), width, height)
+    /// The whole network, centred in the room between the summary and the legend.
+    fn fit_net(net: &crate::network::Net, width: f64, height: f64) -> Self {
+        Camera::fit_box(net.width, net.top, net.bottom, width, height)
     }
 
     /// A map `map_w` wide whose lines run from `top` to `bottom`, centred in the room between
@@ -512,9 +124,9 @@ pub fn MetroMap() -> Element {
         Load::Ready(model) => Some(Arc::new(Metro::build_with(model, &open.read()))),
         _ => None,
     });
-    // The map draws the session's places: each thing touched a station, each agent a line.
-    let places = use_memo(move || match &*state.graph.read() {
-        Load::Ready(model) => Some(Arc::new(Metro::steps(model))),
+    // The map draws the places the agents went to on the lines of what told them to.
+    let net = use_memo(move || match &*state.graph.read() {
+        Load::Ready(model) => Some(Arc::new(crate::network::Net::build(model))),
         _ => None,
     });
     use_effect(move || {
@@ -541,7 +153,7 @@ pub fn MetroMap() -> Element {
     let mut dragged = use_signal(|| false);
     let hovered = use_signal(|| None::<i64>);
     // 지도 or 노선도: the land under the lines, or the lines alone.
-    let mut plain = use_signal(|| true);
+    let plain = use_signal(|| true);
 
     let measure = move || async move {
         let el = mounted.peek().clone();
@@ -573,11 +185,11 @@ pub fn MetroMap() -> Element {
             state.selected.set(Selection::Node(seq));
         }
         if fresh || camera.peek().is_none() {
-            let Some(p) = places() else { return };
+            let Some(p) = net() else { return };
             spawn(async move {
                 measure().await;
                 let (w, h) = *size.peek();
-                camera.set(Some(Camera::first_view(&p, w, h)));
+                camera.set(Some(Camera::fit_net(&p, w, h)));
             });
         }
     });
@@ -586,14 +198,14 @@ pub fn MetroMap() -> Element {
     let framed = use_signal(|| None::<i64>);
     use_effect(move || {
         let selected = (state.selected)();
-        let Some(m) = places.peek().clone() else {
+        let (Some(m), Some(cm)) = (net.peek().clone(), metro.peek().clone()) else {
             return;
         };
         let dest = match selected {
-            Selection::Node(seq) => m.station(seq).map(|s| s.seq),
+            Selection::Node(seq) => m.station_of(seq).map(|_| seq),
             Selection::None => None,
         }
-        .or_else(|| m.default_dest());
+        .or_else(|| cm.default_dest());
         let mut framed = framed;
         if dest.is_none() || *framed.peek() == dest {
             return;
@@ -604,15 +216,11 @@ pub fn MetroMap() -> Element {
             measure().await;
             let (w, h) = *size.peek();
             let current = *camera.peek();
-            if let (Some(c), Some(st)) = (current, m.station(dest))
+            if let (Some(c), Some(st)) = (current, m.station_of(dest))
                 && w > 0.0
-                && {
-                    let (x, y) = Snake::new(&m, w, h).at(st.x, m.drawn_y(st));
-                    !c.shows(x, y, w, h)
-                }
+                && !c.shows(st.x, st.y, w, h)
             {
-                let (x, y) = Snake::new(&m, w, h).at(st.x, m.drawn_y(st));
-                camera.set(Some(c.center_on(x, y, w, h)));
+                camera.set(Some(c.center_on(st.x, st.y, w, h)));
             }
         });
     });
@@ -622,25 +230,25 @@ pub fn MetroMap() -> Element {
         if (state.fit)() == 0 {
             return;
         }
-        let Some(m) = places.peek().clone() else {
+        let Some(m) = net.peek().clone() else {
             return;
         };
         spawn(async move {
             measure().await;
             let (w, h) = *size.peek();
-            camera.set(Some(Camera::fit(&m, w, h)));
+            camera.set(Some(Camera::fit_net(&m, w, h)));
         });
     });
 
     // Focus waits for the open session's own map.
     use_effect(move || {
         let Some(seq) = (state.focus)() else { return };
-        let Some(m) = places() else { return };
+        let Some(m) = net() else { return };
         if *state.graph_of.read() != *state.current.read() {
             return;
         }
         state.focus.set(None);
-        let Some(station) = m.station(seq).cloned() else {
+        let Some(station) = m.station_of(seq).cloned() else {
             return;
         };
         spawn(async move {
@@ -648,13 +256,12 @@ pub fn MetroMap() -> Element {
             let (w, h) = *size.peek();
             let current = *camera.peek();
             if let Some(c) = current {
-                let (x, y) = Snake::new(&m, w, h).at(station.x, m.drawn_y(&station));
-                camera.set(Some(c.center_on(x, y, w, h)));
+                camera.set(Some(c.center_on(station.x, station.y, w, h)));
             }
         });
     });
 
-    let (Some(cm), Some(m)) = (metro(), places()) else {
+    let (Some(cm), Some(nm)) = (metro(), net()) else {
         return rsx! { div { class: "metro", onmounted: move |e| mounted.set(Some(e.data())) } };
     };
     let cam = camera().unwrap_or(Camera {
@@ -669,150 +276,6 @@ pub fn MetroMap() -> Element {
     // The Call being looked at (the one picked, else the first that stopped), and on the map
     // the station it was made at.
     let call = picked.or_else(|| cm.default_dest());
-    let dest = call.and_then(|d| m.station(d)).map(|s| s.seq);
-    // Interchanges: where words that told the agent were read, and the main line's stations
-    // a branch shares, each with how far beside the main line the lines through it run.
-    let mut forks: HashSet<i64> = m.interchanges();
-    // Every main-line station more than one line stops at, with each line's dot: the main
-    // line's on it, a line running beside it at its side, a branch leaving there stacked out
-    // the way it goes, as Seoul's map stacks a line's dot for each line at a transfer.
-    let mut hubs: std::collections::HashMap<i64, Vec<&'static str>> =
-        std::collections::HashMap::new();
-    for (i, l) in m.lines.iter().enumerate().skip(1) {
-        let colour = line_colour(&m, i, l.x0);
-        let junction = m
-            .stations
-            .iter()
-            .find(|s| s.line == 0 && (s.x - l.x1).abs() < 0.5)
-            .map(|s| s.seq);
-        for q in l.shares.iter().copied().chain(junction) {
-            let e = hubs
-                .entry(q)
-                .or_insert_with(|| vec![line_colour(&m, 0, 0.0)]);
-            if !e.contains(&colour) {
-                e.push(colour);
-            }
-        }
-    }
-    // Each hub's dots, stacked across the line about its station.
-    let shared: std::collections::HashMap<i64, Vec<(f64, &'static str)>> = hubs
-        .into_iter()
-        .filter(|(_, c)| c.len() > 1)
-        .map(|(q, c)| {
-            let n = c.len() as f64;
-            (
-                q,
-                c.into_iter()
-                    .enumerate()
-                    .map(|(i, c)| ((i as f64 - (n - 1.0) / 2.0) * 7.0, c))
-                    .collect(),
-            )
-        })
-        .collect();
-    forks.extend(shared.keys().copied());
-    let k = cam.grow();
-    // The map folded to the canvas, and every station where it is drawn.
-    let snake = Snake::new(&m, size().0, size().1);
-    let drawn: Vec<Station> = m
-        .stations
-        .iter()
-        .map(|s| {
-            let (x, y) = snake.at(s.x, m.drawn_y(s));
-            Station { x, y, ..s.clone() }
-        })
-        .collect();
-    let spot = |seq: i64| drawn.iter().find(|s| s.seq == seq).cloned();
-    // The way to the Call being looked at, as a route finder draws it: the legs ridden in
-    // colour, everything else grey; where it set out, changed and arrived, pinned.
-    let legs = dest.and_then(|d| m.journey(d)).unwrap_or_default();
-    let route = dest.map(|d| m.route(d));
-    let start_ask = legs.first().and_then(|l| match l.board {
-        Board::Ask(i) => Some(i),
-        _ => None,
-    });
-    let transfer = legs.iter().find_map(|l| match l.board {
-        Board::Station(b) => m.station(b).cloned(),
-        _ => None,
-    });
-    let dest_station = dest.and_then(|d| m.station(d)).cloned();
-    // A change at the result whose words told the agent is walked, not ridden: the dotted way.
-    let walked = dest_station
-        .as_ref()
-        .and_then(|d| d.source.as_ref().map(|src| src.by))
-        .filter(|by| transfer.as_ref().is_some_and(|t| t.seq == *by));
-    // Each leg ridden: its line, its stretch, and whether it followed words read on the way.
-    let ridden: Vec<(usize, f64, f64, bool)> = legs
-        .iter()
-        .filter_map(|l| {
-            let x0 = match l.board {
-                Board::Ask(i) => m.asks.get(i)?.x,
-                Board::Station(b) => m.station(b)?.x,
-                Board::Nowhere => return None,
-            };
-            let told = walked.is_some() && l.board == Board::Station(walked.unwrap_or_default());
-            Some((l.line, x0, m.station(l.alight)?.x, told))
-        })
-        .collect();
-    let start_at = start_ask.map(|i| snake.at(m.asks[i].x, MAIN_Y));
-    let dest_at = dest_station.as_ref().and_then(|d| spot(d.seq));
-    let mut pins: Vec<(f64, f64)> = Vec::new();
-    pins.extend(start_at);
-    if let Some(d) = &dest_at {
-        pins.push((d.x, d.y));
-    }
-    // Every line and station keeps its colour: the way shows as a band under it and pins.
-    let on = |_: i64| true;
-    // Names on the way, as a route finder labels its stops, and what stopped elsewhere.
-    let shown: Vec<i64> = m
-        .stations
-        .iter()
-        .filter(|s| on(s.seq) && !crate::metro::place_label(s).is_empty())
-        .map(|s| s.seq)
-        .collect();
-    let ups: HashSet<i64> = m
-        .stations
-        .iter()
-        .filter(|s| {
-            drawn
-                .iter()
-                .any(|d| d.seq == s.seq && d.y < snake.at(s.x, MAIN_Y).1 - 1.0)
-        })
-        .map(|s| s.seq)
-        .collect();
-    // Where each turn's name stands over its marker, kept clear of the stations' names.
-    let turn_boxes: Vec<(f64, f64, f64, f64)> = m
-        .asks
-        .iter()
-        .enumerate()
-        .map(|(n, a)| {
-            let (ax, ay) = snake.at(a.x, MAIN_Y);
-            let said = match &a.agent {
-                Some(agent) => format!("턴 {} {} 보고", n + 1, clip(agent, 14)),
-                None => format!("턴 {} {}", n + 1, clip(&a.text, 60)),
-            };
-            let wide = (name_width(&said) * k).min(snake.w);
-            let gap = if start_ask == Some(n) { 30.0 } else { 12.0 } * k;
-            let (x0, x1) = if snake.backward(a.x) {
-                (ax - gap - wide, ax - gap)
-            } else {
-                (ax + gap, ax + gap + wide)
-            };
-            (x0, x1, ay - 30.0 * k, ay - 8.0 * k)
-        })
-        .collect();
-    // The pins' own room: over a station of the main line, beside one on a branch.
-    let mut taken = turn_boxes.clone();
-    for &(x, y) in &pins {
-        let side = dest_at
-            .as_ref()
-            .is_some_and(|d| d.line != 0 && (d.x - x).abs() < 0.5 && (d.y - y).abs() < 0.5);
-        taken.push(if side {
-            (x - 70.0 * k, x - 8.0 * k, y - 13.0 * k, y + 13.0 * k)
-        } else {
-            (x - 24.0 * k, x + 24.0 * k, y - 44.0 * k, y - 8.0 * k)
-        });
-    }
-    let names = map_names(&drawn, dest, &forks, k, &[], &shown, &ups, &taken);
     let mut zoom_by = move |factor: f64| {
         let (w, h) = *size.peek();
         let current = *camera.peek();
@@ -845,15 +308,9 @@ pub fn MetroMap() -> Element {
                     return;
                 }
                 size.set((w, h));
-                let Some(m) = places.peek().clone() else { return };
-                let dest = match *state.selected.peek() {
-                    Selection::Node(seq) => m.station(seq).map(|s| s.seq),
-                    Selection::None => None,
-                }
-                .or_else(|| m.default_dest());
-                let _ = dest;
+                let Some(m) = net.peek().clone() else { return };
                 if w0 > 0.0 {
-                    camera.set(Some(Camera::fit(&m, w, h)));
+                    camera.set(Some(Camera::fit_net(&m, w, h)));
                 }
             },
             // ← and → step the destination along its line, as the station sign's arrows do.
@@ -864,7 +321,7 @@ pub fn MetroMap() -> Element {
                     Key::ArrowRight => 1,
                     _ => return,
                 };
-                let Some(m) = places.peek().clone() else { return };
+                let Some(m) = metro.peek().clone() else { return };
                 let current = match *state.selected.peek() {
                     Selection::Node(seq) => m.station(seq).map(|s| s.seq),
                     Selection::None => None,
@@ -912,261 +369,8 @@ pub fn MetroMap() -> Element {
             },
             onmouseup: move |_| drag.set(None),
             onmouseleave: move |_| drag.set(None),
-            div {
-                class: "metro-world",
-                style: "width: {snake.right()}px; height: {snake.bottom() + 200.0}px; transform: translate({cam.x}px, {cam.y}px) scale({cam.zoom}); --k: {k}",
-                svg {
-                    width: "{snake.right()}",
-                    height: "{snake.bottom() + 200.0}",
-                    // The land: parks, streets, avenues, and the rivers between the turns.
-                    if !plain() {
-                        {
-                            let land = land(&m, &snake);
-                            rsx! {
-                                g { class: "land",
-                                    for d in land.parks.iter() { path { class: "park", d: "{d}" } }
-                                    for d in land.streets.iter() { path { class: "street-edge", d: "{d}" } }
-                                    for d in land.avenues.iter() { path { class: "avenue-edge", d: "{d}" } }
-                                    for d in land.streets.iter() { path { class: "street", d: "{d}" } }
-                                    for d in land.avenues.iter() { path { class: "avenue", d: "{d}" } }
-                                    for d in land.rivers.iter() { path { class: "river-bank", d: "{d}" } }
-                                    for d in land.rivers.iter() { path { class: "river", d: "{d}" } }
-                                }
-                            }
-                        }
-                    } else {
-                        for (x0, _) in districts(&m).into_iter().skip(1) {
-                            path { class: "district-edge", d: "M{x0},{-6000.0} V{snake.bottom() + 6000.0}" }
-                        }
-                    }
-                    // The way to the Call being looked at, as a soft band under the lines it rides,
-                    // so every line keeps its own colour.
-                    for (line, x0, x1, told) in ridden.iter().copied() {
-                        {
-                            let d = if line == 0 { snake.main_path(x0.min(x1), x0.max(x1)) } else { snake.branch_path(&m, line) };
-                            let colour = if told { TOLD } else { line_colour(&m, line, x0) };
-                            rsx! { path { class: "route-glow", style: "stroke: {colour}", d: "{d}" } }
-                        }
-                    }
-                    // Each line over a casing, as a map draws its roads.
-                    for (x0, x1, solid, _) in m.main_runs() {
-                        if solid { path { class: "casing", d: "{snake.main_path(x0, x1)}" } }
-                    }
-                    for (x0, x1, solid, _) in m.main_runs() {
-                        path {
-                            class: if solid { "track main" } else { "track main idle" },
-                            style: "stroke: {line_colour(&m, 0, x0)}",
-                            d: "{snake.main_path(x0, x1)}",
-                        }
-                    }
-                    for i in 1..m.lines.len() {
-                        Track { metro: m.clone(), index: i, d: snake.branch_path(&m, i) }
-                    }
-                    // Each branch's terminus, capped with a bar.
-                    for i in 1..m.lines.len() {
-                        {
-                            let l = &m.lines[i];
-                            let ((cx, cy), across) = snake.terminus(&m, i);
-                            let c = 7.0 * k;
-                            let d = if across { format!("M{cx},{} V{}", cy - c, cy + c) } else { format!("M{},{cy} H{}", cx - c, cx + c) };
-                            rsx! { path { class: "end-cap", style: "stroke: {line_colour(&m, i, l.x0)}", d: "{d}" } }
-                        }
-                    }
-                    // The main line's two ends, capped with a bar as a metro line ends.
-                    for x in [crate::metro::LEFT, m.main_end()] {
-                        {
-                            let (cx, cy) = snake.at(x, MAIN_Y);
-                            rsx! { path { class: "end-cap", style: "stroke: {line_colour(&m, 0, x)}", d: "M{cx},{cy - 10.0 * k} V{cy + 10.0 * k}" } }
-                        }
-                    }
-                    for (n, a) in m.asks.iter().cloned().enumerate() {
-                        circle {
-                            class: "terminus",
-                            style: "stroke: {turn_colour(n)}",
-                            cx: "{snake.at(a.x, MAIN_Y).0}", cy: "{snake.at(a.x, MAIN_Y).1}", r: "{8.0 * k}",
-                        }
-                    }
-                    // A station two lines share, as a metro map draws one: a capsule across both.
-                    for (q, dots) in shared.iter() {
-                        if let Some(st) = m.station(*q) {
-                            {
-                                let lo = dots.iter().map(|d| d.0).fold(0.0, f64::min);
-                                let hi = dots.iter().map(|d| d.0).fold(0.0, f64::max);
-                                let (ax, ay) = snake.at(st.x, MAIN_Y + lo);
-                                let (_, by) = snake.at(st.x, MAIN_Y + hi);
-                                let r = 5.8 * k;
-                                let (y0, y1) = (ay.min(by), ay.max(by));
-                                let pts: Vec<(f64, f64, &str)> = dots.iter().map(|&(o, c)| { let (x, y) = snake.at(st.x, MAIN_Y + o); (x, y, c) }).collect();
-                                rsx! {
-                                    rect { class: "xchg-capsule", x: "{ax - r}", y: "{y0 - r}", width: "{2.0 * r}", height: "{y1 - y0 + 2.0 * r}", rx: "{r}" }
-                                    for (x, y, c) in pts {
-                                        circle { class: "xchg-dot", style: "fill: {c}", cx: "{x}", cy: "{y}", r: "{3.4 * k}" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    for (s, at) in m.stations.iter().cloned().zip(drawn.iter().cloned()) {
-                        StationMark {
-                            capsule: shared.contains_key(&s.seq),
-                            station: at,
-                            turn: line_colour(&m, s.line, s.x),
-                            ring: ring(&m, &s),
-                            fork: forks.contains(&s.seq),
-                            picked: dest == Some(s.seq),
-                            off: !on(s.seq),
-                            k,
-                            dragged,
-                            open,
-                            hovered,
-                        }
-                    }
-                }
-                // The main line's badge at its start, as a line's number stands at its terminus.
-                span { class: "line-badge", style: "left: {crate::metro::LEFT}px; top: {MAIN_Y}px; background: {MAIN_INK}; transform: scale({k}) translate(calc(-100% - 10px), -50%)", "{m.badge(0)}" }
-                {
-                    let (ex, ey) = snake.at(m.main_end(), MAIN_Y);
-                    let past = if snake.backward(m.main_end()) { "calc(-100% - 10px)" } else { "10px" };
-                    rsx! { span { class: "line-badge", style: "left: {ex}px; top: {ey}px; background: {line_colour(&m, 0, m.main_end())}; transform: scale({k}) translate({past}, -50%)", "{m.badge(0)}" } }
-                }
-                // A branch is named by where its instruction came from, with its badge.
-                for (i, line) in m.lines.iter().enumerate() {
-                    if line.kind == LineKind::Branch {
-                        {
-                            // A branch's badge stands past its terminus, as a line's number does.
-                            let ((bx, by), across) = snake.terminus(&m, i);
-                            let row_y = snake.at(line.x1, MAIN_Y).1;
-                            let past = if across {
-                                if snake.backward(line.x1) { "calc(-100% - 8px), -50%" } else { "8px, -50%" }
-                            } else if by < row_y { "-50%, calc(-100% - 6px)" } else { "-50%, 6px" };
-                            rsx! {
-                                span {
-                                    class: "line-badge",
-                                    title: "{line.name}",
-                                    style: "left: {bx}px; top: {by}px; background: {line_colour(&m, i, line.x0)}; transform: scale({k}) translate({past})",
-                                    "{line.badge}"
-                                }
-                            }
-                        }
-                    }
-                }
-                // Each turn's request as its line's terminal: the turn, and who asked what.
-                for ((n, a), (_, x1)) in m.asks.iter().cloned().enumerate().zip(districts(&m)) {
-                    {
-                        // As far as the next turn's marker, less a gap so two names never run
-                        // into each other, and never past the row.
-                        let (ax, ay) = snake.at(a.x, MAIN_Y);
-                        // and short of a pin standing on the main line ahead of it on its row.
-                        let ahead = |px: f64| if snake.backward(a.x) { ax - px } else { px - ax };
-                        let pin_room = pins
-                            .iter()
-                            .filter(|&&(px, py)| (py - ay).abs() < 2.0 && ahead(px) > 1.0)
-                            .map(|&(px, _)| ahead(px) / k - 70.0)
-                            .fold(f64::MAX, f64::min);
-                        let wide = ((x1.min(right(&m)) - a.x).min(snake.w) / k - 48.0).min(pin_room).max(40.0);
-                        // Along the way the line runs from the marker, clear of the start pin when
-                        // it stands there.
-                        let gap = if start_ask == Some(n) { 30 } else { 12 };
-                        let nudge = if snake.backward(a.x) { format!("calc(-100% - {gap}px)") } else { format!("{gap}px") };
-                        let said = match a.agent.clone() {
-                            Some(agent) => format!("{} 보고", clip(&agent, 14)),
-                            None => clip(&a.text, 60),
-                        };
-                        rsx! {
-                            div {
-                                class: format!("terminal{}", if route.is_some() && start_ask != Some(n) { " off" } else { "" }),
-                                style: "left: {ax}px; top: {ay}px; max-width: {wide}px; --turn: {turn_colour(n)}; transform: scale({k}) translate({nudge}, calc(-100% - 10px))",
-                                title: "{a.text}",
-                                onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(a.seq)); },
-                                b { "턴 {n + 1}" }
-                                span { "{said}" }
-                            }
-                        }
-                    }
-                }
-                // Every station's name that fits, as a printed map names them all.
-                for (s, side) in names.iter().cloned() {
-                    div {
-                        class: format!(
-                            "map-name{}{}{}",
-                            match s.decision.as_deref() { Some("DENY") => " deny", Some("REVIEW") => " review", _ => "" },
-                            if Some(s.seq) == dest { " picked" } else { "" },
-                            if forks.contains(&s.seq) { " hub" } else { "" },
-                        ),
-                        style: format!(
-                            "left: {}px; top: {}px; transform: scale({k}) translate({})",
-                            s.x, s.y,
-                            match side {
-                                Side::Under => "-50%, 11px",
-                                Side::Over => "-50%, calc(-100% - 11px)",
-                                Side::Right => "12px, -50%",
-                                Side::Left => "calc(-100% - 12px), -50%",
-                            },
-                        ),
-                        title: "{s.what}",
-                        onclick: { let seq = s.seq; move |e: MouseEvent| { e.stop_propagation(); state.selected.set(Selection::Node(seq)); } },
-                        span { class: "mn-main", "{crate::metro::place_label(&s)}" }
-                        {
-                            let sub = place_sub(&s);
-                            rsx! { if !sub.is_empty() { span { class: "mn-sub", "{sub}" } } }
-                        }
-                    }
-                }
-                // Where the way set out, changed and arrived, pinned as a route finder pins them.
-                if let (Some(i), Some((sx, sy))) = (start_ask, start_at) {
-                    div {
-                        class: "pin start",
-                        style: "left: {sx}px; top: {sy}px; --turn: {turn_colour(i)}; transform: scale({k}) translate(-50%, calc(-100% - 12px))",
-                        "출발"
-                    }
-                }
-                if let Some(d) = dest_at.clone() {
-                    {
-                    let if_side = if d.line != 0 { "calc(-100% - 14px), -50%" } else { "-50%, calc(-100% - 15px)" };
-                    rsx! {
-                    div {
-                        // Over a station of the main line; beside one on a branch, which runs across
-                        // the rows, on the side away from its names.
-                        class: format!("pin end {}{}", match d.decision.as_deref() { Some("DENY") => "deny", Some("REVIEW") => "review", _ => "" }, if d.line != 0 { " side" } else { "" }),
-                        style: "left: {d.x}px; top: {d.y}px; transform: scale({k}) translate({if_side})",
-                        "도착"
-                    }
-                    }
-                    }
-                }
-                // The station under the pointer, in a balloon over it.
-                if let Some(h) = hovered().filter(|&h| Some(h) != dest).and_then(spot) {
-                    {
-                        let (tone, verdict) = match h.decision.as_deref() {
-                            Some("DENY") => ("deny", "차단"),
-                            Some("REVIEW") => ("review", "확인 요청"),
-                            Some(_) => ("pass", "허용"),
-                            None => ("quiet", "판정 없음"),
-                        };
-                        rsx! {
-                            div { class: "balloon", style: "left: {h.x}px; top: {h.y}px; transform: scale({k}) translate(-50%, calc(-100% - 16px))",
-                                div { class: "bl-head",
-                                    span { class: "line-badge small", style: "background: {line_colour(&m, h.line, h.x)}", "{badge_at(&m, h.line, h.x)}" }
-                                    b { "{crate::metro::place_label(&h)}" }
-                                    if h.members.len() > 1 { span { class: "bl-n", "{h.members.len()}번" } }
-                                    span { class: "chip {tone}", "{verdict}" }
-                                }
-                                div { class: "bl-what", "{h.tool} · {clip(&h.what, 60)}" }
-                                div { class: "bl-foot",
-                                    span { "{clock(h.at)}" }
-                                    span { class: "bl-hint", "눌러서 길찾기" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            MapLegend { metro: m.clone() }
-            // 일반지도 / 노선도, as a map app switches its kinds of map.
-            div { class: "maptype", onmousedown: move |e| e.stop_propagation(),
-                button { class: if plain() { "mt on" } else { "mt" }, onclick: move |_| plain.set(true), span { class: "mt-thumb lines" } span { "노선도" } }
-                button { class: if !plain() { "mt on" } else { "mt" }, onclick: move |_| plain.set(false), span { class: "mt-thumb land" } span { "지도" } }
-            }
+            super::net::NetWorld { net: nm.clone(), calls: cm.clone(), call, cam, dragged, open, hovered }
+            super::net::NetLegend { net: nm.clone(), calls: cm.clone() }
             {
                 let (n, w) = scale(cam.zoom);
                 rsx! {
@@ -1187,17 +391,9 @@ pub fn MetroMap() -> Element {
     }
 }
 
-/// The class of the line a station rides, for its ring: an allowed station wears its line's colour.
-fn ring(m: &Metro, s: &Station) -> &'static str {
-    match m.lines[s.line].kind {
-        LineKind::Branch => "on-agent",
-        LineKind::Main => "on-main",
-    }
-}
-
 /// The small line under a station's name, as Seoul's map writes it in English: where the file
 /// is, or what ran.
-fn place_sub(s: &Station) -> String {
+pub(super) fn place_sub(s: &Station) -> String {
     use crate::metro::Action;
     // A station of several places names them all; one tool or folder would mislead.
     if crate::metro::place_label(s).contains(" · ") {
@@ -1234,7 +430,7 @@ fn place_sub(s: &Station) -> String {
 
 /// Where a station's name stands beside it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Side {
+pub(super) enum Side {
     Under,
     Over,
     Right,
@@ -1242,7 +438,7 @@ enum Side {
 }
 
 /// How wide a name is on screen, at the map's 12px.
-fn name_width(text: &str) -> f64 {
+pub(super) fn name_width(text: &str) -> f64 {
     text.chars()
         .map(|c| if c.is_ascii() { 7.0 } else { 12.5 })
         .sum::<f64>()
@@ -1255,7 +451,7 @@ fn name_width(text: &str) -> f64 {
 /// already placed, or into the turn band over the main line, is left to its hover card.
 /// `grow` is how much larger than the map's own scale names are drawn.
 #[allow(clippy::too_many_arguments)]
-fn map_names(
+pub(super) fn map_names(
     stations: &[Station],
     dest: Option<i64>,
     forks: &HashSet<i64>,
@@ -1264,6 +460,7 @@ fn map_names(
     shown: &[i64],
     ups: &HashSet<i64>,
     taken: &[(f64, f64, f64, f64)],
+    reach: &HashMap<i64, (f64, f64)>,
 ) -> Vec<(Station, Side)> {
     let mut picked: Vec<&Station> = stations.iter().filter(|s| shown.contains(&s.seq)).collect();
     let rank = |s: &Station| {
@@ -1314,8 +511,15 @@ fn map_names(
         // Each side a name may take, as a box: under and over a station on the main line,
         // right and left of one on a branch, which runs across it.
         let spot = |side: Side| match side {
-            Side::Under => (s.x - half, s.x + half, s.y + gap, s.y + gap + tall),
-            Side::Over => (s.x - half, s.x + half, s.y - gap - tall, s.y - gap),
+            // Clear of what the station's mark reaches over and under it, a transfer's pill.
+            Side::Under => {
+                let b = s.y + reach.get(&s.seq).map_or(0.0, |r| r.1);
+                (s.x - half, s.x + half, b + gap, b + gap + tall)
+            }
+            Side::Over => {
+                let t = s.y - reach.get(&s.seq).map_or(0.0, |r| r.0);
+                (s.x - half, s.x + half, t - gap - tall, t - gap)
+            }
             Side::Right => (
                 s.x + 12.0 * grow,
                 s.x + 12.0 * grow + wide,
@@ -1371,7 +575,7 @@ fn Track(metro: Arc<Metro>, index: usize, d: String) -> Element {
 
 #[component]
 #[allow(clippy::too_many_arguments)]
-fn StationMark(
+pub(super) fn StationMark(
     station: Station,
     turn: &'static str,
     ring: &'static str,
@@ -2530,33 +1734,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_first_view_keeps_the_first_stop_in_sight() {
-        let graph = crate::demo::Demo::load();
-        let id = graph
-            .sessions()
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|s| s["id"].as_str())
-            .find(|id| id.starts_with("b6380b32"))
-            .unwrap()
-            .to_owned();
-        let model = crate::layout::Model::build(
-            &serde_json::from_value(graph.graph(&id).unwrap()).unwrap(),
-        );
-        let m = Metro::build(&model);
-        let (w, h) = (1000.0, 700.0);
-        let c = Camera::first_view(&m, w, h);
-        let stop = m.stations.iter().find(|s| s.stopped()).unwrap();
-        let (sx, sy) = (stop.x * c.zoom + c.x, stop.y * c.zoom + c.y);
-        assert!(
-            (0.0..w).contains(&sx) && (0.0..h).contains(&sy),
-            "stop at {sx},{sy}"
-        );
-    }
-
-    fn demo_metro(prefix: &str) -> Metro {
+    fn demo_net(prefix: &str) -> crate::network::Net {
         let graph = crate::demo::Demo::load();
         let id = graph
             .sessions()
@@ -2567,7 +1745,7 @@ mod tests {
             .find(|id| id.starts_with(prefix))
             .unwrap()
             .to_owned();
-        Metro::build(&crate::layout::Model::build(
+        crate::network::Net::build(&crate::layout::Model::build(
             &serde_json::from_value(graph.graph(&id).unwrap()).unwrap(),
         ))
     }
@@ -2575,18 +1753,17 @@ mod tests {
     // The whole-map view sits between the summary and the legend, with what is drawn inside.
     #[test]
     fn the_fit_keeps_the_map_between_summary_and_legend() {
-        let m = demo_metro("fa6576f7");
+        let m = demo_net("fa6576f7");
         let (w, h) = (840.0, 760.0);
-        let c = Camera::fit(&m, w, h);
-        let snake = Snake::new(&m, w, h);
-        let top = MAIN_Y * c.zoom + c.y;
-        let low = snake.bottom() * c.zoom + c.y;
+        let c = Camera::fit_net(&m, w, h);
+        let top = m.top * c.zoom + c.y;
+        let low = m.bottom * c.zoom + c.y;
         assert!(
             top >= SUMMARY_H + OVER - 0.5 && low <= h - LEGEND_H - UNDER + 0.5,
             "{top}..{low}"
         );
         // The whole width in view.
-        assert!(c.x >= 0.0 && c.x + snake.right() * c.zoom <= w + 0.5);
+        assert!(c.x >= 0.0 && c.x + m.width * c.zoom <= w + 0.5);
     }
 
     #[test]
