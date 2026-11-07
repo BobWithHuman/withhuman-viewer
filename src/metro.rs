@@ -117,6 +117,8 @@ pub struct Station {
     pub members: Vec<i64>,
     /// When the engine saw the Call, in milliseconds.
     pub at: Option<i64>,
+    /// On a map of places or steps, the station's name: the places its Calls went to.
+    pub label: Option<String>,
 }
 
 impl Station {
@@ -312,8 +314,38 @@ pub fn place_key(s: &Station) -> String {
     }
 }
 
+/// How wide a name is drawn, at the map's 11.5px.
+fn label_width(text: &str) -> f64 {
+    text.chars()
+        .map(|c| if c.is_ascii() { 7.0 } else { 12.5 })
+        .sum::<f64>()
+        + 10.0
+}
+
+/// A station's name for a group of Calls: the places they went to in the order they went,
+/// two of them and how many more.
+fn group_label(group: &[&Station]) -> String {
+    let mut names: Vec<String> = Vec::new();
+    let mut sorted: Vec<&&Station> = group.iter().collect();
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x));
+    for s in sorted {
+        let n = place_label(s);
+        if !n.is_empty() && !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    match names.len() {
+        0 => String::new(),
+        1 | 2 => names.join(" · "),
+        n => format!("{} · {} 외 {}", names[0], names[1], n - 2),
+    }
+}
+
 /// A place's name on the map: the file or page, the command, the search.
 pub fn place_label(s: &Station) -> String {
+    if let Some(l) = &s.label {
+        return l.clone();
+    }
     let short = |t: &str, n: usize| {
         if t.chars().count() > n {
             format!("{}…", t.chars().take(n).collect::<String>())
@@ -334,6 +366,7 @@ pub fn place_label(s: &Station) -> String {
         Action::Search => format!("{} 검색", s.tool),
         // A run's report coming back is where its line ends: its terminus says so.
         Action::Delegate if s.tool == "SubagentHandback" => String::new(),
+        Action::Delegate if s.what.trim().is_empty() => "에이전트에 맡김".to_owned(),
         Action::Delegate => format!("맡김 · {}", short(&s.what, 14)),
         _ => s.tool.clone(),
     }
@@ -695,6 +728,7 @@ impl Metro {
                             .unwrap_or_default(),
                         members: vec![node.seq()],
                         at: node.props.get("observed_at").and_then(Value::as_i64),
+                        label: None,
                     }));
                 }
                 _ => {}
@@ -976,7 +1010,16 @@ impl Metro {
     /// a tool result told the agent to do what was then stopped, those Calls are a line of
     /// their own (the words' line), leaving the station where the words were read: the change
     /// a route finder shows as a transfer.
-    pub fn places(model: &Model) -> Self {
+    /// The session as a metro map of the engine's own steps: a station is a SubGraph (an
+    /// assistant message and the Calls that followed it, or a subagent's turn at the tools),
+    /// each agent's line runs through its steps in the order it took them, and a Call's way
+    /// there is the path the engine traced back from it, changing at the step whose result
+    /// held the words that caused it.
+    pub fn steps(model: &Model) -> Self {
+        Self::map_of(model, true)
+    }
+
+    fn map_of(model: &Model, steps: bool) -> Self {
         let all: HashSet<i64> = model.nodes.iter().map(|n| n.seq()).collect();
         let calls = Self::build_with(model, &all);
         let mut order: Vec<&Station> = calls.stations.iter().collect();
@@ -990,9 +1033,10 @@ impl Metro {
                 caused.entry(src.by).or_default().push(s);
             }
         }
+        // On the map of steps the words' line is the route itself, not a line of its own.
         let told: HashSet<i64> = caused
             .iter()
-            .filter(|(_, v)| v.iter().any(|s| s.stopped()))
+            .filter(|(_, v)| !steps && v.iter().any(|s| s.stopped()))
             .map(|(b, _)| *b)
             .collect();
         // The line a Call rides on this map: the words' line it followed, else its agent's.
@@ -1014,7 +1058,11 @@ impl Metro {
                 rides.push(r);
             }
             let list = stops.entry(r).or_default();
-            let key = place_key(s);
+            let key = if steps {
+                format!("g:{}", s.subgraph.unwrap_or(-s.seq))
+            } else {
+                place_key(s)
+            };
             match list.iter_mut().find(|(k, _)| *k == key) {
                 Some((_, v)) => v.push(s),
                 None => list.push((key, vec![*s])),
@@ -1049,6 +1097,7 @@ impl Metro {
                 unsourced: group.iter().any(|s| s.unsourced),
                 loose: group.iter().any(|s| s.loose),
                 at: group.iter().filter_map(|s| s.at).max(),
+                label: Some(group_label(group)),
                 ..rep.clone()
             }
         };
@@ -1072,8 +1121,16 @@ impl Metro {
         // Each place on the main line: its station, and every Call any line made there.
         let mut main_at: HashMap<String, (usize, Vec<&Station>)> = HashMap::new();
         if let Some(list) = stops.get(&Ride::Agent(0)) {
+            // A column apart at least, and further where two names would meet, as a metro map
+            // spaces its stations for their names.
+            let mut x = LEFT + FIRST;
+            let mut prev_half = 0.0;
             for (k, (key, group)) in list.iter().enumerate() {
-                let x = LEFT + FIRST + k as f64 * STEP;
+                let half = label_width(&group_label(group)) / 2.0;
+                if k > 0 {
+                    x += STEP.max(prev_half + half + 28.0);
+                }
+                prev_half = half;
                 let st = station(0, x, group);
                 lines[0].stations.push(st.seq);
                 let i = push(st, &mut stations, &mut at);
@@ -1893,47 +1950,66 @@ mod tests {
         assert_eq!(issue.cause_name(), "issues/42");
     }
 
-    // On the map of places the issue's page is a station of the main line, and the Calls its
-    // hidden words told the agent to make (both stopped) ride a line of their own out of it:
-    // the way to the denied read changes there, as a route finder's transfer.
+    // The map of steps for the recorded README session: one station a SubGraph. The README
+    // read and the test run share a step; the Write and the Edit the README's hidden comment
+    // told the agent to make (both denied) are the next step, and their way there changes at
+    // the first step, where the words were read.
     #[test]
-    fn the_words_ride_their_own_line_out_of_the_page() {
-        let (demo, id) = long("c5204b3c");
-        let model = Model::build(&serde_json::from_value(demo.graph(&id).unwrap()).unwrap());
-        let m = Metro::places(&model);
-        let told: Vec<&Line> = m.lines.iter().filter(|l| l.badge == "글").collect();
+    fn a_step_is_a_station_and_the_way_changes_where_the_words_were_read() {
+        let m = Metro::steps(&model(&session("fa6576f7")));
+        let main: Vec<&Station> = m.stations.iter().filter(|s| s.line == 0).collect();
+        assert_eq!(main.len(), 3, "s1, s2, s3");
+        let read = m.station(5).unwrap();
         assert_eq!(
-            told.len(),
-            1,
-            "{:?}",
-            m.lines.iter().map(|l| &l.name).collect::<Vec<_>>()
+            read.seq,
+            m.station(7).unwrap().seq,
+            "the README read and make test: one step"
         );
-        assert_eq!(told[0].name, "issues/42에 적힌 글");
-        let issue = m.stations.iter().find(|s| s.tool == "WebFetch").unwrap();
-        assert_eq!(issue.line, 0);
-        let denied: Vec<&Station> = m
-            .stations
+        let denied = m.station(11).unwrap();
+        assert_eq!(
+            denied.seq,
+            m.station(12).unwrap().seq,
+            "the Write and the Edit: one step"
+        );
+        assert_eq!(denied.decision.as_deref(), Some("DENY"));
+        let legs = m.journey(11).unwrap();
+        assert_eq!(legs.first().unwrap().board, Board::Ask(0));
+        assert_eq!(legs.last().unwrap().board, Board::Station(read.seq));
+        assert!(m.interchanges().contains(&read.seq));
+        // Every Call is at a station.
+        let calls = model(&session("fa6576f7"))
+            .nodes
             .iter()
-            .filter(|s| s.decision.as_deref() == Some("DENY"))
-            .collect();
-        assert!(!denied.is_empty() && denied.iter().all(|s| m.lines[s.line].badge == "글"));
-        let legs = m.journey(denied[0].seq).unwrap();
-        assert_eq!(legs.last().unwrap().board, Board::Station(issue.seq));
-        // One station a place: the main line never stops twice at one file.
-        let keys: Vec<String> = m
-            .stations
-            .iter()
-            .filter(|s| s.line == 0)
-            .map(place_key)
-            .collect();
-        let unique: HashSet<&String> = keys.iter().collect();
-        assert_eq!(keys.len(), unique.len());
-        // Every Call is somewhere on the map.
-        let calls = model.nodes.iter().filter(|n| n.kind == "Call").count();
+            .filter(|n| n.kind == "Call")
+            .count();
         assert_eq!(
             m.stations.iter().map(|s| s.members.len()).sum::<usize>(),
             calls
         );
+    }
+
+    // A subagent's steps are a branch off the main agent's step that handed it the work.
+    #[test]
+    fn a_subagents_steps_branch_off_the_step_that_handed_it_the_work() {
+        let m = Metro::steps(&model(&session("7fcbd428")));
+        let handoff = m.station(4).unwrap();
+        assert_eq!(handoff.line, 0);
+        let branch: Vec<&Station> = m.stations.iter().filter(|s| s.line != 0).collect();
+        assert_eq!(branch.len(), 3, "the run's three steps");
+        let l = &m.lines[branch[0].line];
+        assert_eq!(l.x1, handoff.x, "it leaves at the hand-off");
+    }
+
+    // A Call the engine traced to nothing in the session sets out from nowhere.
+    #[test]
+    fn a_call_traced_to_nothing_sets_out_from_nowhere() {
+        let m = Metro::steps(&model(&session("b6380b32")));
+        let rm = m
+            .stations
+            .iter()
+            .find(|s| s.decision.as_deref() == Some("DENY"))
+            .unwrap();
+        assert_eq!(m.journey(rm.seq).unwrap()[0].board, Board::Nowhere);
     }
 
     // A long live session that grows never moves what is drawn.

@@ -514,7 +514,7 @@ pub fn MetroMap() -> Element {
     });
     // The map draws the session's places: each thing touched a station, each agent a line.
     let places = use_memo(move || match &*state.graph.read() {
-        Load::Ready(model) => Some(Arc::new(Metro::places(model))),
+        Load::Ready(model) => Some(Arc::new(Metro::steps(model))),
         _ => None,
     });
     use_effect(move || {
@@ -1199,6 +1199,10 @@ fn ring(m: &Metro, s: &Station) -> &'static str {
 /// is, or what ran.
 fn place_sub(s: &Station) -> String {
     use crate::metro::Action;
+    // A station of several places names them all; one tool or folder would mislead.
+    if crate::metro::place_label(s).contains(" · ") {
+        return String::new();
+    }
     match s.action {
         Action::Read | Action::Change if s.what.contains('/') && !s.what.contains("://") => {
             let dir = s
@@ -2311,6 +2315,22 @@ fn RoutePanel(
         Load::Ready(model) => strongest_reason(model, dest.seq),
         _ => None,
     };
+    // Which of the engine's checks decided it, in a sentence.
+    let branch: Option<String> = match &*state.graph.read() {
+        Load::Ready(model) => model.node(dest.seq).and_then(|n| {
+            let trace = crate::model::parse_json(n.props.get("trace_json"));
+            let b = trace["check"]["branch"].as_str()?.to_owned();
+            Some(match b.as_str() {
+                "safeguard" => "에이전트 설정·훅을 바꾸는 호출이라 늘 막습니다".to_owned(),
+                "run" => "실행하려는 스크립트의 코드를 읽고, 결과를 속이거나 시키지 않은 일을 하는지 물었습니다".to_owned(),
+                "file" => "바뀌는 줄을 보고, 요청하지 않은 변경인지 물었습니다".to_owned(),
+                "purpose" => "이 호출의 목적이 사용자의 요청에 반하는지 물었습니다".to_owned(),
+                "clear" => "의도에서 벗어날 의심이 낮아 더 묻지 않고 허용했습니다".to_owned(),
+                other => other.to_owned(),
+            })
+        }),
+        _ => None,
+    };
     let mut focus = state.focus;
     let inspecting = (state.inspect)();
     let request = ask
@@ -2373,6 +2393,11 @@ fn RoutePanel(
                                         Board::Ask(_) => rsx! {
                                             div { class: "nv-stop-head", b { "{asker}" } span { class: "nv-at", "{clock(ask.as_ref().and_then(|a| a.at))}" } }
                                             div { class: "nv-said", "{request}" }
+                                            if let Some(intent) = ask.as_ref().and_then(|a| a.intent.clone()).filter(|i| !i.trim().is_empty()) {
+                                                // What the agent wrote it would do this turn: what the verdict
+                                                // measured the Call against.
+                                                div { class: "nv-intent", span { class: "nv-intent-k", "에이전트가 적은 의도" } span { "{intent}" } }
+                                            }
                                         },
                                         Board::Station(b) => {
                                             let bs = m.station(b).cloned();
@@ -2395,6 +2420,7 @@ fn RoutePanel(
                                                                 blockquote { key: "{q.result}-{q.paragraph:?}", class: if bs.action == crate::metro::Action::Run { "st-quote out" } else { "st-quote prose" },
                                                                     super::trace::Preview { seq: q.result, paragraph: q.paragraph, lines: true }
                                                                 }
+                                                                super::trace::ParagraphTags { seq: q.result, paragraph: q.paragraph }
                                                                 div { class: "nv-meta",
                                                                     span { class: "cr-tool", "{bs.tool}" }
                                                                     span { class: "nv-src", title: "{bs.what}", "{bs.what}" }
@@ -2430,6 +2456,9 @@ fn RoutePanel(
                     }
                     div { class: "nv-stop",
                         div { class: "crow big", CallLines { station: dest.clone(), title: dest.name(), full_time: true } }
+                        if let Some(b) = branch.clone() {
+                            div { class: "nv-branch", span { class: "nv-branch-k", "판정 방식" } span { "{b}" } }
+                        }
                         if let Some((text, p)) = why.clone().filter(|_| dest.stopped()) {
                             div { class: "cr-reason", ReasonBox { tone: vtone, text, p } }
                         }

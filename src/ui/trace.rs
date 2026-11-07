@@ -599,6 +599,79 @@ pub fn Preview(seq: i64, paragraph: Option<i64>, #[props(default)] lines: bool) 
     rsx! { div { class: "preview", "{shown}" } }
 }
 
+/// What the engine marked on a paragraph of a tool result: the rules that hid it from a
+/// person reading it, and the sensitive values it carried. Nothing when it marked nothing.
+#[component]
+pub fn ParagraphTags(seq: i64, paragraph: Option<i64>) -> Element {
+    let backend = use_context::<Arc<Backend>>();
+    let state = use_context::<AppState>();
+    let found = use_resource(move || {
+        let backend = backend.clone();
+        let session = state.current.peek().clone();
+        async move {
+            let session = session?;
+            backend.node(&session, seq).await.ok().flatten()
+        }
+    });
+    let mut tags: Vec<(&'static str, String)> = Vec::new();
+    if let Some(Some(detail)) = &*found.read() {
+        if let Some(p) =
+            paragraph.and_then(|i| detail.paragraphs.iter().find(|p| p.index == Some(i)))
+        {
+            if p.hidden == Some(true) {
+                let rules: Vec<String> = p
+                    .hidden_rules
+                    .as_array()
+                    .map(|r| {
+                        r.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                tags.push((
+                    "hidden",
+                    if rules.is_empty() {
+                        "숨은 글".to_owned()
+                    } else {
+                        format!("숨은 글 · {}", rules.join(", "))
+                    },
+                ));
+            }
+            if let Some(i) = p.instructs.filter(|&i| i >= 0.5) {
+                tags.push(("instructs", format!("지시하는 글 {}%", (i * 100.0).round())));
+            }
+        }
+        let mut kinds: Vec<String> = detail
+            .tokens
+            .iter()
+            .filter_map(|t| t.category.clone())
+            .filter(|c| c != "address")
+            .collect();
+        kinds.sort();
+        kinds.dedup();
+        for k in kinds {
+            let name = match k.as_str() {
+                "credential" => "자격 증명",
+                "pii" => "개인 정보",
+                "financial" => "금융 정보",
+                "device" => "기기 정보",
+                _ => "민감한 값",
+            };
+            tags.push(("token", name.to_owned()));
+        }
+    }
+    rsx! {
+        if !tags.is_empty() {
+            div { class: "ptags",
+                for (tone, text) in tags {
+                    span { class: "ptag {tone}", "{text}" }
+                }
+            }
+        }
+    }
+}
+
 /// What the agent was asked and has done, as the verdict saw it.
 #[component]
 pub fn Context(trace: Value) -> Element {

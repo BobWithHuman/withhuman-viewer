@@ -1460,3 +1460,11 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .map-legend .lg-pill { fill: #fff; stroke: #2b2f3a; stroke-width: 1.6; }
 .map-legend .lg-xchg { stroke: #2b2f3a; stroke-width: 1.8; }
 .map-legend .lg-glow { stroke: #2b2f3a; opacity: .16; }
+.route-panel.nv .nv-intent { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 7px 9px; border-radius: 6px; background: #f4f5f7; font-size: 12px; line-height: 1.45; color: #333; }
+.route-panel.nv .nv-intent-k, .route-panel.nv .nv-branch-k { font-size: 10.5px; font-weight: 700; color: #8a8f98; }
+.route-panel.nv .nv-branch { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; font-size: 12px; line-height: 1.45; color: #444; }
+.ptags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.ptag { padding: 1px 6px; border-radius: 4px; font-size: 10.5px; font-weight: 700; background: #eef0f3; color: #4a5160; }
+.ptag.hidden { background: #fde8e6; color: #b3261e; }
+.ptag.token { background: #fff3d6; color: #8a5a00; }
+@media (prefers-color-scheme: dark) { .route-panel.nv .nv-intent { background: #24272b; color: #ddd; } }
