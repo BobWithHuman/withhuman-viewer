@@ -2,9 +2,9 @@
 //! open, its graph, and what is selected in it.
 
 mod compare;
+mod flow;
 mod inspector;
 mod metro;
-mod net;
 mod settings;
 // The session list, kept while sessions are picked in the route list's region.
 #[allow(dead_code)]
@@ -169,7 +169,7 @@ pub fn App() -> Element {
             div { class: "columns", hidden: (state.mode)() == Mode::Compare,
                 main { class: "stage",
                     div { class: "canvas-wrap",
-                        metro::MetroMap {}
+                        flow::FlowMap {}
                         StageNotice {}
                     }
                 }

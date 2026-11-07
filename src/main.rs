@@ -4,12 +4,12 @@
 
 mod api;
 mod demo;
+mod flow;
 mod graph;
 mod layout;
 mod menu;
 mod metro;
 mod model;
-mod network;
 mod prefs;
 mod settings;
 mod ui;

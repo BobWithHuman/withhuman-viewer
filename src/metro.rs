@@ -283,6 +283,7 @@ pub struct Leg {
 }
 
 /// Calls by verdict, as the route list's tabs count them.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Verdicts {
     pub all: usize,
@@ -335,41 +336,6 @@ pub fn place_label(s: &Station) -> String {
         Action::Delegate => format!("맡김 · {}", short(&s.what, 14)),
         _ => s.tool.clone(),
     }
-}
-
-/// A path through `points` in straight runs, each turn rounded as a metro map rounds its
-/// corners. Points repeated in a row are one point.
-pub fn rounded(points: &[(f64, f64)]) -> String {
-    const R: f64 = 16.0;
-    let mut pts: Vec<(f64, f64)> = Vec::new();
-    for &p in points {
-        if pts
-            .last()
-            .is_none_or(|q| (q.0 - p.0).abs() > 0.01 || (q.1 - p.1).abs() > 0.01)
-        {
-            pts.push(p);
-        }
-    }
-    let Some(&(x0, y0)) = pts.first() else {
-        return String::new();
-    };
-    let mut d = format!("M{x0:.1},{y0:.1}");
-    for i in 1..pts.len() {
-        let (bx, by) = pts[i];
-        if let Some(&(cx, cy)) = pts.get(i + 1) {
-            let (ax, ay) = pts[i - 1];
-            let (l1, l2) = ((bx - ax).hypot(by - ay), (cx - bx).hypot(cy - by));
-            let r = R.min(l1 / 2.0).min(l2 / 2.0);
-            let (px, py) = (bx - (bx - ax) / l1 * r, by - (by - ay) / l1 * r);
-            let (qx, qy) = (bx + (cx - bx) / l2 * r, by + (cy - by) / l2 * r);
-            d.push_str(&format!(
-                " L{px:.1},{py:.1} Q{bx:.1},{by:.1} {qx:.1},{qy:.1}"
-            ));
-        } else {
-            d.push_str(&format!(" L{bx:.1},{by:.1}"));
-        }
-    }
-    d
 }
 
 fn text(v: &Option<String>) -> String {
@@ -996,6 +962,7 @@ impl Metro {
 
     /// How many Calls the engine judged each way, counting every Call an express station
     /// stands for: all, denied, held for review, allowed, undecided.
+    #[cfg(test)]
     pub fn verdicts(&self) -> Verdicts {
         let mut v = Verdicts::default();
         for s in &self.stations {
