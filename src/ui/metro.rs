@@ -4,7 +4,7 @@
 //! Panned by dragging or scrolling, zoomed with a pinch or ⌘-scroll; picking a station keeps
 //! its way back to the request lit.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -12,20 +12,422 @@ use dioxus::prelude::*;
 
 use super::{AppState, Load, Selection};
 use crate::layout::clip;
-use crate::metro::{Action, Band, LEFT, LineKind, MAIN_Y, Metro, Route, Station};
+use crate::metro::{Board, LineKind, MAIN_Y, Metro, Station};
 
-/// Below this zoom names get too small to read: the first view shows the whole map down to here.
-const OVERVIEW: f64 = 0.65;
 const MAX_ZOOM: f64 = 2.0;
-const MIN_ZOOM: f64 = 0.2;
+pub(super) const MIN_ZOOM: f64 = 0.2;
+/// The most a whole-map view enlarges a small session.
+const FIT_ZOOM: f64 = 1.2;
+/// The canvas above the map that the summary takes, and below it that the legend takes.
+pub(super) const SUMMARY_H: f64 = 130.0;
+pub(super) const LEGEND_H: f64 = 70.0;
+/// The route panel on the left of the canvas, and the room the map leaves it.
+const PANEL_ROOM: f64 = 0.0;
+/// The right end of what is drawn: the last station, line end or turn, short of the margin the
+/// map keeps for what is still to come.
+fn right(metro: &Metro) -> f64 {
+    let stations = metro.stations.iter().map(|s| s.x);
+    let lines = metro.lines.iter().map(|l| l.x1);
+    let asks = metro.asks.iter().map(|a| a.x);
+    stations
+        .chain(lines)
+        .chain(asks)
+        .chain([metro.main_end() + 40.0])
+        .fold(0.0, f64::max)
+        + 40.0
+}
+/// The room the main line's badge takes left of its first terminal.
+const BADGE_ROOM: f64 = 30.0;
+/// The width the zoom buttons take at the canvas's right edge.
+const CONTROLS: f64 = 64.0;
+/// The map under the lines, as a map app draws the land: streets everywhere, a river where
+/// one turn gives way to the next, a park around each subagent's run. Drawn from the map's
+/// own shape, so the same session always gets the same land.
+struct Land {
+    streets: Vec<String>,
+    avenues: Vec<String>,
+    rivers: Vec<String>,
+    parks: Vec<String>,
+}
+
+fn land(m: &Metro, snake: &Snake) -> Land {
+    // A small fixed scramble, so the streets wander without changing between draws.
+    let wob = |i: i64, j: i64| -> f64 {
+        let h = (i.wrapping_mul(73_856_093) ^ j.wrapping_mul(19_349_663)).rem_euclid(1000);
+        h as f64 / 1000.0 - 0.5
+    };
+    let (x0, x1) = (-2400.0, snake.right() + 2400.0);
+    let low = snake.bottom();
+    let (y0, y1) = (MAIN_Y - 1600.0, low + 1600.0);
+    let mut streets = Vec::new();
+    let mut avenues = Vec::new();
+    // Cross streets about every 160, broken into blocks: each stretch drawn or not, bending a
+    // little its own way, as a town's streets do.
+    let mut i = 0;
+    let mut x = x0;
+    while x < x1 {
+        let mut y = y0;
+        let mut k = 0;
+        while y < y1 {
+            let len = 260.0 + (wob(i, k) + 0.5) * 360.0;
+            if wob(i, k + 50) > -0.25 {
+                let dx = wob(i, k + 100) * 70.0;
+                let d = format!(
+                    "M{},{} Q{},{} {},{}",
+                    x,
+                    y,
+                    x + dx,
+                    y + len / 2.0,
+                    x + dx * 0.4,
+                    y + len
+                );
+                if i % 6 == 3 {
+                    avenues.push(d)
+                } else {
+                    streets.push(d)
+                }
+            }
+            y += len;
+            k += 1;
+        }
+        x += 160.0 + wob(i, 3) * 80.0;
+        i += 1;
+    }
+    // Long streets between the lanes and over and under them, broken the same way.
+    let mut j = 0;
+    let mut y = y0;
+    while y < y1 {
+        let mut x = x0;
+        let mut k = 0;
+        while x < x1 {
+            let len = 320.0 + (wob(k, j) + 0.5) * 520.0;
+            if wob(k + 70, j) > -0.3 {
+                let dy = wob(k + 130, j) * 60.0;
+                let d = format!(
+                    "M{},{} Q{},{} {},{}",
+                    x,
+                    y,
+                    x + len / 2.0,
+                    y + dy,
+                    x + len,
+                    y + dy * 0.3
+                );
+                if j % 4 == 1 {
+                    avenues.push(d)
+                } else {
+                    streets.push(d)
+                }
+            }
+            x += len;
+            k += 1;
+        }
+        y += 140.0 + wob(j, 8) * 50.0;
+        j += 1;
+    }
+    // A river along each turn's border, meandering.
+    let rivers = districts(m)
+        .into_iter()
+        .skip(1)
+        .enumerate()
+        .map(|(n, (bx, _))| {
+            // Across the row the turn changes in, from the row over it to the row under it.
+            let (rx, ry) = snake.at(bx, MAIN_Y);
+            let mut d = String::new();
+            let mut y = ry - snake.v * 0.5;
+            let mut k = 0;
+            while y <= ry + snake.v * 0.5 {
+                let x =
+                    rx - 6.0 + 22.0 * ((y / 150.0) + n as f64 * 1.7).sin() + wob(n as i64, k) * 8.0;
+                d.push_str(&format!("{}{x},{y} ", if k == 0 { "M" } else { "L" }));
+                y += 40.0;
+                k += 1;
+            }
+            d
+        })
+        .collect();
+    let parks = (1..m.lines.len())
+        .filter_map(|i| {
+            // Along the branch, from its first station to its last.
+            let pts = m.branch_points(i);
+            let (a, b) = (pts.get(1)?, pts.get(pts.len().checked_sub(2)?)?);
+            let ((ax, ay), (bx, by)) = (snake.at(a.0, a.1), snake.at(b.0, b.1));
+            Some(format!("M{ax},{ay} L{bx},{by}"))
+        })
+        .collect();
+    Land {
+        streets,
+        avenues,
+        rivers,
+        parks,
+    }
+}
+
+/// The scale a map app keeps in its corner, in stations: a round count whose length on
+/// screen is between 60 and 150 pixels.
+fn scale(zoom: f64) -> (usize, f64) {
+    let step = crate::metro::STEP * zoom;
+    [1usize, 2, 5, 10, 20, 50, 100]
+        .into_iter()
+        .map(|n| (n, n as f64 * step))
+        .find(|&(_, w)| w >= 60.0)
+        .unwrap_or((100, 100.0 * step))
+}
+
+/// Each turn's stretch of the map, from a little before its request to the next turn's, the
+/// first and last running on past the map's ends.
+fn districts(m: &Metro) -> Vec<(f64, f64)> {
+    let starts: Vec<f64> = m
+        .asks
+        .iter()
+        .enumerate()
+        .map(|(n, a)| if n == 0 { -6000.0 } else { a.x - 40.0 })
+        .collect();
+    (0..starts.len())
+        .map(|n| {
+            (
+                starts[n],
+                starts.get(n + 1).copied().unwrap_or(m.width + 6000.0),
+            )
+        })
+        .collect()
+}
+/// The room on screen the map keeps over the main line for the turn band and the names, and
+/// under the lowest lane for its names: screen pixels, as those are drawn at their own size.
+pub(super) const OVER: f64 = 112.0;
+pub(super) const UNDER: f64 = 44.0;
 /// A press that moves less than this is a click, not a drag.
-const CLICK_SLOP: f64 = 4.0;
+pub(super) const CLICK_SLOP: f64 = 4.0;
+
+/// The main line folded to fill the canvas, as a city's metro map winds a long line across
+/// the sheet: it runs right, turns down at the edge, runs back left, turns down again. Each
+/// row is a stretch of the session in order; rows break only where no subagent's run is
+/// under way, so a run always sits in one row. What is drawn moves; what the map means (the
+/// order, the turns, the way back) does not, so everything else keeps the unfolded places.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Snake {
+    /// Each row's stretch of the unfolded map.
+    rows: Vec<(f64, f64)>,
+    /// How wide a row is, and how far apart the rows are.
+    w: f64,
+    v: f64,
+    depth: f64,
+    above: f64,
+}
+
+impl Snake {
+    /// Folded into as many rows as make the map about as wide for its height as a `cw` × `ch`
+    /// canvas.
+    pub(super) fn new(m: &Metro, cw: f64, ch: f64) -> Self {
+        let (start, end) = (crate::metro::LEFT, m.main_end());
+        // How far the branches reach over and under the main line, terminus and badge included.
+        let offs: Vec<f64> = (1..m.lines.len())
+            .filter_map(|i| m.branch_points(i).last().map(|p| p.1 - MAIN_Y))
+            .map(|d| d + d.signum() * 40.0)
+            .collect();
+        // A row running back is the one over it turned over, so each row needs room both sides
+        // for the farthest a branch reaches either way.
+        let reach = offs.iter().map(|o| o.abs()).fold(0.0, f64::max);
+        let (depth, above) = (reach, reach);
+        let v = depth + above + 260.0;
+        let total = (end - start).max(1.0);
+        let aspect = if cw > 0.0 && ch > 0.0 {
+            (cw - CONTROLS - BADGE_ROOM - 40.0).max(300.0) / (ch - SUMMARY_H - LEGEND_H).max(200.0)
+        } else {
+            1e9
+        };
+        let ideal = ((total / (aspect * v)).sqrt().round() as usize).clamp(1, 12);
+        // Where a row may end: halfway between two of the main line's stations.
+        let mut xs: Vec<f64> = m
+            .stations
+            .iter()
+            .filter(|s| s.line == 0)
+            .map(|s| s.x)
+            .collect();
+        xs.sort_by(f64::total_cmp);
+        let breaks: Vec<f64> = xs
+            .windows(2)
+            .filter(|w| w[1] - w[0] > 1.0)
+            .map(|w| (w[0] + w[1]) / 2.0)
+            // Never where a branch comes in beside the main line or leaves it: a stretch beside
+            // it keeps beside it through a turn, but a junction stays on its row.
+            .filter(|&b| {
+                let near = |x: f64| (b - x).abs() < crate::metro::STEP * 0.75;
+                m.lines.iter().skip(1).all(|l| !near(l.x0) && !near(l.x1))
+            })
+            .collect();
+        // Rows about as long as each other: fewer rows when the only places a row may end
+        // would leave one row much longer than the rest.
+        let fold = |n: usize| {
+            let mut cuts: Vec<f64> = Vec::new();
+            for i in 1..n {
+                let target = start + total * i as f64 / n as f64;
+                let floor = cuts.last().copied().unwrap_or(start) + crate::metro::STEP;
+                if let Some(&b) = breaks
+                    .iter()
+                    .filter(|&&b| b > floor && b < end - crate::metro::STEP)
+                    .min_by(|a, b| (*a - target).abs().total_cmp(&(*b - target).abs()))
+                {
+                    cuts.push(b);
+                }
+            }
+            let mut rows = Vec::new();
+            let mut a = start;
+            for c in cuts {
+                rows.push((a, c));
+                a = c;
+            }
+            rows.push((a, end));
+            rows
+        };
+        let mut rows = fold(1);
+        for n in (2..=ideal).rev() {
+            let r = fold(n);
+            let longest = r.iter().map(|(a, b)| b - a).fold(0.0, f64::max);
+            if longest <= 1.35 * total / r.len() as f64 {
+                rows = r;
+                break;
+            }
+        }
+        let w = rows.iter().map(|(a, b)| b - a).fold(0.0, f64::max);
+        Snake {
+            rows,
+            w,
+            v,
+            depth,
+            above,
+        }
+    }
+
+    fn row_of(&self, x: f64) -> usize {
+        self.rows
+            .iter()
+            .position(|&(_, b)| x <= b + 0.01)
+            .unwrap_or(self.rows.len() - 1)
+    }
+
+    /// Where a point of the unfolded map is drawn.
+    pub(super) fn at(&self, x: f64, y: f64) -> (f64, f64) {
+        let r = self.row_of(x);
+        let u = x - self.rows[r].0;
+        let left = crate::metro::LEFT;
+        let dx = if r.is_multiple_of(2) {
+            left + u
+        } else {
+            left + self.w - u
+        };
+        // A row running back is turned over, so what was over the line on the way out is
+        // under it on the way back, and a stretch beside the line stays on its side of the turn.
+        let flip = if r.is_multiple_of(2) { 1.0 } else { -1.0 };
+        (dx, MAIN_Y + (y - MAIN_Y) * flip + r as f64 * self.v)
+    }
+
+    /// The points of a stretch `off` beside the main line from `a` to `b`, keeping beside it
+    /// through the turns between rows.
+    fn beside(&self, a: f64, b: f64, off: f64) -> Vec<(f64, f64)> {
+        let left = crate::metro::LEFT;
+        let mut pts = vec![self.at(a, MAIN_Y + off)];
+        let (ra, rb) = (self.row_of(a), self.row_of(b));
+        for r in ra..rb {
+            let flip = if r.is_multiple_of(2) { 1.0 } else { -1.0 };
+            let o = off * flip;
+            let y = MAIN_Y + r as f64 * self.v;
+            let edge = if r.is_multiple_of(2) {
+                left + self.w - o
+            } else {
+                left + o
+            };
+            pts.push((edge, y + o));
+            pts.push((edge, y + self.v - o));
+        }
+        pts.push(self.at(b, MAIN_Y + off));
+        pts
+    }
+
+    /// Whether the main line runs right to left at `x`.
+    pub(super) fn backward(&self, x: f64) -> bool {
+        self.row_of(x) % 2 == 1
+    }
+
+    /// The main line from `a` to `b`, turning down at the edges between rows.
+    pub(super) fn main_path(&self, a: f64, b: f64) -> String {
+        let left = crate::metro::LEFT;
+        let mut pts = vec![self.at(a, MAIN_Y)];
+        let (ra, rb) = (self.row_of(a), self.row_of(b));
+        for r in ra..rb {
+            let edge = if r % 2 == 0 { left + self.w } else { left };
+            let y = MAIN_Y + r as f64 * self.v;
+            pts.push((edge, y));
+            pts.push((edge, y + self.v));
+        }
+        pts.push(self.at(b, MAIN_Y));
+        crate::metro::rounded(&pts)
+    }
+
+    /// A subagent's run, its corners folded with the rest.
+    pub(super) fn branch_path(&self, m: &Metro, index: usize) -> String {
+        let l = &m.lines[index];
+        // Beside the main line through the stations it shares, then out on its own.
+        let mut pts = if l.off != 0.0 {
+            // In from the junction's side, a short way before the first shared station.
+            let lead = 24.0;
+            let mut p = vec![self.at(l.x0 - lead, MAIN_Y)];
+            p.extend(self.beside(l.x0, l.x1, l.off));
+            p
+        } else {
+            Vec::new()
+        };
+        let spur: Vec<(f64, f64)> = m
+            .branch_points(index)
+            .into_iter()
+            .map(|(x, y)| self.at(x, y))
+            .collect();
+        if spur.len() > 1 || l.off == 0.0 {
+            pts.extend(if l.off != 0.0 {
+                spur[1..].to_vec()
+            } else {
+                spur
+            });
+        } else if let Some(&(x, y)) = pts.last() {
+            // Sharing all it went to: it ends a little past the last shared station.
+            let ahead = if self.backward(l.x1) { -24.0 } else { 24.0 };
+            pts.push((x + ahead, y));
+        }
+        crate::metro::rounded(&pts)
+    }
+
+    /// Where a branch's terminus is drawn, and whether its track runs across the row there.
+    pub(super) fn terminus(&self, m: &Metro, index: usize) -> ((f64, f64), bool) {
+        let l = &m.lines[index];
+        let spur = m.branch_points(index);
+        if spur.len() > 1 || l.off == 0.0 {
+            let (x, y) = spur.last().copied().unwrap_or((l.x1, MAIN_Y));
+            (self.at(x, y), false)
+        } else {
+            let (x, y) = self.at(l.x1, MAIN_Y + l.off);
+            let ahead = if self.backward(l.x1) { -24.0 } else { 24.0 };
+            ((x + ahead, y), true)
+        }
+    }
+
+    /// The right edge of what is drawn, and the bottom.
+    pub(super) fn right(&self) -> f64 {
+        crate::metro::LEFT + self.w + 60.0
+    }
+
+    pub(super) fn top(&self) -> f64 {
+        MAIN_Y - self.above
+    }
+
+    pub(super) fn bottom(&self) -> f64 {
+        MAIN_Y + (self.rows.len() - 1) as f64 * self.v + self.depth
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Camera {
-    x: f64,
-    y: f64,
-    zoom: f64,
+pub(super) struct Camera {
+    pub(super) x: f64,
+    pub(super) y: f64,
+    pub(super) zoom: f64,
 }
 
 impl Camera {
@@ -33,33 +435,53 @@ impl Camera {
     /// read at. A map longer than that opens at that zoom on the first stopped station, or on
     /// the start when nothing stopped.
     fn first_view(metro: &Metro, width: f64, height: f64) -> Self {
-        let fit = ((width - 60.0) / metro.width)
-            .min((height - 120.0) / metro.height)
-            .min(1.0);
-        if fit >= OVERVIEW {
-            return Camera {
-                zoom: fit,
-                x: (width - metro.width * fit) / 2.0,
-                y: 86.0,
-            };
+        // The map is the session at a glance: all of it, whatever is picked.
+        Camera::fit(metro, width, height)
+    }
+
+    /// The whole map, centred in the room between the summary and the legend: what is drawn,
+    /// not the empty margin around it.
+    fn fit(metro: &Metro, width: f64, height: f64) -> Self {
+        let snake = Snake::new(metro, width, height);
+        Camera::fit_box(snake.right(), snake.top(), snake.bottom(), width, height)
+    }
+
+    /// A map `map_w` wide whose lines run from `top` to `bottom`, centred in the room between
+    /// the summary and the legend of a `width` × `height` canvas, with the names' room kept
+    /// over and under the lines.
+    pub(super) fn fit_box(map_w: f64, top: f64, bottom: f64, width: f64, height: f64) -> Self {
+        let drawn = bottom - top;
+        let room = (height - SUMMARY_H - LEGEND_H - OVER - UNDER).max(40.0);
+        // The zoom buttons keep the right edge.
+        let free = (width - PANEL_ROOM - CONTROLS).max(320.0);
+        let zoom = ((free - 40.0 - BADGE_ROOM) / map_w)
+            .min(if drawn > 0.0 {
+                room / drawn
+            } else {
+                f64::INFINITY
+            })
+            .clamp(MIN_ZOOM, FIT_ZOOM);
+        Camera {
+            zoom,
+            x: PANEL_ROOM + BADGE_ROOM + (free - BADGE_ROOM - map_w * zoom) / 2.0,
+            y: SUMMARY_H + OVER + ((room - drawn * zoom) / 2.0).max(0.0) - top * zoom,
         }
-        let zoom = OVERVIEW;
-        let start_x = 30.0 - (LEFT - 20.0) * zoom;
-        let top_y = 86.0;
-        let Some(stop) = metro.stations.iter().find(|s| s.stopped()) else {
-            return Camera {
-                zoom,
-                x: start_x,
-                y: top_y,
-            };
-        };
-        let x = (width * 0.62 - stop.x * zoom).min(start_x);
-        let y = top_y.min(height - 110.0 - stop.y * zoom);
-        Camera { zoom, x, y }
+    }
+
+    /// How much larger than the map's own scale marks and names are drawn so they keep their
+    /// size on screen when the map is shrunk to fit: 1 at full size and over.
+    pub(super) fn grow(self) -> f64 {
+        1.0 / self.zoom.min(1.0)
+    }
+
+    /// Whether a point of the map is in view, with a margin.
+    fn shows(self, x: f64, y: f64, width: f64, height: f64) -> bool {
+        let (sx, sy) = (x * self.zoom + self.x, y * self.zoom + self.y);
+        (60.0..width - 60.0).contains(&sx) && (40.0..height - 40.0).contains(&sy)
     }
 
     /// Zooms by `factor` keeping the point under the pointer still.
-    fn zoom_at(self, factor: f64, px: f64, py: f64) -> Self {
+    pub(super) fn zoom_at(self, factor: f64, px: f64, py: f64) -> Self {
         let zoom = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
         let k = zoom / self.zoom;
         Camera {
@@ -69,13 +491,14 @@ impl Camera {
         }
     }
 
-    /// Brings a point of the map to the middle of the canvas.
-    fn center_on(self, x: f64, y: f64, width: f64, height: f64) -> Self {
-        let zoom = self.zoom.max(0.9);
+    /// Brings a point of the map to the middle of the room the panel and the signboard leave.
+    pub(super) fn center_on(self, x: f64, y: f64, width: f64, height: f64) -> Self {
+        let zoom = self.zoom;
+        let free = (width - PANEL_ROOM).max(320.0);
         Camera {
             zoom,
-            x: width / 2.0 - x * zoom,
-            y: height / 2.0 - y * zoom,
+            x: PANEL_ROOM + free / 2.0 - x * zoom,
+            y: (height - LEGEND_H) / 2.0 - y * zoom,
         }
     }
 }
@@ -87,6 +510,11 @@ pub fn MetroMap() -> Element {
     let mut open = use_signal(HashSet::<i64>::new);
     let metro = use_memo(move || match &*state.graph.read() {
         Load::Ready(model) => Some(Arc::new(Metro::build_with(model, &open.read()))),
+        _ => None,
+    });
+    // The map draws the session's places: each thing touched a station, each agent a line.
+    let places = use_memo(move || match &*state.graph.read() {
+        Load::Ready(model) => Some(Arc::new(Metro::places(model))),
         _ => None,
     });
     use_effect(move || {
@@ -112,6 +540,8 @@ pub fn MetroMap() -> Element {
     let mut drag = use_signal(|| None::<(f64, f64, Camera, bool)>);
     let mut dragged = use_signal(|| false);
     let hovered = use_signal(|| None::<i64>);
+    // 지도 or 노선도: the land under the lines, or the lines alone.
+    let mut plain = use_signal(|| true);
 
     let measure = move || async move {
         let el = mounted.peek().clone();
@@ -123,6 +553,8 @@ pub fn MetroMap() -> Element {
     };
 
     // A new session starts from its first view; a refresh of the same one keeps the camera.
+    // The detail column: open on a route, closed with its ✕ while the list stays.
+    let mut detail = use_signal(|| true);
     let drawn = use_signal(|| None::<Option<String>>);
     use_effect(move || {
         let Some(m) = metro() else { return };
@@ -130,13 +562,59 @@ pub fn MetroMap() -> Element {
         let mut drawn = drawn;
         let fresh = *drawn.peek() != Some(session.clone());
         drawn.set(Some(session));
+        if fresh {
+            detail.set(true);
+        }
+        // A stopped session opens on its first stop, as the Call being looked at.
+        if fresh
+            && *state.selected.peek() == Selection::None
+            && let Some(seq) = m.default_dest()
+        {
+            state.selected.set(Selection::Node(seq));
+        }
         if fresh || camera.peek().is_none() {
+            let Some(p) = places() else { return };
             spawn(async move {
                 measure().await;
                 let (w, h) = *size.peek();
-                camera.set(Some(Camera::first_view(&m, w, h)));
+                camera.set(Some(Camera::first_view(&p, w, h)));
             });
         }
+    });
+
+    // A new destination off the screen is brought into view; one on it stays where it is.
+    let framed = use_signal(|| None::<i64>);
+    use_effect(move || {
+        let selected = (state.selected)();
+        let Some(m) = places.peek().clone() else {
+            return;
+        };
+        let dest = match selected {
+            Selection::Node(seq) => m.station(seq).map(|s| s.seq),
+            Selection::None => None,
+        }
+        .or_else(|| m.default_dest());
+        let mut framed = framed;
+        if dest.is_none() || *framed.peek() == dest {
+            return;
+        }
+        framed.set(dest);
+        let Some(dest) = dest else { return };
+        spawn(async move {
+            measure().await;
+            let (w, h) = *size.peek();
+            let current = *camera.peek();
+            if let (Some(c), Some(st)) = (current, m.station(dest))
+                && w > 0.0
+                && {
+                    let (x, y) = Snake::new(&m, w, h).at(st.x, m.drawn_y(st));
+                    !c.shows(x, y, w, h)
+                }
+            {
+                let (x, y) = Snake::new(&m, w, h).at(st.x, m.drawn_y(st));
+                camera.set(Some(c.center_on(x, y, w, h)));
+            }
+        });
     });
 
     // "Fit" shows the whole map.
@@ -144,27 +622,20 @@ pub fn MetroMap() -> Element {
         if (state.fit)() == 0 {
             return;
         }
-        let Some(m) = metro.peek().clone() else {
+        let Some(m) = places.peek().clone() else {
             return;
         };
         spawn(async move {
             measure().await;
             let (w, h) = *size.peek();
-            let zoom = ((w - 60.0) / m.width)
-                .min((h - 60.0) / m.height)
-                .clamp(MIN_ZOOM, 1.0);
-            camera.set(Some(Camera {
-                zoom,
-                x: (w - m.width * zoom) / 2.0,
-                y: (h - m.height * zoom) / 2.0,
-            }));
+            camera.set(Some(Camera::fit(&m, w, h)));
         });
     });
 
     // Focus waits for the open session's own map.
     use_effect(move || {
         let Some(seq) = (state.focus)() else { return };
-        let Some(m) = metro() else { return };
+        let Some(m) = places() else { return };
         if *state.graph_of.read() != *state.current.read() {
             return;
         }
@@ -177,12 +648,13 @@ pub fn MetroMap() -> Element {
             let (w, h) = *size.peek();
             let current = *camera.peek();
             if let Some(c) = current {
-                camera.set(Some(c.center_on(station.x, station.y, w, h)));
+                let (x, y) = Snake::new(&m, w, h).at(station.x, m.drawn_y(&station));
+                camera.set(Some(c.center_on(x, y, w, h)));
             }
         });
     });
 
-    let Some(m) = metro() else {
+    let (Some(cm), Some(m)) = (metro(), places()) else {
         return rsx! { div { class: "metro", onmounted: move |e| mounted.set(Some(e.data())) } };
     };
     let cam = camera().unwrap_or(Camera {
@@ -191,22 +663,220 @@ pub fn MetroMap() -> Element {
         zoom: 1.0,
     });
     let picked = match (state.selected)() {
-        Selection::Node(seq) => m.station(seq).map(|s| s.seq),
+        Selection::Node(seq) => cm.station(seq).map(|_| seq),
         _ => None,
     };
-    let route = picked.map(|seq| m.route(seq));
-    let forks: HashSet<i64> = m
-        .lines
-        .iter()
-        .filter_map(|l| l.source.as_ref())
-        .filter_map(|s| m.station(s.by).map(|st| st.seq))
+    // The Call being looked at (the one picked, else the first that stopped), and on the map
+    // the station it was made at.
+    let call = picked.or_else(|| cm.default_dest());
+    let dest = call.and_then(|d| m.station(d)).map(|s| s.seq);
+    // Interchanges: where words that told the agent were read, and the main line's stations
+    // a branch shares, each with how far beside the main line the lines through it run.
+    let mut forks: HashSet<i64> = m.interchanges();
+    // Every main-line station more than one line stops at, with each line's dot: the main
+    // line's on it, a line running beside it at its side, a branch leaving there stacked out
+    // the way it goes, as Seoul's map stacks a line's dot for each line at a transfer.
+    let mut hubs: std::collections::HashMap<i64, Vec<&'static str>> =
+        std::collections::HashMap::new();
+    for (i, l) in m.lines.iter().enumerate().skip(1) {
+        let colour = line_colour(&m, i, l.x0);
+        let junction = m
+            .stations
+            .iter()
+            .find(|s| s.line == 0 && (s.x - l.x1).abs() < 0.5)
+            .map(|s| s.seq);
+        for q in l.shares.iter().copied().chain(junction) {
+            let e = hubs
+                .entry(q)
+                .or_insert_with(|| vec![line_colour(&m, 0, 0.0)]);
+            if !e.contains(&colour) {
+                e.push(colour);
+            }
+        }
+    }
+    // Each hub's dots, stacked across the line about its station.
+    let shared: std::collections::HashMap<i64, Vec<(f64, &'static str)>> = hubs
+        .into_iter()
+        .filter(|(_, c)| c.len() > 1)
+        .map(|(q, c)| {
+            let n = c.len() as f64;
+            (
+                q,
+                c.into_iter()
+                    .enumerate()
+                    .map(|(i, c)| ((i as f64 - (n - 1.0) / 2.0) * 7.0, c))
+                    .collect(),
+            )
+        })
         .collect();
-    let notes = notes(&m);
+    forks.extend(shared.keys().copied());
+    let k = cam.grow();
+    // The map folded to the canvas, and every station where it is drawn.
+    let snake = Snake::new(&m, size().0, size().1);
+    let drawn: Vec<Station> = m
+        .stations
+        .iter()
+        .map(|s| {
+            let (x, y) = snake.at(s.x, m.drawn_y(s));
+            Station { x, y, ..s.clone() }
+        })
+        .collect();
+    let spot = |seq: i64| drawn.iter().find(|s| s.seq == seq).cloned();
+    // The way to the Call being looked at, as a route finder draws it: the legs ridden in
+    // colour, everything else grey; where it set out, changed and arrived, pinned.
+    let legs = dest.and_then(|d| m.journey(d)).unwrap_or_default();
+    let route = dest.map(|d| m.route(d));
+    let start_ask = legs.first().and_then(|l| match l.board {
+        Board::Ask(i) => Some(i),
+        _ => None,
+    });
+    let transfer = legs.iter().find_map(|l| match l.board {
+        Board::Station(b) => m.station(b).cloned(),
+        _ => None,
+    });
+    let dest_station = dest.and_then(|d| m.station(d)).cloned();
+    // A change at the result whose words told the agent is walked, not ridden: the dotted way.
+    let walked = dest_station
+        .as_ref()
+        .and_then(|d| d.source.as_ref().map(|src| src.by))
+        .filter(|by| transfer.as_ref().is_some_and(|t| t.seq == *by));
+    // Each leg ridden: its line, its stretch, and whether it followed words read on the way.
+    let ridden: Vec<(usize, f64, f64, bool)> = legs
+        .iter()
+        .filter_map(|l| {
+            let x0 = match l.board {
+                Board::Ask(i) => m.asks.get(i)?.x,
+                Board::Station(b) => m.station(b)?.x,
+                Board::Nowhere => return None,
+            };
+            let told = walked.is_some() && l.board == Board::Station(walked.unwrap_or_default());
+            Some((l.line, x0, m.station(l.alight)?.x, told))
+        })
+        .collect();
+    let start_at = start_ask.map(|i| snake.at(m.asks[i].x, MAIN_Y));
+    let dest_at = dest_station.as_ref().and_then(|d| spot(d.seq));
+    let mut pins: Vec<(f64, f64)> = Vec::new();
+    pins.extend(start_at);
+    if let Some(d) = &dest_at {
+        pins.push((d.x, d.y));
+    }
+    // Every line and station keeps its colour: the way shows as a band under it and pins.
+    let on = |_: i64| true;
+    // Names on the way, as a route finder labels its stops, and what stopped elsewhere.
+    let shown: Vec<i64> = m
+        .stations
+        .iter()
+        .filter(|s| on(s.seq) && !crate::metro::place_label(s).is_empty())
+        .map(|s| s.seq)
+        .collect();
+    let ups: HashSet<i64> = m
+        .stations
+        .iter()
+        .filter(|s| {
+            drawn
+                .iter()
+                .any(|d| d.seq == s.seq && d.y < snake.at(s.x, MAIN_Y).1 - 1.0)
+        })
+        .map(|s| s.seq)
+        .collect();
+    // Where each turn's name stands over its marker, kept clear of the stations' names.
+    let turn_boxes: Vec<(f64, f64, f64, f64)> = m
+        .asks
+        .iter()
+        .enumerate()
+        .map(|(n, a)| {
+            let (ax, ay) = snake.at(a.x, MAIN_Y);
+            let said = match &a.agent {
+                Some(agent) => format!("턴 {} {} 보고", n + 1, clip(agent, 14)),
+                None => format!("턴 {} {}", n + 1, clip(&a.text, 60)),
+            };
+            let wide = (name_width(&said) * k).min(snake.w);
+            let gap = if start_ask == Some(n) { 30.0 } else { 12.0 } * k;
+            let (x0, x1) = if snake.backward(a.x) {
+                (ax - gap - wide, ax - gap)
+            } else {
+                (ax + gap, ax + gap + wide)
+            };
+            (x0, x1, ay - 30.0 * k, ay - 8.0 * k)
+        })
+        .collect();
+    // The pins' own room: over a station of the main line, beside one on a branch.
+    let mut taken = turn_boxes.clone();
+    for &(x, y) in &pins {
+        let side = dest_at
+            .as_ref()
+            .is_some_and(|d| d.line != 0 && (d.x - x).abs() < 0.5 && (d.y - y).abs() < 0.5);
+        taken.push(if side {
+            (x - 70.0 * k, x - 8.0 * k, y - 13.0 * k, y + 13.0 * k)
+        } else {
+            (x - 24.0 * k, x + 24.0 * k, y - 44.0 * k, y - 8.0 * k)
+        });
+    }
+    let names = map_names(&drawn, dest, &forks, k, &[], &shown, &ups, &taken);
+    let mut zoom_by = move |factor: f64| {
+        let (w, h) = *size.peek();
+        let current = *camera.peek();
+        if let Some(c) = current {
+            let cx = PANEL_ROOM + (w - PANEL_ROOM).max(320.0) / 2.0;
+            camera.set(Some(c.zoom_at(factor, cx, (h - LEGEND_H) / 2.0)));
+        }
+    };
 
     rsx! {
+        div { class: "routes",
+        RouteList { metro: cm.clone(), dest: call, detail }
+        if detail() && call.is_some() {
+            RoutePanel { metro: cm.clone(), dest: call, hovered, detail }
+        }
         div {
-            class: if drag().is_some_and(|d| d.3) { "metro dragging" } else { "metro" },
+            class: format!(
+                "metro{}{}{}",
+                if drag().is_some_and(|d| d.3) { " dragging" } else { "" },
+                "",
+                if plain() { " plain" } else { " landed" },
+            ),
             onmounted: move |e| mounted.set(Some(e.data())),
+            // A window resized fits the whole session again in the room it now has.
+            onresize: move |e| {
+                let Ok(box_size) = e.get_border_box_size() else { return };
+                let (w, h) = (box_size.width, box_size.height);
+                let (w0, h0) = *size.peek();
+                if (w - w0).abs() < 1.0 && (h - h0).abs() < 1.0 {
+                    return;
+                }
+                size.set((w, h));
+                let Some(m) = places.peek().clone() else { return };
+                let dest = match *state.selected.peek() {
+                    Selection::Node(seq) => m.station(seq).map(|s| s.seq),
+                    Selection::None => None,
+                }
+                .or_else(|| m.default_dest());
+                let _ = dest;
+                if w0 > 0.0 {
+                    camera.set(Some(Camera::fit(&m, w, h)));
+                }
+            },
+            // ← and → step the destination along its line, as the station sign's arrows do.
+            tabindex: "0",
+            onkeydown: move |e| {
+                let step = match e.key() {
+                    Key::ArrowLeft => 0,
+                    Key::ArrowRight => 1,
+                    _ => return,
+                };
+                let Some(m) = places.peek().clone() else { return };
+                let current = match *state.selected.peek() {
+                    Selection::Node(seq) => m.station(seq).map(|s| s.seq),
+                    Selection::None => None,
+                }
+                .or_else(|| m.default_dest());
+                let Some(here) = current.and_then(|d| m.station(d)).cloned() else { return };
+                let (prev, next) = neighbours(&m, &here);
+                if let Some(seq) = if step == 0 { prev } else { next } {
+                    e.prevent_default();
+                    state.selected.set(Selection::Node(seq));
+                }
+            },
             onwheel: move |e| {
                 e.prevent_default();
                 let current = *camera.peek();
@@ -242,270 +912,455 @@ pub fn MetroMap() -> Element {
             },
             onmouseup: move |_| drag.set(None),
             onmouseleave: move |_| drag.set(None),
-            onclick: move |_| {
-                if !dragged() {
-                    state.selected.set(Selection::None);
-                }
-            },
-            Summary { metro: m.clone() }
             div {
                 class: "metro-world",
-                style: "width: {m.width}px; height: {m.height}px; transform: translate({cam.x}px, {cam.y}px) scale({cam.zoom});",
+                style: "width: {snake.right()}px; height: {snake.bottom() + 200.0}px; transform: translate({cam.x}px, {cam.y}px) scale({cam.zoom}); --k: {k}",
                 svg {
-                    width: "{m.width}",
-                    height: "{m.height}",
-                    for b in m.bands.iter().cloned() {
-                        BandMark { band: b.clone(), y: m.lines[b.line].y, lit: route.is_none() }
-                    }
-                    for sec in m.sections.iter().cloned() {
-                        path {
-                            class: if route.is_some() { "section-tick dim" } else { "section-tick" },
-                            d: "M{sec.from - 10.0},{MAIN_Y - 88.0} V{MAIN_Y - 83.0} H{(sec.to + 10.0).max(sec.from + 24.0)} V{MAIN_Y - 88.0}",
+                    width: "{snake.right()}",
+                    height: "{snake.bottom() + 200.0}",
+                    // The land: parks, streets, avenues, and the rivers between the turns.
+                    if !plain() {
+                        {
+                            let land = land(&m, &snake);
+                            rsx! {
+                                g { class: "land",
+                                    for d in land.parks.iter() { path { class: "park", d: "{d}" } }
+                                    for d in land.streets.iter() { path { class: "street-edge", d: "{d}" } }
+                                    for d in land.avenues.iter() { path { class: "avenue-edge", d: "{d}" } }
+                                    for d in land.streets.iter() { path { class: "street", d: "{d}" } }
+                                    for d in land.avenues.iter() { path { class: "avenue", d: "{d}" } }
+                                    for d in land.rivers.iter() { path { class: "river-bank", d: "{d}" } }
+                                    for d in land.rivers.iter() { path { class: "river", d: "{d}" } }
+                                }
+                            }
+                        }
+                    } else {
+                        for (x0, _) in districts(&m).into_iter().skip(1) {
+                            path { class: "district-edge", d: "M{x0},{-6000.0} V{snake.bottom() + 6000.0}" }
                         }
                     }
-                    for (x0, x1, solid, agent) in m.main_runs() {
+                    // The way to the Call being looked at, as a soft band under the lines it rides,
+                    // so every line keeps its own colour.
+                    for (line, x0, x1, told) in ridden.iter().copied() {
+                        {
+                            let d = if line == 0 { snake.main_path(x0.min(x1), x0.max(x1)) } else { snake.branch_path(&m, line) };
+                            let colour = if told { TOLD } else { line_colour(&m, line, x0) };
+                            rsx! { path { class: "route-glow", style: "stroke: {colour}", d: "{d}" } }
+                        }
+                    }
+                    // Each line over a casing, as a map draws its roads.
+                    for (x0, x1, solid, _) in m.main_runs() {
+                        if solid { path { class: "casing", d: "{snake.main_path(x0, x1)}" } }
+                    }
+                    for (x0, x1, solid, _) in m.main_runs() {
                         path {
-                            class: format!(
-                                "track main{}{}",
-                                if agent.is_some() { " agent" } else { "" },
-                                if solid { "" } else { " idle" },
-                            ),
-                            d: "M{x0},{MAIN_Y} H{x1}",
+                            class: if solid { "track main" } else { "track main idle" },
+                            style: "stroke: {line_colour(&m, 0, x0)}",
+                            d: "{snake.main_path(x0, x1)}",
                         }
                     }
                     for i in 1..m.lines.len() {
-                        Track { metro: m.clone(), index: i, lit: route.as_ref().is_none_or(|r| r.lines.contains(&i)) }
+                        Track { metro: m.clone(), index: i, d: snake.branch_path(&m, i) }
+                    }
+                    // Each branch's terminus, capped with a bar.
+                    for i in 1..m.lines.len() {
+                        {
+                            let l = &m.lines[i];
+                            let ((cx, cy), across) = snake.terminus(&m, i);
+                            let c = 7.0 * k;
+                            let d = if across { format!("M{cx},{} V{}", cy - c, cy + c) } else { format!("M{},{cy} H{}", cx - c, cx + c) };
+                            rsx! { path { class: "end-cap", style: "stroke: {line_colour(&m, i, l.x0)}", d: "{d}" } }
+                        }
+                    }
+                    // The main line's two ends, capped with a bar as a metro line ends.
+                    for x in [crate::metro::LEFT, m.main_end()] {
+                        {
+                            let (cx, cy) = snake.at(x, MAIN_Y);
+                            rsx! { path { class: "end-cap", style: "stroke: {line_colour(&m, 0, x)}", d: "M{cx},{cy - 10.0 * k} V{cy + 10.0 * k}" } }
+                        }
                     }
                     for (n, a) in m.asks.iter().cloned().enumerate() {
                         circle {
-                            class: format!(
-                                "terminus{}{}",
-                                if a.agent.is_some() { " agent" } else { "" },
-                                if route.is_some() && n > 0 { " dim" } else { "" },
-                            ),
-                            cx: "{a.x}", cy: "{MAIN_Y}", r: "10",
+                            class: "terminus",
+                            style: "stroke: {turn_colour(n)}",
+                            cx: "{snake.at(a.x, MAIN_Y).0}", cy: "{snake.at(a.x, MAIN_Y).1}", r: "{8.0 * k}",
                         }
                     }
-                    for s in m.stations.iter().cloned() {
+                    // A station two lines share, as a metro map draws one: a capsule across both.
+                    for (q, dots) in shared.iter() {
+                        if let Some(st) = m.station(*q) {
+                            {
+                                let lo = dots.iter().map(|d| d.0).fold(0.0, f64::min);
+                                let hi = dots.iter().map(|d| d.0).fold(0.0, f64::max);
+                                let (ax, ay) = snake.at(st.x, MAIN_Y + lo);
+                                let (_, by) = snake.at(st.x, MAIN_Y + hi);
+                                let r = 5.8 * k;
+                                let (y0, y1) = (ay.min(by), ay.max(by));
+                                let pts: Vec<(f64, f64, &str)> = dots.iter().map(|&(o, c)| { let (x, y) = snake.at(st.x, MAIN_Y + o); (x, y, c) }).collect();
+                                rsx! {
+                                    rect { class: "xchg-capsule", x: "{ax - r}", y: "{y0 - r}", width: "{2.0 * r}", height: "{y1 - y0 + 2.0 * r}", rx: "{r}" }
+                                    for (x, y, c) in pts {
+                                        circle { class: "xchg-dot", style: "fill: {c}", cx: "{x}", cy: "{y}", r: "{3.4 * k}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (s, at) in m.stations.iter().cloned().zip(drawn.iter().cloned()) {
                         StationMark {
-                            station: s.clone(),
+                            capsule: shared.contains_key(&s.seq),
+                            station: at,
+                            turn: line_colour(&m, s.line, s.x),
                             ring: ring(&m, &s),
                             fork: forks.contains(&s.seq),
-                            picked: picked == Some(s.seq),
-                            lit: lit(&route, s.seq),
+                            picked: dest == Some(s.seq),
+                            off: !on(s.seq),
+                            k,
                             dragged,
                             open,
                             hovered,
                         }
                     }
                 }
-                // What the agent said it would do, over where it did it.
-                for sec in m.sections.iter().cloned() {
-                    div {
-                        class: if route.is_some() { "section-name dim" } else { "section-name" },
-                        style: "left: {sec.at}px; bottom: calc(100% - {MAIN_Y - 92.0}px); max-width: {crate::metro::NAME_WIDTH}px",
-                        onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(sec.seq)); },
-                        "{sec.text}"
-                    }
+                // The main line's badge at its start, as a line's number stands at its terminus.
+                span { class: "line-badge", style: "left: {crate::metro::LEFT}px; top: {MAIN_Y}px; background: {MAIN_INK}; transform: scale({k}) translate(calc(-100% - 10px), -50%)", "{m.badge(0)}" }
+                {
+                    let (ex, ey) = snake.at(m.main_end(), MAIN_Y);
+                    let past = if snake.backward(m.main_end()) { "calc(-100% - 10px)" } else { "10px" };
+                    rsx! { span { class: "line-badge", style: "left: {ex}px; top: {ey}px; background: {line_colour(&m, 0, m.main_end())}; transform: scale({k}) translate({past}, -50%)", "{m.badge(0)}" } }
                 }
-                // A branch is named by where its instruction came from.
+                // A branch is named by where its instruction came from, with its badge.
                 for (i, line) in m.lines.iter().enumerate() {
                     if line.kind == LineKind::Branch {
-                        BranchName { metro: m.clone(), index: i, lit: route.as_ref().is_none_or(|r| r.lines.contains(&i)) }
-                    }
-                    if line.kind == LineKind::Loose {
-                        div {
-                            class: if route.as_ref().is_none_or(|r| r.lines.contains(&i)) { "line-name loose" } else { "line-name loose dim" },
-                            style: "left: {m.station(line.stations[0]).map_or(0.0, |s| s.x) - 120.0}px; top: {line.y - 8.0}px",
-                            "출처 없음"
+                        {
+                            // A branch's badge stands past its terminus, as a line's number does.
+                            let ((bx, by), across) = snake.terminus(&m, i);
+                            let row_y = snake.at(line.x1, MAIN_Y).1;
+                            let past = if across {
+                                if snake.backward(line.x1) { "calc(-100% - 8px), -50%" } else { "8px, -50%" }
+                            } else if by < row_y { "-50%, calc(-100% - 6px)" } else { "-50%, 6px" };
+                            rsx! {
+                                span {
+                                    class: "line-badge",
+                                    title: "{line.name}",
+                                    style: "left: {bx}px; top: {by}px; background: {line_colour(&m, i, line.x0)}; transform: scale({k}) translate({past})",
+                                    "{line.badge}"
+                                }
+                            }
                         }
                     }
                 }
-                for (n, a) in m.asks.iter().cloned().enumerate().skip(1) {
-                    div {
-                        class: format!("turn-name{}{}", if a.agent.is_some() { " agent" } else { "" }, if route.is_some() && n > 0 { " dim" } else { "" }),
-                        style: "left: {a.x - 10.0}px; top: {MAIN_Y + 16.0}px",
-                        onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(a.seq)); },
-                        if let Some(agent) = a.agent.clone() {
-                            b { "에이전트 보고" }
-                            span { "{clip(&agent, 14)} · 사람이 아님" }
-                        } else {
-                            b { "다음 요청" }
-                            span { "{clip(&a.text, 18)}" }
+                // Each turn's request as its line's terminal: the turn, and who asked what.
+                for ((n, a), (_, x1)) in m.asks.iter().cloned().enumerate().zip(districts(&m)) {
+                    {
+                        // As far as the next turn's marker, less a gap so two names never run
+                        // into each other, and never past the row.
+                        let (ax, ay) = snake.at(a.x, MAIN_Y);
+                        // and short of a pin standing on the main line ahead of it on its row.
+                        let ahead = |px: f64| if snake.backward(a.x) { ax - px } else { px - ax };
+                        let pin_room = pins
+                            .iter()
+                            .filter(|&&(px, py)| (py - ay).abs() < 2.0 && ahead(px) > 1.0)
+                            .map(|&(px, _)| ahead(px) / k - 70.0)
+                            .fold(f64::MAX, f64::min);
+                        let wide = ((x1.min(right(&m)) - a.x).min(snake.w) / k - 48.0).min(pin_room).max(40.0);
+                        // Along the way the line runs from the marker, clear of the start pin when
+                        // it stands there.
+                        let gap = if start_ask == Some(n) { 30 } else { 12 };
+                        let nudge = if snake.backward(a.x) { format!("calc(-100% - {gap}px)") } else { format!("{gap}px") };
+                        let said = match a.agent.clone() {
+                            Some(agent) => format!("{} 보고", clip(&agent, 14)),
+                            None => clip(&a.text, 60),
+                        };
+                        rsx! {
+                            div {
+                                class: format!("terminal{}", if route.is_some() && start_ask != Some(n) { " off" } else { "" }),
+                                style: "left: {ax}px; top: {ay}px; max-width: {wide}px; --turn: {turn_colour(n)}; transform: scale({k}) translate({nudge}, calc(-100% - 10px))",
+                                title: "{a.text}",
+                                onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(a.seq)); },
+                                b { "턴 {n + 1}" }
+                                span { "{said}" }
+                            }
                         }
                     }
                 }
-                // Every station's short name, slanted like a metro map's so close ones clear.
-                for s in m.stations.iter().cloned() {
+                // Every station's name that fits, as a printed map names them all.
+                for (s, side) in names.iter().cloned() {
                     div {
                         class: format!(
-                            "station-name{}{}",
+                            "map-name{}{}{}",
                             match s.decision.as_deref() { Some("DENY") => " deny", Some("REVIEW") => " review", _ => "" },
-                            if lit(&route, s.seq) { "" } else { " dim" },
+                            if Some(s.seq) == dest { " picked" } else { "" },
+                            if forks.contains(&s.seq) { " hub" } else { "" },
                         ),
-                        style: "left: {s.x + 9.0}px; top: {s.y - 27.0}px",
-                        title: "{s.tool} {s.what}",
-                        "{s.name()}"
+                        style: format!(
+                            "left: {}px; top: {}px; transform: scale({k}) translate({})",
+                            s.x, s.y,
+                            match side {
+                                Side::Under => "-50%, 11px",
+                                Side::Over => "-50%, calc(-100% - 11px)",
+                                Side::Right => "12px, -50%",
+                                Side::Left => "calc(-100% - 12px), -50%",
+                            },
+                        ),
+                        title: "{s.what}",
+                        onclick: { let seq = s.seq; move |e: MouseEvent| { e.stop_propagation(); state.selected.set(Selection::Node(seq)); } },
+                        span { class: "mn-main", "{crate::metro::place_label(&s)}" }
+                        {
+                            let sub = place_sub(&s);
+                            rsx! { if !sub.is_empty() { span { class: "mn-sub", "{sub}" } } }
+                        }
                     }
                 }
-                // Names only where something happened; any other on hover.
-                for (s, lower) in notes {
-                    StationNote { station: s.clone(), lower, lit: lit(&route, s.seq), dragged }
+                // Where the way set out, changed and arrived, pinned as a route finder pins them.
+                if let (Some(i), Some((sx, sy))) = (start_ask, start_at) {
+                    div {
+                        class: "pin start",
+                        style: "left: {sx}px; top: {sy}px; --turn: {turn_colour(i)}; transform: scale({k}) translate(-50%, calc(-100% - 12px))",
+                        "출발"
+                    }
+                }
+                if let Some(d) = dest_at.clone() {
+                    {
+                    let if_side = if d.line != 0 { "calc(-100% - 14px), -50%" } else { "-50%, calc(-100% - 15px)" };
+                    rsx! {
+                    div {
+                        // Over a station of the main line; beside one on a branch, which runs across
+                        // the rows, on the side away from its names.
+                        class: format!("pin end {}{}", match d.decision.as_deref() { Some("DENY") => "deny", Some("REVIEW") => "review", _ => "" }, if d.line != 0 { " side" } else { "" }),
+                        style: "left: {d.x}px; top: {d.y}px; transform: scale({k}) translate({if_side})",
+                        "도착"
+                    }
+                    }
+                    }
+                }
+                // The station under the pointer, in a balloon over it.
+                if let Some(h) = hovered().filter(|&h| Some(h) != dest).and_then(spot) {
+                    {
+                        let (tone, verdict) = match h.decision.as_deref() {
+                            Some("DENY") => ("deny", "차단"),
+                            Some("REVIEW") => ("review", "확인 요청"),
+                            Some(_) => ("pass", "허용"),
+                            None => ("quiet", "판정 없음"),
+                        };
+                        rsx! {
+                            div { class: "balloon", style: "left: {h.x}px; top: {h.y}px; transform: scale({k}) translate(-50%, calc(-100% - 16px))",
+                                div { class: "bl-head",
+                                    span { class: "line-badge small", style: "background: {line_colour(&m, h.line, h.x)}", "{badge_at(&m, h.line, h.x)}" }
+                                    b { "{crate::metro::place_label(&h)}" }
+                                    if h.members.len() > 1 { span { class: "bl-n", "{h.members.len()}번" } }
+                                    span { class: "chip {tone}", "{verdict}" }
+                                }
+                                div { class: "bl-what", "{h.tool} · {clip(&h.what, 60)}" }
+                                div { class: "bl-foot",
+                                    span { "{clock(h.at)}" }
+                                    span { class: "bl-hint", "눌러서 길찾기" }
+                                }
+                            }
+                        }
+                    }
                 }
             }
+            MapLegend { metro: m.clone() }
+            // 일반지도 / 노선도, as a map app switches its kinds of map.
+            div { class: "maptype", onmousedown: move |e| e.stop_propagation(),
+                button { class: if plain() { "mt on" } else { "mt" }, onclick: move |_| plain.set(true), span { class: "mt-thumb lines" } span { "노선도" } }
+                button { class: if !plain() { "mt on" } else { "mt" }, onclick: move |_| plain.set(false), span { class: "mt-thumb land" } span { "지도" } }
+            }
+            {
+                let (n, w) = scale(cam.zoom);
+                rsx! {
+                    div { class: "scalebar",
+                        span { class: "sb-brand", "WITHHUMAN" }
+                        span { class: "sb-n", "역 {n}개" }
+                        span { class: "sb-bar", style: "width: {w}px" }
+                    }
+                }
+            }
+            div { class: "zoomctl", onmousedown: move |e| e.stop_propagation(),
+                button { title: "확대", onclick: move |_| zoom_by(1.25), "+" }
+                button { title: "축소", onclick: move |_| zoom_by(0.8), "−" }
+                button { class: "fit", title: "전체 보기", onclick: move |_| state.fit += 1, "전체" }
+            }
+        }
         }
     }
-}
-
-fn lit(route: &Option<Route>, seq: i64) -> bool {
-    route.as_ref().is_none_or(|r| r.stations.contains(&seq))
 }
 
 /// The class of the line a station rides, for its ring: an allowed station wears its line's colour.
 fn ring(m: &Metro, s: &Station) -> &'static str {
     match m.lines[s.line].kind {
-        LineKind::Branch => "on-branch",
-        LineKind::Loose => "on-loose",
-        LineKind::Main if m.turn_agent(s.x).is_some() => "on-agent",
+        LineKind::Branch => "on-agent",
         LineKind::Main => "on-main",
     }
 }
 
-/// Something happened here worth naming without a hover.
-fn is_notable(s: &Station) -> bool {
-    s.stopped() || s.decision.is_none() || s.irreversible || s.failed || s.unsourced || s.folded()
+/// The small line under a station's name, as Seoul's map writes it in English: where the file
+/// is, or what ran.
+fn place_sub(s: &Station) -> String {
+    use crate::metro::Action;
+    match s.action {
+        Action::Read | Action::Change if s.what.contains('/') && !s.what.contains("://") => {
+            let dir = s
+                .what
+                .rsplit_once('/')
+                .map_or("", |(d, _)| d)
+                .trim_start_matches("./");
+            let dir = dir
+                .rsplit('/')
+                .take(2)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("/");
+            clip(&dir, 22)
+        }
+        Action::Read if s.what.contains("://") => s
+            .what
+            .split("://")
+            .nth(1)
+            .and_then(|r| r.split('/').next())
+            .unwrap_or("")
+            .to_owned(),
+        Action::Run => s.tool.clone(),
+        _ => String::new(),
+    }
 }
 
-/// The stations named on the map, each with whether it drops a line to clear the name before it.
-fn notes(m: &Metro) -> Vec<(Station, bool)> {
-    let mut last: std::collections::HashMap<usize, (f64, bool)> = std::collections::HashMap::new();
+/// Where a station's name stands beside it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Side {
+    Under,
+    Over,
+    Right,
+    Left,
+}
+
+/// How wide a name is on screen, at the map's 12px.
+fn name_width(text: &str) -> f64 {
+    text.chars()
+        .map(|c| if c.is_ascii() { 7.0 } else { 12.5 })
+        .sum::<f64>()
+        + 4.0
+}
+
+/// The stations named on the map, each with whether its name sits under the station rather
+/// than over it. The most telling go first (the one looked at, then what stopped, then where a
+/// cause was read); one whose name fits neither over nor under without running into a name
+/// already placed, or into the turn band over the main line, is left to its hover card.
+/// `grow` is how much larger than the map's own scale names are drawn.
+#[allow(clippy::too_many_arguments)]
+fn map_names(
+    stations: &[Station],
+    dest: Option<i64>,
+    forks: &HashSet<i64>,
+    grow: f64,
+    pins: &[(f64, f64)],
+    shown: &[i64],
+    ups: &HashSet<i64>,
+    taken: &[(f64, f64, f64, f64)],
+) -> Vec<(Station, Side)> {
+    let mut picked: Vec<&Station> = stations.iter().filter(|s| shown.contains(&s.seq)).collect();
+    let rank = |s: &Station| {
+        if Some(s.seq) == dest {
+            0
+        } else if s.decision.as_deref() == Some("DENY") {
+            1
+        } else if s.stopped() {
+            2
+        } else if forks.contains(&s.seq) {
+            3
+        } else if s.source.is_some() || s.loose || s.unsourced || s.line != 0 {
+            // A branch's own stations are all the map shows of where it went.
+            4
+        } else {
+            5
+        }
+    };
+    picked.sort_by(|a, b| rank(a).cmp(&rank(b)).then(a.x.total_cmp(&b.x)));
+    let (gap, tall) = (10.0 * grow, 28.0 * grow);
+    // The pins stand over their stations,
+    let mut boxes: Vec<(f64, f64, f64, f64)> = pins
+        .iter()
+        .map(|&(x, y)| {
+            (
+                x - 24.0 * grow,
+                x + 24.0 * grow,
+                y - 44.0 * grow,
+                y - 8.0 * grow,
+            )
+        })
+        // the turns' names over the main line, and every station's own mark, which no name may
+        // cover.
+        .chain(taken.iter().copied())
+        .chain(stations.iter().map(|s| {
+            (
+                s.x - 8.0 * grow,
+                s.x + 8.0 * grow,
+                s.y - 8.0 * grow,
+                s.y + 8.0 * grow,
+            )
+        }))
+        .collect();
     let mut out = Vec::new();
-    for s in m.stations.iter().filter(|s| is_notable(s)) {
-        let lower = last
-            .get(&s.line)
-            .is_some_and(|(x, low)| s.x - x < 150.0 && !low);
-        last.insert(s.line, (s.x, lower));
-        out.push((s.clone(), lower));
+    for s in picked {
+        let wide = name_width(&crate::metro::place_label(s)) * grow + 6.0 * grow;
+        let half = wide / 2.0;
+        // Each side a name may take, as a box: under and over a station on the main line,
+        // right and left of one on a branch, which runs across it.
+        let spot = |side: Side| match side {
+            Side::Under => (s.x - half, s.x + half, s.y + gap, s.y + gap + tall),
+            Side::Over => (s.x - half, s.x + half, s.y - gap - tall, s.y - gap),
+            Side::Right => (
+                s.x + 12.0 * grow,
+                s.x + 12.0 * grow + wide,
+                s.y - tall / 2.0,
+                s.y + tall / 2.0,
+            ),
+            Side::Left => (
+                s.x - 12.0 * grow - wide,
+                s.x - 12.0 * grow,
+                s.y - tall / 2.0,
+                s.y + tall / 2.0,
+            ),
+        };
+        let clear = |(x0, x1, y0, y1): (f64, f64, f64, f64)| {
+            boxes
+                .iter()
+                .all(|&(a0, a1, b0, b1)| x1 <= a0 || x0 >= a1 || y1 <= b0 || y0 >= b1)
+        };
+        // Every name on the side away from the main line first (under it, over a branch that
+        // goes up, right of a branch), else the other side; one that fits neither waits for
+        // a hover.
+        let tries = if s.line != 0 {
+            [Side::Right, Side::Left]
+        } else if ups.contains(&s.seq) {
+            [Side::Over, Side::Under]
+        } else {
+            [Side::Under, Side::Over]
+        };
+        if let Some(&side) = tries.iter().find(|&&t| clear(spot(t))) {
+            boxes.push(spot(side));
+            out.push((s.clone(), side));
+        }
     }
     out
 }
 
-/// One line over the map saying what the session did.
 #[component]
-fn Summary(metro: Arc<Metro>) -> Element {
-    let state = use_context::<AppState>();
-    let calls: usize = metro.stations.iter().map(|s| s.members.len()).sum();
-    let branches = metro
-        .lines
-        .iter()
-        .filter(|l| l.kind == LineKind::Branch)
-        .count();
-    let loose: usize = metro
-        .lines
-        .iter()
-        .filter(|l| l.kind == LineKind::Loose)
-        .map(|l| l.stations.len())
-        .sum();
-    let stops = metro.stations.iter().filter(|s| s.stopped()).count();
-    let undo = metro
-        .stations
-        .iter()
-        .filter(|s| s.irreversible && !s.stopped())
-        .count();
-    let ask = metro
-        .asks
-        .first()
-        .map(|a| a.text.clone())
-        .unwrap_or_default();
-    let _ = state;
-    rsx! {
-        div { class: "map-summary", onmousedown: move |e| e.stop_propagation(),
-            div { class: "summary-ask", "{clip(&ask, 80)}" }
-            div { class: "counts",
-                span { b { "{calls}" } "번 도구 호출" }
-                if branches > 0 { span { class: "x", b { "{branches}" } "곳의 도구 결과가 지시" } }
-                if loose > 0 { span { b { "{loose}" } "번 출처 없음" } }
-                span { class: if stops > 0 { "s" } else { "" }, b { "{stops}" } "번 멈춤" }
-                if undo > 0 { span { class: "u", b { "{undo}" } "번 되돌릴 수 없는 작업 허용" } }
-            }
-        }
-    }
-}
-
-/// The band behind a subagent's stations, and its name.
-#[component]
-fn BandMark(band: Band, y: f64, lit: bool) -> Element {
-    let (x, w) = (band.x0 - 18.0, band.x1 - band.x0 + 36.0);
-    rsx! {
-        rect { class: if lit { "band" } else { "band dim" }, x: "{x}", y: "{y - 16.0}", width: "{w}", height: "32", rx: "16" }
-    }
-}
-
-#[component]
-fn Track(metro: Arc<Metro>, index: usize, lit: bool) -> Element {
+fn Track(metro: Arc<Metro>, index: usize, d: String) -> Element {
     let line = &metro.lines[index];
+    // The words' line is dashed: not an agent going somewhere, but what it was told.
     let class = match line.kind {
         LineKind::Main => "track main",
-        LineKind::Branch => "track branch",
-        LineKind::Loose => "track loose",
+        LineKind::Branch if line.badge == "글" => "track sub told",
+        LineKind::Branch => "track sub",
     };
     rsx! {
-        g { class: if lit { "" } else { "dim" },
-            path { class: "{class}", d: "{metro.path(index)}" }
-        }
-    }
-}
-
-/// The shape of an action, centred on (x, y): circle, square, triangle, diamond or hexagon.
-fn shape(action: Action, x: f64, y: f64, r: f64) -> String {
-    match action {
-        Action::Read | Action::Other => format!(
-            "M{},{y} a{r},{r} 0 1,0 {},0 a{r},{r} 0 1,0 {},0",
-            x - r,
-            2.0 * r,
-            -2.0 * r
-        ),
-        Action::Change => {
-            let h = r * 0.9;
-            format!(
-                "M{},{} h{} v{} h{} z",
-                x - h,
-                y - h,
-                2.0 * h,
-                2.0 * h,
-                -2.0 * h
-            )
-        }
-        Action::Run => {
-            let k = r * 1.15;
-            format!(
-                "M{x},{} L{},{} L{},{} z",
-                y - k,
-                x + k,
-                y + k * 0.75,
-                x - k,
-                y + k * 0.75
-            )
-        }
-        Action::Search => {
-            let k = r * 1.2;
-            format!(
-                "M{x},{} L{},{y} L{x},{} L{},{y} z",
-                y - k,
-                x + k,
-                y + k,
-                x - k
-            )
-        }
-        Action::Delegate => {
-            let k = r * 1.1;
-            let pts: Vec<String> = (0..6)
-                .map(|i| {
-                    let a = std::f64::consts::PI / 3.0 * i as f64;
-                    format!("{},{}", x + k * a.cos(), y + k * a.sin())
-                })
-                .collect();
-            format!("M{} z", pts.join(" L"))
+        g {
+            path { class: "casing", d: "{d}" }
+            path { class: "{class}", style: "stroke: {line_colour(&metro, index, line.x0)}", d: "{d}" }
         }
     }
 }
@@ -514,127 +1369,1110 @@ fn shape(action: Action, x: f64, y: f64, r: f64) -> String {
 #[allow(clippy::too_many_arguments)]
 fn StationMark(
     station: Station,
+    turn: &'static str,
     ring: &'static str,
     fork: bool,
     picked: bool,
-    lit: bool,
+    off: bool,
+    capsule: bool,
+    k: f64,
     dragged: Signal<bool>,
     open: Signal<HashSet<i64>>,
     hovered: Signal<Option<i64>>,
 ) -> Element {
     let mut state = use_context::<AppState>();
     let (cx, cy, seq) = (station.x, station.y, station.seq);
-    let folded = station.folded();
     // A folded station opens; any other is picked.
     let select = move |e: MouseEvent| {
         e.stop_propagation();
         if dragged() {
             return;
         }
-        if folded {
-            open.write().insert(seq);
-        } else {
-            state.selected.set(Selection::Node(seq));
-        }
-    };
-    let fill = match station.decision.as_deref() {
-        Some("DENY") => "mark deny",
-        Some("REVIEW") => "mark review",
-        None => "mark undecided",
-        _ => "mark pass",
+        // A station is a place: picking it picks the gravest Call made there.
+        state.selected.set(Selection::Node(seq));
     };
     let stop = station.stopped();
-    let r = if stop { 9.0 } else { 6.5 };
-    let count = station.members.len();
+    let r = if stop {
+        6.5
+    } else if fork {
+        5.5
+    } else {
+        4.2
+    };
     rsx! {
         g {
-            class: if lit { "station {ring}" } else { "station {ring} dim" },
+            class: format!("station {ring}{}{}", if fork { " xchg" } else { "" }, if off { " off" } else { "" }),
+            style: "--turn: {turn}",
+            // Drawn at its own size whatever the map's scale.
+            transform: "translate({cx} {cy}) scale({k}) translate({-cx} {-cy})",
             onclick: select,
             onmouseenter: move |_| hovered.set(Some(seq)),
             onmouseleave: move |_| hovered.set(None),
             // A larger, invisible target than the mark itself.
             circle { class: "hit", cx: "{cx}", cy: "{cy}", r: "16" }
-            if picked { circle { class: if stop { "halo stopped" } else { "halo" }, cx: "{cx}", cy: "{cy}", r: "{r + 7.0}" } }
-            // Where a branch leaves: an interchange, ringed in the branch's colour.
-            if fork && !folded { circle { class: "interchange", cx: "{cx}", cy: "{cy}", r: "{r + 4.5}" } }
-            if folded {
-                rect { class: "mark pass fold", x: "{cx - 17.0}", y: "{cy - 8.0}", width: "34", height: "16", rx: "8" }
-                text { class: "fold-count", x: "{cx}", y: "{cy + 3.5}", "×{count}" }
-            } else {
-                path { class: "{fill}", d: "{shape(station.action, cx, cy, r)}" }
+                match station.decision.as_deref() {
+                    // A stop sign: an octagon, flat side up.
+                    Some("DENY") => {
+                        let k = r * 1.12;
+                        let a = k * 0.4142;
+                        rsx! { path { class: "mark deny", d: "M{cx - a},{cy - k} H{cx + a} L{cx + k},{cy - a} V{cy + a} L{cx + a},{cy + k} H{cx - a} L{cx - k},{cy + a} V{cy - a} Z" } }
+                    }
+                    // A warning sign: a triangle, point up.
+                    Some("REVIEW") => {
+                        let k = r * 1.35;
+                        rsx! { path { class: "mark review", "stroke-linejoin": "round", d: "M{cx},{cy - k} L{cx + k * 0.95},{cy + k * 0.62} H{cx - k * 0.95} Z" } }
+                    }
+                    None => rsx! { circle { class: "mark undecided", cx: "{cx}", cy: "{cy}", r: "{r}" } },
+                    // A station two lines share is its capsule, drawn under the lines' marks.
+                    _ if capsule => rsx! {},
+                    // A station: a white disc in its line's colour; an interchange in black.
+                    // Where words were read and nothing else stops: a ring like a transfer's.
+                    _ if fork => rsx! { circle { class: "mark xchg-ring", cx: "{cx}", cy: "{cy}", r: "{r}" } },
+                    // A station, as Seoul's map draws one: a small white dot in the line.
+                    _ => rsx! { circle { class: "mark dot", cx: "{cx}", cy: "{cy}", r: "1.6" } },
+                }
                 if station.decision.as_deref() == Some("DENY") {
                     path { class: "glyph", d: "M{cx - 3.2},{cy - 3.2} l6.4,6.4 M{cx + 3.2},{cy - 3.2} l-6.4,6.4" }
                 }
                 if station.decision.as_deref() == Some("REVIEW") {
-                    path { class: "glyph", d: "M{cx},{cy - 4.0} v4.5 M{cx},{cy + 3.4} v0.4" }
+                    path { class: "glyph", d: "M{cx},{cy - 4.2} v4.2 M{cx},{cy + 3.6} v0.2" }
                 }
-                if station.irreversible {
-                    circle { class: "undo", cx: "{cx}", cy: "{cy}", r: "{r + 5.0}" }
+                if fork && stop { circle { class: "xchg-ring outer", cx: "{cx}", cy: "{cy}", r: "{r + 4.0}" } }
+        }
+    }
+}
+
+/// The colour of a leg that followed words read in a tool result rather than the request.
+const TOLD: &str = "#8a909a";
+/// How long a way took, as a route finder writes it.
+fn took(ms: i64) -> String {
+    let secs = ms.max(0) as f64 / 1000.0;
+    if secs < 10.0 {
+        format!("{secs:.1}초")
+    } else if secs < 60.0 {
+        format!("{}초", secs.round())
+    } else {
+        format!("{}분 {}초", (secs / 60.0).floor(), (secs % 60.0).round())
+    }
+}
+
+/// What a route finder says about a way: its legs, each leg's span, colour and badge (and
+/// whether it was walked), the Calls passed on each, how long it all took, and the changes.
+struct RouteFacts {
+    legs: Vec<crate::metro::Leg>,
+    segs: Vec<(i64, &'static str, String, bool)>,
+    passed: Vec<usize>,
+    total: Option<i64>,
+    changes: usize,
+}
+
+fn route_facts(m: &Metro, dest: &Station) -> RouteFacts {
+    let legs = m.journey(dest.seq).unwrap_or_default();
+    let by = dest.source.as_ref().map(|src| src.by);
+    let board_x = |b: Board| match b {
+        Board::Ask(i) => m.asks.get(i).map(|a| a.x),
+        Board::Station(q) => m.station(q).map(|s| s.x),
+        Board::Nowhere => None,
+    };
+    let mut segs = Vec::new();
+    let mut passed = Vec::new();
+    for leg in &legs {
+        let from = match leg.board {
+            Board::Ask(i) => m.asks.get(i).and_then(|a| a.at),
+            Board::Station(b) => m.station(b).and_then(|s| s.at),
+            Board::Nowhere => None,
+        };
+        let to = m.station(leg.alight).and_then(|s| s.at);
+        let span = from.zip(to).map_or(0, |(a, b)| (b - a).max(0));
+        let walked = matches!(leg.board, Board::Station(b) if Some(b) == by);
+        let x1 = m.station(leg.alight).map_or(dest.x, |s| s.x);
+        let colour = if walked {
+            TOLD
+        } else {
+            line_colour(m, leg.line, x1)
+        };
+        segs.push((span, colour, m.badge(leg.line), walked));
+        // The Calls on the stretch ridden, folded ones counted one by one.
+        let count = board_x(leg.board).map_or(1, |x0| {
+            m.stations
+                .iter()
+                .filter(|s| s.line == leg.line && s.x > x0.min(x1) && s.x <= x0.max(x1))
+                .map(|s| s.members.len().max(1))
+                .sum::<usize>()
+        });
+        passed.push(count);
+    }
+    let start = match legs.first().map(|l| l.board) {
+        Some(Board::Ask(i)) => m.asks.get(i).and_then(|a| a.at),
+        _ => None,
+    };
+    RouteFacts {
+        changes: legs.len().saturating_sub(1),
+        total: start.zip(dest.at).map(|(a, b)| b - a),
+        legs,
+        segs,
+        passed,
+    }
+}
+
+/// The map's key, as a metro map keeps one in its corner: each line by its colour, badge and
+/// name (the main line in each turn's colour), then what the marks mean.
+#[component]
+fn MapLegend(metro: Arc<Metro>) -> Element {
+    // Lines that share a name share a row: "E E2 E3 Explore 에이전트".
+    let mut rows: Vec<(String, Vec<String>, &'static str)> = Vec::new();
+    for (i, line) in metro.lines.iter().enumerate().skip(1) {
+        let colour = line_colour(&metro, i, line.x0);
+        match rows.iter_mut().find(|(name, ..)| *name == line.name) {
+            Some((_, badges, _)) => badges.push(metro.badge(i)),
+            None => rows.push((line.name.clone(), vec![metro.badge(i)], colour)),
+        }
+    }
+    let turns: Vec<&'static str> = (0..metro.asks.len().max(1)).map(turn_colour).collect();
+    rsx! {
+        div { class: "map-legend", onmousedown: move |e| e.stop_propagation(),
+            div { class: "lg-title", "노선 안내" }
+            div { class: "lg-row",
+                span { class: "lg-bar", span { style: "background: {MAIN_INK}" } }
+                span { class: "line-badge small", style: "background: {MAIN_INK}", "{metro.badge(0)}" }
+                span { "{metro.lines[0].name}" }
+            }
+            if turns.len() > 1 {
+                div { class: "lg-row turns",
+                    for (n, c) in turns.iter().enumerate() { span { class: "lg-turn", style: "background: {c}", "턴 {n + 1}" } }
+                    span { class: "lg-note", "요청이 들어온 곳" }
                 }
             }
-            if station.failed {
-                path { class: "fail", d: "M{cx - 7.0},{cy + 7.0} L{cx + 7.0},{cy - 7.0}" }
+            for (name, badges, colour) in rows.iter().cloned() {
+                div { class: "lg-row",
+                    span { class: "lg-bar", span { style: "background: {colour}" } }
+                    for b in badges.iter().take(4) {
+                        span { class: "line-badge small", style: "background: {colour}", "{b}" }
+                    }
+                    span { "{name}" }
+                }
+            }
+            div { class: "lg-marks",
+                span { class: "lg",
+                    svg { width: "12", height: "20", view_box: "-6 -10 12 20",
+                        rect { class: "lg-pill", x: "-5", y: "-9", width: "10", height: "18", rx: "5" }
+                        circle { cx: "0", cy: "-3.5", r: "2.6", style: "fill: {MAIN_INK}" }
+                        circle { cx: "0", cy: "3.5", r: "2.6", style: "fill: {BRANCH_COLOURS[0]}" }
+                    }
+                    "환승 · 여러 노선이 들른 곳"
+                }
+                span { class: "lg",
+                    svg { width: "14", height: "14", view_box: "-7 -7 14 14", circle { class: "lg-xchg", r: "5" } }
+                    "글을 읽은 곳"
+                }
+                span { class: "lg",
+                    svg { width: "14", height: "14", view_box: "-8 -8 16 16",
+                        path { class: "lg-deny", d: "M-2.8,-6.7 H2.8 L6.7,-2.8 V2.8 L2.8,6.7 H-2.8 L-6.7,2.8 V-2.8 Z" }
+                    }
+                    "차단"
+                }
+                span { class: "lg",
+                    svg { width: "14", height: "14", view_box: "-8 -8 16 16",
+                        path { class: "lg-review", "stroke-linejoin": "round", d: "M0,-7 L7.2,5 H-7.2 Z" }
+                    }
+                    "확인 요청"
+                }
+                span { class: "lg",
+                    svg { width: "20", height: "14", view_box: "-10 -7 20 14", path { class: "lg-glow", d: "M-8,0 H8" } }
+                    "고른 행동까지의 길"
+                }
             }
         }
     }
 }
 
-/// A named station: what happened, then the tool and file, under the station.
+/// A subagent's report as a person reads it: its words, without the envelope the engine kept.
+fn report_words(text: &str) -> String {
+    let mut t = text.trim();
+    if t.starts_with("<agent-message") {
+        t = t.split_once('>').map_or(t, |(_, rest)| rest).trim();
+    }
+    if t.starts_with('[') {
+        t = t.split_once(']').map_or(t, |(_, rest)| rest).trim();
+    }
+    t.trim_end_matches("</agent-message>").trim().to_owned()
+}
+
+/// A line's badge where the route rides it: the request's line opened by a subagent's report
+/// reads as the report's.
+fn badge_at(m: &Metro, line: usize, x: f64) -> String {
+    let _ = x;
+    m.badge(line)
+}
+
+/// The tone a line wears in the route card: its colour.
+fn line_tone(m: &Metro, line: usize, x: f64) -> &'static str {
+    let _ = x;
+    match m.lines[line].kind {
+        LineKind::Main => "main",
+        LineKind::Branch => "agent",
+    }
+}
+
+/// A moment as the route finder's times column writes it: the hour, minute and second.
+fn clock(ms: Option<i64>) -> String {
+    use chrono::TimeZone;
+    ms.and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single())
+        .map(|t| t.format("%H:%M:%S").to_string())
+        .unwrap_or_default()
+}
+
+/// Which routes the list shows, as a route finder's tabs split them by mode.
+#[derive(Clone, Copy, PartialEq)]
+enum Filter {
+    All,
+    Deny,
+    Review,
+    Allow,
+    Undecided,
+}
+
+/// An icon of the viewer's own set, drawn as Lucide draws its icons (a 24 grid, a 2px round
+/// stroke) and shaped like the signs a verdict means: a stop sign for a denial, a warning
+/// triangle for a review, a ticked circle for an allowed Call, a dashed one for no verdict.
+/// Shape carries the meaning before colour does.
 #[component]
-fn StationNote(station: Station, lower: bool, lit: bool, dragged: Signal<bool>) -> Element {
-    let mut state = use_context::<AppState>();
-    let seq = station.seq;
-    let (tone, head) = match station.decision.as_deref() {
-        Some("DENY") => ("deny", "차단"),
-        Some("REVIEW") => ("review", "확인"),
-        None => ("quiet", "판정 없음"),
-        _ if station.irreversible => ("undo", "되돌릴 수 없음"),
-        _ if station.failed => ("quiet", "실패"),
-        _ if station.unsourced => ("quiet", "출처 결과 없음"),
-        _ => ("quiet", ""),
+pub(super) fn Icon(name: &'static str, size: f64) -> Element {
+    rsx! {
+        svg {
+            class: "icon {name}",
+            width: "{size}", height: "{size}", view_box: "0 0 24 24",
+            "aria-hidden": "true",
+            match name {
+                // An octagon, flat side up, with a cross.
+                "deny" => rsx! {
+                    path { class: "fill", d: "M8.1 2h7.8L22 8.1v7.8L15.9 22H8.1L2 15.9V8.1Z" }
+                    path { class: "mark", d: "M9 9l6 6M15 9l-6 6" }
+                },
+                // A rounded triangle, point up, with an exclamation.
+                "review" => rsx! {
+                    path { class: "fill", d: "M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" }
+                    path { class: "mark", d: "M12 9.5v4.5M12 17.5h.01" }
+                },
+                "allow" => rsx! {
+                    circle { class: "line", cx: "12", cy: "12", r: "9.5" }
+                    path { class: "mark-line", d: "m8 12.2 2.8 2.8L16.2 9.4" }
+                },
+                // Who told it: a person, words in a document, or no one found.
+                "person" => rsx! {
+                    circle { class: "line", cx: "12", cy: "8", r: "4" }
+                    path { class: "line", d: "M4.5 21a7.5 7.5 0 0 1 15 0" }
+                },
+                "doc" => rsx! {
+                    path { class: "line", d: "M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8Z" }
+                    path { class: "line", d: "M14 2.5V8h5.5M8.5 13h7M8.5 17h5" }
+                },
+                "unknown" => rsx! {
+                    circle { class: "line dashed", cx: "12", cy: "12", r: "9.5" }
+                    path { class: "line", d: "M9.3 9.3a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.4-2.7 4" }
+                    path { class: "line", d: "M12 17.6h.01" }
+                },
+                "undecided" => rsx! {
+                    circle { class: "line dashed", cx: "12", cy: "12", r: "9.5" }
+                },
+                // Hard to undo: an undo arrow, struck through.
+                "undo" => rsx! {
+                    path { class: "line", d: "M9 14 4 9l5-5" }
+                    path { class: "line", d: "M4 9h10.5a5.5 5.5 0 0 1 4.3 8.9" }
+                    path { class: "line", d: "M3 21 21 3" }
+                },
+                // The tool failed: a circle with a slash.
+                "fail" => rsx! {
+                    circle { class: "line", cx: "12", cy: "12", r: "9.5" }
+                    path { class: "line", d: "m5.3 5.3 13.4 13.4" }
+                },
+                _ => rsx! {},
+            }
+        }
+    }
+}
+
+/// Each turn's colour, in the order the turns came: the list, the detail and the map's turn
+/// labels all paint a turn with it. Red and amber stay out: they mean a stop.
+pub(super) const TURN_COLOURS: [&str; 5] = ["#3e5c76", "#4f8a87", "#81729f", "#7b8656", "#9c7a5e"];
+
+/// The main agent's line: ink, ours rather than a metro's primary colours.
+pub(super) const MAIN_INK: &str = "#2b2f3a";
+
+pub(super) fn turn_colour(turn: usize) -> &'static str {
+    TURN_COLOURS[turn % TURN_COLOURS.len()]
+}
+
+/// The colours a subagent's line takes, one per kind of subagent, as a metro gives each line
+/// its own: none of them red (a stop) or the turns' blues.
+const BRANCH_COLOURS: [&str; 4] = ["#1f9e89", "#8c6bb1", "#4f7cac", "#5e8f3a"];
+
+/// A line's colour where it runs at `x`: the main line in its turn's colour, a subagent's line
+/// in its kind's.
+pub(super) fn line_colour(m: &Metro, line: usize, x: f64) -> &'static str {
+    if m.lines.get(line).is_some_and(|l| l.badge == "글") {
+        return TOLD;
+    }
+    if m.lines.get(line).is_none_or(|l| l.kind == LineKind::Main) {
+        // One line, one colour, as a metro map keeps it: the turns show at their markers.
+        let _ = x;
+        return MAIN_INK;
+    }
+    let mut kinds: Vec<&str> = Vec::new();
+    for l in m.lines.iter().filter(|l| l.kind == LineKind::Branch) {
+        if !kinds.contains(&l.name.as_str()) {
+            kinds.push(&l.name);
+        }
+    }
+    let at = kinds
+        .iter()
+        .position(|k| *k == m.lines[line].name)
+        .unwrap_or(0);
+    BRANCH_COLOURS[at % BRANCH_COLOURS.len()]
+}
+
+/// The turn a station belongs to: the last request before it.
+pub(super) fn turn_of(m: &Metro, s: &Station) -> usize {
+    m.asks.iter().rposition(|a| a.x <= s.x).unwrap_or(0)
+}
+
+/// One entry of a turn in the list: a Call, or a run of allowed ones folded together.
+#[derive(Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
+enum Entry {
+    Call(Station),
+    Fold(usize, Vec<Station>),
+}
+
+/// The colour a verdict wears in classes.
+fn verdict_tone(decision: Option<&str>) -> &'static str {
+    match decision {
+        Some("DENY") => "deny",
+        Some("REVIEW") => "review",
+        Some(_) => "pass",
+        None => "quiet",
+    }
+}
+
+/// The icon a verdict wears.
+pub(super) fn verdict_icon(decision: Option<&str>) -> &'static str {
+    match decision {
+        Some("DENY") => "deny",
+        Some("REVIEW") => "review",
+        Some(_) => "allow",
+        None => "undecided",
+    }
+}
+
+/// The engine's strongest reason for a verdict, by the probability it gave it.
+pub(super) fn strongest_reason(model: &crate::layout::Model, seq: i64) -> Option<(String, String)> {
+    let node = model.nodes.iter().find(|n| n.seq() == seq)?;
+    let trace = crate::model::parse_json(node.props.get("trace_json"));
+    let p = |r: &(String, String)| {
+        r.1.split_whitespace()
+            .last()
+            .and_then(|n| n.parse::<f64>().ok())
+            .unwrap_or(0.0)
     };
-    let what = if station.folded() {
-        "펼치기".to_owned()
+    super::trace::reasons(&trace)
+        .into_iter()
+        .max_by(|a, b| p(a).total_cmp(&p(b)))
+}
+
+/// What told the agent to make a Call, as the list groups it: the tool result whose words
+/// caused it, nothing in the session, or the turn's request.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Cause {
+    Result(i64),
+    Nothing,
+    Turn(usize),
+}
+
+fn cause_of(m: &Metro, s: &Station) -> Cause {
+    match &s.source {
+        Some(src) => Cause::Result(src.result),
+        None if s.loose || s.unsourced => Cause::Nothing,
+        None => Cause::Turn(m.asks.iter().rposition(|a| a.x <= s.x).unwrap_or(0)),
+    }
+}
+
+/// A cause as the list heads its group: "issues/42 결과의 지시", "출처 없음", the request.
+fn cause_title(m: &Metro, cause: &Cause, example: &Station) -> (&'static str, String) {
+    match cause {
+        Cause::Result(_) => match example.source.as_ref().and_then(|src| m.station(src.by)) {
+            Some(b) => ("used", format!("{}{}", b.cause_name(), source_kind(b))),
+            None => ("used", "도구 결과".to_owned()),
+        },
+        Cause::Nothing => ("nobody", "시킨 것 없음".to_owned()),
+        Cause::Turn(i) => {
+            let ask = &m.asks[*i];
+            let turn = if m.asks.len() > 1 {
+                format!("턴 {} · ", i + 1)
+            } else {
+                String::new()
+            };
+            match &ask.agent {
+                Some(agent) => ("person", format!("{turn}{agent} 보고")),
+                None => ("person", format!("{turn}사람의 요청")),
+            }
+        }
+    }
+}
+
+/// What told the agent, as the list's group heads and the detail's top both name it: a dot in
+/// the cause's colour and the same words.
+#[component]
+fn CauseTag(tone: &'static str, text: String) -> Element {
+    rsx! { span { class: "ctag {tone}", span { class: "dot" } span { class: "t", "{text}" } } }
+}
+
+/// The engine's reason for a stop, the same box wherever it shows.
+#[component]
+fn ReasonBox(tone: &'static str, text: String, p: String) -> Element {
+    rsx! { div { class: "reason {tone}", span { "{text}" } if !p.is_empty() { span { class: "p", " {p}" } } } }
+}
+
+/// A Call's two lines, the same in the list and the detail: its verdict, name and time; its
+/// tool, target and marks.
+#[component]
+fn CallLines(station: Station, title: String, full_time: bool) -> Element {
+    let s = &station;
+    let mark = match s.decision.as_deref() {
+        Some("DENY") => "차단",
+        Some("REVIEW") => "확인 요청",
+        Some(_) => "허용",
+        None => "판정 없음",
+    };
+    let time = clock(s.at);
+    let time = if full_time {
+        time
     } else {
-        String::new()
+        time.get(..5).unwrap_or_default().to_owned()
     };
-    let top = station.y + if lower { 38.0 } else { 16.0 };
+    rsx! {
+        span { class: "cr-mark", title: "{mark}", Icon { name: verdict_icon(s.decision.as_deref()), size: 16.0 } }
+        span { class: "cr-name", "{title}" }
+        span { class: "cr-time", "{time}" }
+        span { class: "cr-meta",
+            if !s.folded() { span { class: "cr-tool", "{s.tool}" } }
+            span { class: "cr-target", title: "{s.what}", "{s.what}" }
+            if s.irreversible { span { class: "cr-flag", title: "되돌리기 어려움", Icon { name: "undo", size: 13.0 } } }
+            if s.failed { span { class: "cr-flag", title: "도구 실패", Icon { name: "fail", size: 13.0 } } }
+            if let Some(agent) = s.agent.clone() { span { class: "cr-agent", title: "{agent}", "{agent}" } }
+        }
+    }
+}
+
+/// The route finder's first column: the session to look in and what happened there, a search
+/// for a station, tabs by verdict, then the Calls grouped by what told the agent to make them,
+/// the groups that stopped first. The allowed Calls of a group stay folded until asked for.
+#[component]
+fn RouteList(metro: Arc<Metro>, dest: Option<i64>, mut detail: Signal<bool>) -> Element {
+    // While the detail column is open it shows the reason; the list only marks the row.
+    let detail_open = detail();
+    let mut state = use_context::<AppState>();
+    let mut query = use_signal(String::new);
+    let mut searching = use_signal(|| false);
+    let mut filter = use_signal(|| Filter::All);
+    // Folded runs of allowed Calls the person opened, by their first Call.
+    let mut unfolded = use_signal(HashSet::<i64>::new);
+    let m = &metro;
+    let found: Vec<Station> = if searching() {
+        m.find(&query()).into_iter().cloned().collect()
+    } else {
+        Vec::new()
+    };
+    let first_found = found.first().map(|s| s.seq);
+    let mut pick = move |seq: i64| {
+        searching.set(false);
+        query.set(String::new());
+        state.selected.set(Selection::Node(seq));
+        detail.set(true);
+    };
+    let reasons: HashMap<i64, (String, String)> = match &*state.graph.read() {
+        Load::Ready(model) => m
+            .stations
+            .iter()
+            .filter(|s| s.stopped())
+            .filter_map(|s| Some((s.seq, strongest_reason(model, s.seq)?)))
+            .collect(),
+        _ => HashMap::new(),
+    };
+    // The tabs count Calls; the rows are stations, an express one standing for several.
+    let counts = m.verdicts();
+    let shown = |s: &Station| match filter() {
+        Filter::All => true,
+        Filter::Deny => s.decision.as_deref() == Some("DENY"),
+        Filter::Review => s.decision.as_deref() == Some("REVIEW"),
+        Filter::Allow => s.decision.is_some() && !s.stopped(),
+        Filter::Undecided => s.decision.is_none(),
+    };
+    // The Calls by turn, in the order things happened; more than three allowed Calls in a row
+    // fold into one entry until opened.
+    let mut turns: Vec<(usize, Vec<Entry>)> = Vec::new();
+    for s in m.stations.iter().filter(|s| shown(s)) {
+        let t = turn_of(m, s);
+        if turns.last().is_none_or(|(k, _)| *k != t) {
+            turns.push((t, Vec::new()));
+        }
+        turns.last_mut().unwrap().1.push(Entry::Call(s.clone()));
+    }
+    let fold_after = if filter() == Filter::Allow {
+        usize::MAX
+    } else {
+        2
+    };
+    for (_, entries) in turns.iter_mut() {
+        let mut out: Vec<Entry> = Vec::new();
+        let mut run: Vec<Station> = Vec::new();
+        // Every allowed Call the request asked for folds, an express station with them; two or
+        // more Calls in a row are worth one line.
+        let flush = |run: &mut Vec<Station>, out: &mut Vec<Entry>| {
+            let calls: usize = run.iter().map(|s| s.members.len()).sum();
+            if calls >= fold_after && !unfolded().contains(&(run[0].seq)) {
+                out.push(Entry::Fold(run[0].seq as usize, std::mem::take(run)));
+            } else {
+                out.extend(run.drain(..).map(Entry::Call));
+            }
+        };
+        for e in entries.drain(..) {
+            match e {
+                // What is worth a row of its own: a stop, a Call a tool result told it to make, one
+                // nothing told it to make, and the one being looked at.
+                Entry::Call(s)
+                    if !s.stopped()
+                        && Some(s.seq) != dest
+                        && (s.folded() || (s.source.is_none() && !s.loose && !s.unsourced)) =>
+                {
+                    run.push(s)
+                }
+                other => {
+                    flush(&mut run, &mut out);
+                    out.push(other);
+                }
+            }
+        }
+        flush(&mut run, &mut out);
+        *entries = out;
+    }
+    // The region to search in: the session, by its folder and what was asked.
+    let sessions: Vec<(String, String)> = match &*state.sessions.read() {
+        Load::Ready(list) => list
+            .iter()
+            .map(|s| {
+                let folder = s.folder();
+                let label = format!(
+                    "{}{}",
+                    if folder.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{folder} · ")
+                    },
+                    clip(s.title(), 34)
+                );
+                (s.id.clone(), label)
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let current = state.current.read().clone().unwrap_or_default();
+    // 길찾기: the first station the field finds, or else the Call the map would open on.
+    let finder = metro.clone();
+    let m_find = move |q: &str| finder.find(q).first().map(|s| s.seq);
+    let default = m.default_dest();
+    let tab = |f: Filter, label: &str, n: usize| {
+        rsx! {
+            button {
+                class: if filter() == f { "tab on" } else { "tab" },
+                disabled: n == 0 && f != Filter::All,
+                onclick: move |_| filter.set(f),
+                "{label}"
+                span { class: "n", "{n}" }
+            }
+        }
+    };
+    rsx! {
+        div { class: "route-list", onmousedown: move |e| e.stop_propagation(), onclick: move |e| e.stop_propagation(),
+            // The kinds of result, as a route finder's modes: all, then by verdict.
+            div { class: "nv-modes",
+                {tab(Filter::All, "전체", counts.all)}
+                {tab(Filter::Deny, "차단", counts.deny)}
+                {tab(Filter::Review, "확인", counts.review)}
+                {tab(Filter::Allow, "허용", counts.allow)}
+                if counts.none > 0 { {tab(Filter::Undecided, "판정 없음", counts.none)} }
+            }
+            // Where from and where to: the session as the region set out in, a station to arrive at.
+            div { class: "nv-od",
+                div { class: "od-row",
+                    span { class: "od-dot start" }
+                    select {
+                        id: "session-search",
+                        class: "region-pick",
+                        title: "세션 바꾸기",
+                        onchange: move |e| state.open_session(e.value()),
+                        for (id, label) in sessions.iter().cloned() {
+                            option { value: "{id}", selected: id == current, "{label}" }
+                        }
+                    }
+                }
+                div { class: "od-row find",
+                    span { class: "od-dot end" }
+                    input {
+                        value: "{query}",
+                        placeholder: "도착 역 찾기 · 파일, 명령, 도구",
+                        onfocus: move |_| searching.set(true),
+                        onblur: move |_| searching.set(false),
+                        oninput: move |e| query.set(e.value()),
+                        onkeydown: move |e| match e.key() {
+                            Key::Escape => { searching.set(false); query.set(String::new()); }
+                            Key::Enter => if let Some(seq) = first_found { pick(seq) },
+                            _ => {}
+                        },
+                    }
+                    if searching() && !query().trim().is_empty() {
+                        div { class: "suggest",
+                            if found.is_empty() { div { class: "none", "그런 역이 없습니다. 파일 이름이나 명령으로 찾아 보세요." } }
+                            for s in found.iter().cloned() {
+                                div {
+                                    class: "sug",
+                                    // Before the field's blur, which would close the list first.
+                                    onmousedown: move |e| { e.prevent_default(); pick(s.seq); },
+                                    span { class: "lbadge {line_tone(m, s.line, s.x)}", "{badge_at(m, s.line, s.x)}" }
+                                    span { class: "nm", "{s.name()}" }
+                                    span { class: "t", "{clock(s.at)}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "nv-actions",
+                button {
+                    class: "nv-reset",
+                    onclick: move |_| {
+                        query.set(String::new());
+                        filter.set(Filter::All);
+                        state.selected.set(Selection::None);
+                    },
+                    "⟲ 다시입력"
+                }
+                button {
+                    class: "nv-go",
+                    onclick: move |_| {
+                        let to = m_find(&query()).or(default);
+                        if let Some(seq) = to { pick(seq) }
+                    },
+                    "길찾기 ›"
+                }
+            }
+            // When the map was drawn, and whether it keeps up with the session.
+            div { class: "nv-when",
+                button {
+                    class: if (state.live)() { "on-pill on" } else { "on-pill" },
+                    title: "자동 갱신",
+                    onclick: move |_| state.live.toggle(),
+                    if (state.live)() { "ON" } else { "OFF" }
+                }
+                span { class: "nv-live", "자동 갱신" }
+                span { class: "nv-asof", "{clock(m.stations.iter().filter_map(|s| s.at).max())} 기준" }
+                button {
+                    class: "nv-re",
+                    title: "새로고침",
+                    onclick: move |_| {
+                        state.reload += 1;
+                        state.refresh += 1;
+                    },
+                    "⟳ 새로고침"
+                }
+            }
+            div { class: "groups",
+                for (t, entries) in turns.iter().cloned() {
+                    {
+                        let ask = m.asks.get(t).cloned();
+                        let colour = turn_colour(t);
+                        let calls: Vec<&Station> = entries.iter().flat_map(|e| match e {
+                            Entry::Call(s) => vec![s],
+                            Entry::Fold(_, v) => v.iter().collect(),
+                        }).collect();
+                        let deny = calls.iter().filter(|s| s.decision.as_deref() == Some("DENY")).count();
+                        let review = calls.iter().filter(|s| s.decision.as_deref() == Some("REVIEW")).count();
+                        let allowed: usize = calls.iter().filter(|s| !s.stopped()).map(|s| s.members.len()).sum();
+                        let who = match ask.as_ref().and_then(|a| a.agent.clone()) {
+                            Some(agent) => format!("{agent} 보고"),
+                            None => "사람의 요청".to_owned(),
+                        };
+                        let said = ask.as_ref().map(|a| report_words(&a.text)).unwrap_or_default();
+                        rsx! {
+                            div { class: "turn", style: "--turn: {colour}",
+                                div { class: "t-head",
+                                    div { class: "t-top",
+                                        span { class: "t-no", "턴 {t + 1}" }
+                                        span { class: "t-who", "{who}" }
+                                        span { class: "g-counts",
+                                            if deny > 0 { span { class: "c deny", Icon { name: "deny", size: 12.0 } "{deny}" } }
+                                            if review > 0 { span { class: "c review", Icon { name: "review", size: 12.0 } "{review}" } }
+                                            if allowed > 0 { span { class: "c pass", Icon { name: "allow", size: 12.0 } "{allowed}" } }
+                                        }
+                                    }
+                                    div { class: "t-said", title: "{said}", "{said}" }
+                                }
+                                for e in entries.iter().cloned() {
+                                    match e {
+                                        Entry::Call(s) => rsx! {
+                                            CallRow {
+                                                key: "{s.seq}",
+                                                metro: metro.clone(),
+                                                station: s.clone(),
+                                                on: dest == Some(s.seq),
+                                                reason: if detail_open { None } else { reasons.get(&s.seq).cloned() },
+                                                detail,
+                                            }
+                                        },
+                                        Entry::Fold(first, run) => {
+                                            let n: usize = run.iter().map(|s| s.members.len()).sum();
+                                            let first = first as i64;
+                                            rsx! {
+                                                div {
+                                                    key: "fold-{first}",
+                                                    class: "crow fold",
+                                                    onclick: move |_| { unfolded.write().insert(first); },
+                                                    span { class: "cr-mark", Icon { name: "allow", size: 16.0 } }
+                                                    span { class: "cr-name", "허용 {n}개" }
+                                                    span { class: "cr-time open", "펼치기" }
+                                                    span { class: "cr-meta", span { class: "cr-target", "{tool_counts(&run)}" } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if turns.is_empty() {
+                    p { class: "route-hint", "이 탭에 해당하는 호출이 없습니다." }
+                }
+            }
+        }
+    }
+}
+
+/// One Call in a group, on one line: its verdict, its name, what it acted on, when. The one
+/// picked opens to the call itself and, when stopped, the engine's reason.
+#[component]
+fn CallRow(
+    metro: Arc<Metro>,
+    station: Station,
+    on: bool,
+    reason: Option<(String, String)>,
+    mut detail: Signal<bool>,
+) -> Element {
+    let mut state = use_context::<AppState>();
+    let s = &station;
+    let seq = s.seq;
+    let vtone = verdict_tone(s.decision.as_deref());
+    let title = if s.folded() {
+        format!("허용 {}개", s.members.len())
+    } else {
+        s.name()
+    };
     rsx! {
         div {
-            class: if lit { format!("note {tone}") } else { format!("note {tone} dim") },
-            style: "left: {station.x - 10.0}px; top: {top}px",
-            onclick: move |e| {
-                e.stop_propagation();
-                if !dragged() {
-                    state.selected.set(Selection::Node(seq));
-                }
+            class: format!("crow {vtone}{}", if on { " on" } else { "" }),
+            onclick: move |_| {
+                state.selected.set(Selection::Node(seq));
+                detail.set(true);
             },
-            if !head.is_empty() { b { "{head}" } }
-            if !what.is_empty() { "{what}" }
+            CallLines { station: s.clone(), title: title.clone(), full_time: false }
+            if let Some(cause) = told_line(&metro, s) {
+                span { class: "cr-cause", "↳ {cause}" }
+            }
+            if on {
+                if let Some((text, p)) = reason.clone() { div { class: "cr-reason", ReasonBox { tone: vtone, text, p } } }
+            }
         }
     }
 }
 
-/// A branch's name where it turns into its row: the file or tool whose result told the agent.
-#[component]
-fn BranchName(metro: Arc<Metro>, index: usize, lit: bool) -> Element {
-    let mut state = use_context::<AppState>();
-    let line = metro.lines[index].clone();
-    let source = line.source.clone().expect("a branch has a source");
-    let x = metro.station(source.by).map_or(0.0, |s| s.x) + crate::metro::CHAMFER + 8.0;
-    let result = source.result;
-    let class = match (line.hot, lit) {
-        (true, true) => "line-name branch hot",
-        (true, false) => "line-name branch hot dim",
-        (false, true) => "line-name branch",
-        (false, false) => "line-name branch dim",
-    };
-    rsx! {
-        div { class, style: "left: {x}px; top: {line.y - 27.0}px",
-            onclick: move |e| { e.stop_propagation(); state.selected.set(Selection::Node(result)); },
-            "{line.name}"
-            if line.hot { " · 멈춤" }
+/// What told the agent to make a Call, when it was not the turn's request: the result whose
+/// words it followed, or that nothing in the session did.
+fn told_line(m: &Metro, s: &Station) -> Option<String> {
+    // An express station stands for many Calls; its first one's cause is not theirs.
+    if s.folded() {
+        return None;
+    }
+    if let Some(b) = s.source.as_ref().and_then(|src| m.station(src.by)) {
+        return Some(format!("{}{}", b.cause_name(), source_kind(b)));
+    }
+    (s.loose || s.unsourced).then(|| "시킨 것 없음".to_owned())
+}
+
+/// The tools a set of stations ran, each with how many times: "Read 20 · Edit 7".
+fn tool_counts(stations: &[Station]) -> String {
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for s in stations {
+        if s.folded() {
+            // An express station already says its tools: "Read 9 · Edit 6", or "15개".
+            for part in s.what.split(" · ") {
+                let mut words = part.rsplitn(2, ' ');
+                let (n, t) = (
+                    words.next().and_then(|n| n.parse::<usize>().ok()),
+                    words.next(),
+                );
+                match (t, n) {
+                    (Some(t), Some(n)) => add(&mut counts, t, n),
+                    _ => add(&mut counts, &s.tool, s.members.len()),
+                }
+            }
+        } else {
+            add(&mut counts, &s.tool, 1);
         }
+    }
+    fn add(counts: &mut Vec<(String, usize)>, tool: &str, n: usize) {
+        match counts.iter_mut().find(|(t, _)| t == tool) {
+            Some((_, c)) => *c += n,
+            None => counts.push((tool.to_owned(), n)),
+        }
+    }
+    counts.sort_by_key(|c| std::cmp::Reverse(c.1));
+    let name = |t: &str| match t {
+        "SubagentHandback" => "보고".to_owned(),
+        "Agent" | "Task" => "맡김".to_owned(),
+        _ => t.to_owned(),
+    };
+    let mut parts: Vec<String> = counts
+        .iter()
+        .take(3)
+        .map(|(t, c)| format!("{} {c}", name(t)))
+        .collect();
+    let rest: usize = counts.iter().skip(3).map(|(_, c)| c).sum();
+    if rest > 0 {
+        parts.push(format!("외 {rest}"));
+    }
+    parts.join(" · ")
+}
+
+/// What kind of text a cause's result is, after its name: a command's output, a file's
+/// contents, a page.
+fn source_kind(b: &Station) -> &'static str {
+    match (b.tool.as_str(), b.action) {
+        ("WebFetch" | "WebSearch", _) => " 페이지",
+        (_, crate::metro::Action::Run) => " 출력",
+        (_, crate::metro::Action::Search) => " 검색 결과",
+        (_, crate::metro::Action::Read | crate::metro::Action::Change) => " 내용",
+        _ => " 결과",
+    }
+}
+
+/// The detail column answers one question about the Call being looked at: did a person tell
+/// the agent to do this, and if not, what did. It draws the answer as a chain read top to
+/// bottom: the request, then (when something else took over) the words that did or a gap, then
+/// the action. A solid link is "as asked"; a broken one is where the request stopped being
+/// what the agent followed.
+#[component]
+fn RoutePanel(
+    metro: Arc<Metro>,
+    dest: Option<i64>,
+    mut hovered: Signal<Option<i64>>,
+    mut detail: Signal<bool>,
+) -> Element {
+    let mut state = use_context::<AppState>();
+    let m = &metro;
+    let Some(dest) = dest.and_then(|d| m.station(d)).cloned() else {
+        return rsx! {
+            div { class: "route-panel detail", onmousedown: move |e| e.stop_propagation(), onclick: move |e| e.stop_propagation(),
+                button { class: "dh-close", title: "닫기", onclick: move |_| detail.set(false), "✕" }
+                p { class: "route-hint", "지도나 목록에서 호출을 고르면, 그 호출을 누가 시켰는지 보여 줍니다." }
+            }
+        };
+    };
+    let turn = m.asks.iter().rposition(|a| a.x <= dest.x).unwrap_or(0);
+    let ask = m.asks.get(turn).cloned();
+    let report = ask.as_ref().and_then(|a| a.agent.clone());
+    let asker = if report.is_some() {
+        "에이전트 보고"
+    } else {
+        "사람의 요청"
+    };
+    // A result followed and allowed is the agent using what it read; only a stop makes the
+    // words a takeover.
+    let hot = dest.stopped();
+    // The same words and colour as this Call's group in the list.
+    let (tone, kicker) = cause_title(m, &cause_of(m, &dest), &dest);
+    let tone = if tone == "used" && hot { "text" } else { tone };
+    let top_tone: &'static str = if tone == "text" { "text" } else { "turn" };
+    let top_text = if kicker.starts_with("턴 ") {
+        kicker.clone()
+    } else {
+        format!("턴 {} · {kicker}", turn + 1)
+    };
+    let vtone = verdict_tone(dest.decision.as_deref());
+    let why: Option<(String, String)> = match &*state.graph.read() {
+        Load::Ready(model) => strongest_reason(model, dest.seq),
+        _ => None,
+    };
+    let mut focus = state.focus;
+    let inspecting = (state.inspect)();
+    let request = ask
+        .as_ref()
+        .map(|a| report_words(&a.text))
+        .unwrap_or_default();
+    let src = dest.source.clone();
+    let facts = route_facts(m, &dest);
+    let by_seq = dest.source.as_ref().map(|src| src.by);
+    rsx! {
+        div { class: "route-panel detail nv", style: "--turn: {turn_colour(turn)}", onmousedown: move |e| e.stop_propagation(), onclick: move |e| e.stop_propagation(),
+            button { class: "dh-close", title: "닫기", onclick: move |_| detail.set(false), "✕" }
+            div { class: "dp-top",
+                CauseTag { tone: top_tone, text: top_text.clone() }
+            }
+            // The result, as a route finder heads one: how long, when it arrived, how many changes.
+            div { class: "nv-head",
+                b { class: "nv-time", if let Some(t) = facts.total { "{took(t)}" } else { "—" } }
+                span { class: "nv-sep" }
+                span { "{clock(dest.at)} 도착" }
+                span { class: "nv-sep" }
+                span { if facts.changes > 0 { "환승 {facts.changes}회" } else { "환승 없음" } }
+            }
+            div { class: "nv-bar",
+                for (span, colour, badge, walked) in facts.segs.iter().cloned() {
+                    div {
+                        class: if walked { "nv-seg walk" } else { "nv-seg" },
+                        style: "flex: {span.max(1) as f64} 1 0; --seg: {colour}",
+                        if walked {
+                            span { class: "nv-badge walk", Icon { name: "doc", size: 11.0 } }
+                        } else {
+                            span { class: "nv-badge", style: "background: {colour}", "{badge}" }
+                        }
+                        span { class: "nv-span", "{took(span)}" }
+                    }
+                }
+            }
+            // Each leg as a route finder lists it: the line on the left, where it was boarded on
+            // the right; the words that told the agent where it changed.
+            div { class: "nv-steps",
+                for (n, leg) in facts.legs.iter().cloned().enumerate() {
+                    {
+                        let walked = matches!(leg.board, Board::Station(b) if Some(b) == by_seq);
+                        let x = m.station(leg.alight).map_or(dest.x, |s| s.x);
+                        let colour = if walked { TOLD } else { line_colour(m, leg.line, x) };
+                        let line_name = if walked { "글을 따라".to_owned() } else { m.lines[leg.line].name.clone() };
+                        let passed = facts.passed.get(n).copied().unwrap_or(0);
+                        rsx! {
+                            div { class: if walked { "nv-step walk" } else { "nv-step" }, style: "--line: {colour}",
+                                div { class: "nv-line",
+                                    if walked {
+                                        span { class: "nv-badge walk", Icon { name: "doc", size: 11.0 } }
+                                    } else {
+                                        span { class: "nv-badge", style: "background: {colour}", "{m.badge(leg.line)}" }
+                                    }
+                                    span { class: "nv-line-name", "{line_name}" }
+                                }
+                                div { class: "nv-stop",
+                                    match leg.board {
+                                        Board::Ask(_) => rsx! {
+                                            div { class: "nv-stop-head", b { "{asker}" } span { class: "nv-at", "{clock(ask.as_ref().and_then(|a| a.at))}" } }
+                                            div { class: "nv-said", "{request}" }
+                                        },
+                                        Board::Station(b) => {
+                                            let bs = m.station(b).cloned();
+                                            rsx! {
+                                                if let Some(bs) = bs {
+                                                    div {
+                                                        class: "nv-stop-head link",
+                                                        onclick: { let seq = bs.seq; move |_| focus.set(Some(seq)) },
+                                                        onmouseenter: { let seq = bs.seq; move |_| hovered.set(Some(seq)) },
+                                                        onmouseleave: move |_| hovered.set(None),
+                                                        b { "{bs.cause_name()}" }
+                                                        if walked { span { class: "nv-of", "{source_kind(&bs)}" } }
+                                                        if walked && hot { span { class: "ln-flag", "여기서 바뀜" } }
+                                                        span { class: "nv-at", "{clock(bs.at)}" }
+                                                    }
+                                                    if walked {
+                                                        if let Some(q) = src.clone() {
+                                                            // Keyed in a list, so another paragraph makes a new quote.
+                                                            for q in [q] {
+                                                                blockquote { key: "{q.result}-{q.paragraph:?}", class: if bs.action == crate::metro::Action::Run { "st-quote out" } else { "st-quote prose" },
+                                                                    super::trace::Preview { seq: q.result, paragraph: q.paragraph, lines: true }
+                                                                }
+                                                                div { class: "nv-meta",
+                                                                    span { class: "cr-tool", "{bs.tool}" }
+                                                                    span { class: "nv-src", title: "{bs.what}", "{bs.what}" }
+                                                                }
+                                                                div { class: "nv-meta faint",
+                                                                    if let Some(p) = q.paragraph { "문단 {p} · " }
+                                                                    "원인일 확률 {(q.probability * 100.0).round()}%"
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        div { class: "nv-meta faint", "여기서 {m.lines[leg.line].name}에게 맡김" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Board::Nowhere => rsx! {
+                                            div { class: "nv-stop-head", b { "시킨 것을 찾지 못함" } }
+                                            div { class: "nv-meta faint", "세션 안의 요청에도 도구 결과에도 이어지지 않습니다. 세션 밖의 입력이거나 에이전트가 스스로 한 일일 수 있습니다." }
+                                        },
+                                    }
+                                    if passed > 1 && !walked { div { class: "nv-pass", "{passed - 1}개 역 이동" } }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Where it arrived: the Call, with the engine's verdict and its reason.
+                div { class: "nv-step end {vtone}",
+                    div { class: "nv-line",
+                        span { class: "nv-end-dot {vtone}", Icon { name: verdict_icon(dest.decision.as_deref()), size: 14.0 } }
+                        span { class: "nv-line-name", "도착" }
+                    }
+                    div { class: "nv-stop",
+                        div { class: "crow big", CallLines { station: dest.clone(), title: dest.name(), full_time: true } }
+                        if let Some((text, p)) = why.clone().filter(|_| dest.stopped()) {
+                            div { class: "cr-reason", ReasonBox { tone: vtone, text, p } }
+                        }
+                    }
+                }
+            }
+            div { class: "dp-foot",
+                button {
+                    class: if inspecting { "inspect-link on" } else { "inspect-link" },
+                    onclick: move |_| state.inspect.toggle(),
+                    if inspecting { "엔진 판정 닫기" } else { "엔진 판정 자세히 보기 ›" }
+                }
+            }
+        }
+    }
+}
+
+/// The stations either side of one on its line, as a platform sign shows them. Before a
+/// branch's first station is the station it leaves.
+fn neighbours(m: &Metro, s: &Station) -> (Option<i64>, Option<i64>) {
+    let mut on_line: Vec<&Station> = m.stations.iter().filter(|o| o.line == s.line).collect();
+    on_line.sort_by(|a, b| a.x.total_cmp(&b.x));
+    let at = on_line.iter().position(|o| o.seq == s.seq).unwrap_or(0);
+    let prev = at.checked_sub(1).map(|i| on_line[i].seq);
+    (prev, on_line.get(at + 1).map(|o| o.seq))
+}
+
+/// The part of a text worth quoting with its lines kept: from a hidden comment when there is
+/// one, without blank lines or rules of dashes, cut to a few hundred characters.
+pub(super) fn excerpt_lines(text: &str) -> String {
+    let from = text.find("<!--").map_or(text, |i| &text[i..]);
+    let kept: Vec<&str> = from
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty())
+        .filter(|l| !l.trim().chars().all(|c| "-=_*~#".contains(c)))
+        .collect();
+    let joined = kept.join("\n");
+    // Cut by characters, not by words, so the lines stay.
+    if joined.chars().count() > 400 {
+        format!("{}…", joined.chars().take(400).collect::<String>())
+    } else {
+        joined
     }
 }
 
@@ -687,6 +2525,39 @@ mod tests {
             (0.0..w).contains(&sx) && (0.0..h).contains(&sy),
             "stop at {sx},{sy}"
         );
+    }
+
+    fn demo_metro(prefix: &str) -> Metro {
+        let graph = crate::demo::Demo::load();
+        let id = graph
+            .sessions()
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["id"].as_str())
+            .find(|id| id.starts_with(prefix))
+            .unwrap()
+            .to_owned();
+        Metro::build(&crate::layout::Model::build(
+            &serde_json::from_value(graph.graph(&id).unwrap()).unwrap(),
+        ))
+    }
+
+    // The whole-map view sits between the summary and the legend, with what is drawn inside.
+    #[test]
+    fn the_fit_keeps_the_map_between_summary_and_legend() {
+        let m = demo_metro("fa6576f7");
+        let (w, h) = (840.0, 760.0);
+        let c = Camera::fit(&m, w, h);
+        let snake = Snake::new(&m, w, h);
+        let top = MAIN_Y * c.zoom + c.y;
+        let low = snake.bottom() * c.zoom + c.y;
+        assert!(
+            top >= SUMMARY_H + OVER - 0.5 && low <= h - LEGEND_H - UNDER + 0.5,
+            "{top}..{low}"
+        );
+        // The whole width in view.
+        assert!(c.x >= 0.0 && c.x + snake.right() * c.zoom <= w + 0.5);
     }
 
     #[test]

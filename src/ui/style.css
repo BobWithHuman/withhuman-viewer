@@ -81,9 +81,9 @@ label.check { display: inline-flex; gap: 6px; align-items: center; white-space: 
 .session .folder { font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session .title { margin: 2px 0 4px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .session .actions { display: inline-flex; gap: 2px; visibility: hidden; }
-.session:hover .actions, .session .actions .pin.on { visibility: visible; }
+.session:hover .actions { visibility: visible; }
 .session .actions button { border: 0; background: none; padding: 0 4px; color: var(--muted); }
-.session .actions .pin.on { color: var(--review); }
+
 .session .actions .delete:hover { color: #fff; background: var(--deny); }
 .badges { display: flex; gap: 4px; flex-wrap: wrap; }
 .badge { font-size: 11px; padding: 0 6px; border-radius: 9px; background: var(--hover); color: var(--muted); }
@@ -92,14 +92,9 @@ label.check { display: inline-flex; gap: 6px; align-items: center; white-space: 
 .badge.solid { color: #fff; font-weight: 600; padding: 2px 8px; }
 
 .stage { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line);
-           background: var(--panel); }
+
 .canvas-wrap { position: relative; flex: 1; min-height: 0; }
-.canvas { position: absolute; inset: 0; }
-.legend { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 10px; flex-wrap: wrap; padding: 4px 8px;
-          background: color-mix(in srgb, var(--panel) 85%, transparent); border-radius: 6px; color: var(--muted); font-size: 11px; }
-.legend span { display: inline-flex; align-items: center; gap: 4px; }
-.legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
 .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 .notice-wrap { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); padding: 24px; }
 .notice { max-width: 440px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px;
@@ -160,7 +155,7 @@ table.props td:first-child { color: var(--muted); width: 34%; }
 .splitter { width: 5px; margin: 0 -2px; flex: none; cursor: col-resize; position: relative; z-index: 5; }
 .splitter:hover, .resizing .splitter { background: var(--accent); opacity: .5; }
 .resizing { cursor: col-resize; }
-.resizing .canvas, .resizing .inspector { pointer-events: none; }
+.resizing .inspector { pointer-events: none; }
 .sheet-backdrop:focus { outline: none; }
 .update-banner { display: flex; align-items: center; gap: 10px; padding: 7px 14px; background: var(--accent-soft);
                  border-bottom: 1px solid var(--line); }
@@ -255,9 +250,11 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .hit .muted { flex: none; }
 
 /* The metro map: the request is the main line, tool results that drove the agent branch off it. */
-:root { --line-main: #5b6577; --line-branch: #7b5bd6; --branch-soft: #f3effd; --line-loose: #9aa2ae; --line-agent: #1f9e8f; --agent-soft: #e3f4f1; --map-bg: #fbfbfa; }
+:root { --line-main: #2b2f3a; --line-branch: #8b4fd6; --branch-soft: #f3edfc; --line-loose: #9aa2ae; --line-agent: #00a58e; --agent-soft: #e0f4f0;
+        --map-bg: #eef1f0; --map-off: #cdd3d8; --map-ink: #1c2433; --sign: #243049; --sig-red: #e2352b; }
 @media (prefers-color-scheme: dark) {
-  :root { --line-main: #c9d0da; --line-branch: #a58cf0; --branch-soft: #2a2440; --line-loose: #6f7886; --line-agent: #45c2b1; --agent-soft: #17302d; --map-bg: #171a20; }
+  :root { --line-main: #7d9cf0; --line-branch: #b08cf5; --branch-soft: #2a2440; --line-loose: #6f7886; --line-agent: #45c2b1; --agent-soft: #17302d;
+          --map-bg: #161a20; --map-off: #3a414c; --map-ink: #e7ebf1; --sign: #0f1626; --sig-red: #ff5a4f; }
 }
 .metro { position: absolute; inset: 0; overflow: hidden; background: var(--map-bg); cursor: default; }
 .metro.dragging { cursor: grabbing; }
@@ -267,7 +264,7 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .track.main { stroke: var(--line-main); stroke-width: 5; }
 .track.branch { stroke: var(--line-branch); stroke-width: 4; }
 .track.loose { stroke: var(--line-loose); stroke-width: 3; stroke-dasharray: 2 7; }
-.track-end { fill: var(--line-branch); }
+
 .terminus { fill: var(--panel); stroke: var(--line-main); stroke-width: 5; }
 .station { cursor: pointer; }
 .station .hit { fill: transparent; }
@@ -290,23 +287,6 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .metro .label.deny .tool, .metro .label.deny .verdict { color: var(--deny); }
 .metro .label.review .tool, .metro .label.review .verdict { color: var(--review); }
 .metro .label.undo .verdict { color: var(--review); }
-.metro .ask { position: absolute; cursor: pointer; }
-.metro .ask .who { font-size: 11.5px; color: var(--muted); }
-.metro .ask .say { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.35; }
-.metro .ask .say.next { font-size: 13.5px; }
-.metro .ask .intent { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.metro .quote { position: absolute; max-width: 330px; background: var(--branch-soft); border-radius: 8px; padding: 5px 9px 6px;
-                box-shadow: inset 2px 0 0 var(--line-branch); cursor: pointer; }
-.metro .quote .src { font-size: 11px; color: var(--line-branch); font-weight: 650; }
-.metro .quote .txt { font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); opacity: .8;
-                     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.metro .quote.hot { background: color-mix(in srgb, var(--deny) 10%, var(--panel)); box-shadow: inset 2px 0 0 var(--deny); }
-.metro .quote.hot .src { color: var(--deny); }
-.metro .loose-label { position: absolute; font-size: 11px; color: var(--line-loose); font-weight: 650; white-space: nowrap; }
-.metro .last-word { position: absolute; font-size: 11.5px; color: var(--muted); max-width: 260px; cursor: pointer; }
-.metro .last-word b { color: var(--text); }
-.legend .line { display: inline-block; width: 18px; height: 0; border-top: 4px solid; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
-.legend .line.loose { border-top: 3px dotted var(--line-loose); }
 
 /* The story of one Call, above its verdict. */
 .story { padding: 2px 0 6px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
@@ -321,19 +301,15 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
    the band who did it. */
 .track.main.agent { stroke: var(--line-agent); }
 .terminus.agent { stroke: var(--line-agent); }
-.station.on-branch .pass { stroke: var(--line-branch); }
-.station.on-loose .pass { stroke: var(--line-loose); }
+
 .station.on-agent .pass { stroke: var(--line-agent); }
 .station .pass.undecided { stroke: var(--line-loose); stroke-width: 2.5; stroke-dasharray: 3 3; }
 .station .fail { stroke: var(--muted); stroke-width: 2.4; stroke-linecap: round; }
 .station .pass.fold { stroke-width: 3.5; }
 .station .fold-count { font: 700 10px -apple-system, sans-serif; text-anchor: middle; fill: var(--text); pointer-events: none; }
 .band { fill: var(--agent-soft); }
-.metro .band-label { position: absolute; font-size: 11px; font-weight: 650; color: var(--line-agent); white-space: nowrap; }
-.metro .ask .who.agent { color: var(--line-agent); font-weight: 650; }
-.metro .ask .say.agent { color: var(--line-agent); }
+
 .metro .label.quiet .verdict { color: var(--muted); font-weight: 600; }
-.legend i.band { width: 16px; height: 9px; border-radius: 5px; background: var(--agent-soft); border: 1px solid var(--line-agent); }
 
 /* The map at a glance: bold single-colour lines, plain shapes, red only where something stopped. */
 .metro { background: var(--map-bg); }
@@ -344,8 +320,7 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .station .mark { stroke-width: 3.5; stroke-linejoin: round; }
 .station .mark.pass { fill: var(--panel); }
 .station.on-main .mark.pass { stroke: var(--line-main); }
-.station.on-branch .mark.pass { stroke: var(--line-branch); }
-.station.on-loose .mark.pass { stroke: var(--line-loose); }
+
 .station.on-agent .mark.pass { stroke: var(--line-agent); }
 .station .mark.deny { fill: var(--deny); stroke: var(--panel); stroke-width: 2.5; }
 .station .mark.review { fill: var(--review); stroke: var(--panel); stroke-width: 2.5; }
@@ -355,36 +330,1133 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .station .halo { fill: none; stroke: var(--accent); stroke-width: 2.5; opacity: .6; }
 .station .halo.stopped { stroke: var(--deny); }
 .station:hover .mark.pass { stroke-width: 4.5; }
-.section-tick { fill: none; stroke: color-mix(in srgb, var(--muted) 45%, transparent); stroke-width: 1.2; }
-.metro .section-name { position: absolute; font-size: 15px; font-weight: 650; line-height: 1.3; color: var(--text); cursor: pointer;
-                        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
 .metro .line-name { position: absolute; font-size: 13.5px; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .metro .line-name.branch { color: var(--line-branch); }
 .metro .line-name.branch.hot { color: var(--deny); }
 .metro .line-name.loose { color: var(--line-loose); }
-.metro .turn-name { position: absolute; font-size: 13px; white-space: nowrap; display: flex; flex-direction: column; cursor: pointer; }
-.metro .turn-name b { font-weight: 700; color: var(--text); }
-.metro .turn-name span { color: var(--muted); }
-.metro .turn-name.agent b, .metro .turn-name.agent span { color: var(--line-agent); }
-.metro .note { position: absolute; font-size: 13px; white-space: nowrap; cursor: pointer; color: var(--muted); }
-.metro .note b { font-weight: 700; }
-.metro .note.deny, .metro .note.deny b { color: var(--deny); }
-.metro .note.review, .metro .note.review b { color: var(--review); }
-.metro .note.undo b { color: var(--review); }
-.metro .hover-name { position: absolute; font-size: 13px; white-space: nowrap; pointer-events: none; background: var(--panel);
-                     border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; box-shadow: var(--shadow); }
-.metro .hover-name b { font-weight: 650; }
-.map-summary { position: absolute; left: 14px; top: 10px; right: 14px; z-index: 2; pointer-events: none; }
-.map-summary .summary-ask { font-size: 14.5px; font-weight: 700; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.map-summary .counts { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 2px; flex-wrap: wrap; }
-.map-summary .counts b { color: var(--text); font-size: 13.5px; margin-right: 3px; }
-.map-summary .counts .x b { color: var(--line-branch); }
-.map-summary .counts .s b { color: var(--deny); }
-.map-summary .counts .u b { color: var(--review); }
 
 /* Station names, slanted; the main line is faint where the agent was off on a branch. */
 .track.main.idle { stroke-width: 3; stroke-dasharray: 2 7; opacity: .45; }
-.metro .station-name { position: absolute; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text);
-                       transform: rotate(-38deg); transform-origin: 0 100%; pointer-events: none; }
-.metro .station-name.deny { color: var(--deny); font-weight: 750; }
-.metro .station-name.review { color: var(--review); font-weight: 750; }
+
+/* With nothing picked, a session that stopped keeps the way to its stops in front: the rest
+   stays readable but faint, and the branch that led there runs red. */
+.metro.calm .dim { opacity: .35; }
+.track.branch.hot { stroke: var(--deny); stroke-width: 7; }
+
+/* The route finder. The map is the ground; the panel and the station sign float over it. The
+   type is the Korean transit signage gothic; colour belongs to the lines and to what stopped. */
+.metro { color: var(--map-ink); }
+.metro .casing { fill: none; stroke: var(--map-bg); stroke-width: 13; stroke-linecap: round; stroke-linejoin: round; }
+.metro .track.main, .metro .track.branch { stroke-width: 7; }
+
+.metro .line-name { text-shadow: 0 0 3px var(--map-bg), 0 0 4px var(--map-bg); }
+/* Off the route, a line is not faded out but greyed, as a map app greys the lines you do not ride. */
+.metro.calm .dim { opacity: 1; }
+.metro.calm g.dim .track, .metro.calm .track.dim { stroke: var(--map-off); }
+.metro.calm .station.dim .mark { stroke: var(--map-off); fill: var(--map-bg); }
+.metro.calm .station.dim .mark.deny, .metro.calm .station.dim .mark.review { fill: var(--map-off); stroke: var(--map-bg); }
+.metro.calm .station.dim .interchange, .metro.calm .station.dim .undo { stroke: var(--map-off); }
+.metro.calm .line-name.dim { color: color-mix(in srgb, var(--map-ink) 32%, var(--map-bg)); }
+.metro.calm .line-name.dim .lbadge { background: var(--map-off); }
+.metro.calm .terminus.dim { stroke: var(--map-off); }
+
+/* Pins: a teardrop over each end of the route. */
+
+/* A flag on a stem, as Citymapper pins a route's ends: it stands clear of the names below. */
+
+/* Line badges, round like the numbered discs on a metro map. */
+.lbadge { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 20px; height: 20px; padding: 0 5px;
+          box-sizing: border-box; border-radius: 10px; font-size: 11px; font-weight: 800; color: #fff; background: var(--line-main);
+          vertical-align: middle; margin-right: 6px; line-height: 1; }
+.lbadge.small { min-width: 16px; height: 16px; font-size: 9.5px; margin: 0 3px; }
+.lbadge.agent { background: var(--line-agent); }
+.lbadge.branch { background: var(--line-branch); }
+.lbadge.hot { background: var(--sig-red); }
+.lbadge.loose { background: var(--line-loose); }
+.metro .line-name .lbadge { margin-right: 5px; }
+
+/* The panel. */
+.route-panel { position: absolute; z-index: 3; left: 12px; top: 12px; bottom: 12px; width: 322px; display: flex; flex-direction: column;
+               background: var(--panel); border-radius: 18px; box-shadow: 0 1px 0 rgb(20 28 45 / .04), 0 12px 32px rgb(20 28 45 / .14);
+               overflow: hidden; cursor: default; }
+.route-panel .region { padding: 18px 20px 14px; }
+
+.route-hint { color: var(--muted); font-size: 13.5px; line-height: 1.55; margin: 0; padding: 18px 20px; }
+
+/* The way,as a Korean metro app lists it: a time,the line { flex: 1; overflow: auto; padding: 10px 18px 22px 10px; }
+
+/* The start: the line leaves from its middle. */
+
+/* The end: the line stops at its middle. */
+
+/* A change: the line above in the old line's colour, below in the new one's. */
+
+/* The summary, as the app heads a route: how long, then the changes and the stops. */
+
+/* Zoom, like a map app's: bottom right. */
+.zoomctl { position: absolute; z-index: 3; right: 16px; bottom: 18px; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
+           background: var(--panel); box-shadow: 0 6px 18px rgb(20 28 45 / .16); }
+.zoomctl button { width: 40px; height: 38px; padding: 0; border: 0; border-radius: 0; background: var(--panel); font-size: 18px; font-weight: 600;
+                  color: var(--map-ink); cursor: pointer; }
+.zoomctl button + button { border-top: 1px solid var(--line); }
+.zoomctl button.fit { font-size: 11.5px; font-weight: 800; }
+.zoomctl button:hover { background: color-mix(in srgb, var(--line-main) 8%, var(--panel)); }
+.zoomctl button:focus-visible { outline: 2px solid var(--line-main); outline-offset: 2px; }
+
+/* Map type sized to read at the zoom a route opens at. */
+
+.metro .line-name { font-size: 15px; font-weight: 800; }
+
+/* Stations as a Korean metro map draws them: white discs ringed in ink,whatever the line. */
+.metro .station .mark.pass,.metro .station.on-main .mark.pass,.metro .station.on-agent .mark.pass { stroke: var(--map-ink); stroke-width: 3; }
+.metro .station .interchange { stroke: var(--map-ink); stroke-width: 3; }
+/* The stretch of the request's line the agent was away from: a faint dotted thread. */
+.metro .track.main.idle { stroke-width: 3; stroke-dasharray: 1 7; opacity: .55; }
+
+/* The destination's ring reads at a glance. */
+.metro .station .halo { opacity: 1; stroke-width: 3; }
+/* The summary keeps to one line whatever the numbers say. */
+
+/* The bar over the map floats, as a map app's controls do, and gives the map its full height. */
+.stage { position: relative; }
+
+/* The engine's reason, under the arrival like an app's exit note. */
+
+/* The words a change followed, quoted under the change in the new line's colour. */
+
+/* The field shows its own focus; the input inside it does not draw a second ring. */
+
+/* The station card under the pointer. */
+.hovercard { position: absolute; z-index: 4; transform: translate(-50%, 22px); width: max-content; max-width: 280px; padding: 10px 12px;
+             border-radius: 12px; background: var(--panel); color: var(--map-ink); box-shadow: 0 10px 26px rgb(20 28 45 / .2); pointer-events: none; }
+.hovercard .hc-head { display: flex; align-items: center; font-size: 14px; }
+.hovercard .hc-head b { font-weight: 800; }
+.hovercard .hc-what { margin-top: 4px; font-size: 12px; line-height: 1.45; color: color-mix(in srgb, var(--map-ink) 62%, var(--panel));
+                      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+.hovercard .hc-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11.5px; }
+.hovercard .hc-verdict { font-weight: 800; padding: 1px 7px; border-radius: 8px; color: #fff; background: var(--muted); }
+.hovercard .hc-verdict.deny { background: var(--sig-red); }
+.hovercard .hc-verdict.review { background: var(--review); }
+.hovercard .hc-verdict.pass { background: var(--allow); }
+.hovercard .hc-time { font-variant-numeric: tabular-nums; color: color-mix(in srgb, var(--map-ink) 55%, var(--panel)); }
+.hovercard .hc-hint { margin-left: auto; color: var(--line-main); font-weight: 700; }
+
+/* When a pick brings the route onto a branch, the branch draws itself in from where it leaves. */
+@keyframes draw-in { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.metro.calm g:not(.dim) > .track.branch { stroke-dasharray: 1 1; animation: draw-in .5s cubic-bezier(.3, .7, .2, 1) both; }
+@media (prefers-reduced-motion: reduce) { .metro.calm g:not(.dim) > .track.branch { animation: none; stroke-dasharray: none; } }
+/* Two-line answers break evenly, never leaving one syllable alone. */
+
+/* The line and how far on one line: "요청선 | 2개 역 이동 펼치기". */
+
+/* The line's name is never cut; how far goes beside it, or under it when there is no room. */
+
+/* Korean breaks between words, not inside them; quoted code still breaks anywhere. */
+.routes { word-break: keep-all; overflow-wrap: anywhere; }
+.routes .route-hint { text-wrap: pretty; }
+.routes .hc-what { word-break: break-all; }
+/* A line's name sits on a chip of the map's ground, over the flags' stems, as map labels do. */
+.metro .line-name { z-index: 3; padding: 2px 8px 2px 3px; border-radius: 12px; background: var(--map-bg); text-shadow: none; }
+.metro:focus { outline: none; }
+/* Flags stand above the slanted names of the stations beside them. */
+
+/* A narrow map: the panel already names the destination, so the sign steps aside, and the bar
+   keeps its buttons but not its counts. */
+.stage { container-type: inline-size; container-name: stage; }
+
+/* The stations the route passes read first: larger and heavier than the greyed rest. */
+
+/* Route results, laid out as a map app's: the list of routes, the one opened, then the map. */
+.routes { position: absolute; inset: 0; display: flex; background: var(--map-bg); color: var(--map-ink); }
+.routes > .metro { position: relative; inset: auto; flex: 1; min-width: 0; container-type: inline-size; container-name: map; }
+.route-list, .routes > .route-panel { position: relative; inset: auto; z-index: 3; flex: none; width: 352px; display: flex; flex-direction: column;
+                                      border-radius: 0; box-shadow: none; background: var(--panel); border-right: 1px solid var(--line); overflow: hidden; }
+.routes > .route-panel { width: 340px; box-shadow: 8px 0 24px rgb(20 28 45 / .08); }
+
+/* The region: which session to search in, and what happened there. */
+.route-list .region { padding: 16px 18px 12px; }
+.region-pick { width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+               font: inherit; font-size: 12.5px; font-weight: 700; color: color-mix(in srgb, var(--map-ink) 70%, var(--panel)); }
+
+/* Tabs by verdict, as a route finder splits results by mode. */
+.route-list .tabs { display: flex; gap: 2px; padding: 12px 14px 0; border-bottom: 1px solid var(--line); }
+.route-list .tab { height: 36px; padding: 0 10px; border: 0; border-radius: 0; background: none; font: inherit; font-size: 14px; font-weight: 700;
+                   color: color-mix(in srgb, var(--map-ink) 55%, var(--panel)); cursor: pointer; box-shadow: inset 0 -2px 0 transparent; }
+.route-list .tab .n { margin-left: 4px; font-variant-numeric: tabular-nums; }
+.route-list .tab.on { color: var(--map-ink); box-shadow: inset 0 -2.5px 0 var(--map-ink); }
+.route-list .tab:disabled { opacity: .4; cursor: default; }
+
+/* The detail column's head: what it is,the verdict beside the map { display: flex; align-items: center; gap: 8px; padding: 12px 12px 4px 20px; }
+
+/* ---- Quality pass, after Naver Map's route results: white surfaces and hairlines, one accent
+   for what is selected, colour kept for the lines, numbers set large with small units. ---- */
+.routes { --ink: #1e2329; --ink-2: #5b6470; --ink-3: #8b939e; --hair: #e6e8eb; --surface: #f5f6f8; --pick: #1f6fff; --pick-soft: #eef4ff; }
+@media (prefers-color-scheme: dark) {
+  .routes { --ink: #eceff3; --ink-2: #aab2bd; --ink-3: #7d8692; --hair: #2c323b; --surface: #1c2027; --pick: #5b9bff; --pick-soft: #1b2a44; }
+}
+.routes { color: var(--ink); font-feature-settings: "tnum" 0; }
+.route-list, .routes > .route-panel { border-right: 1px solid var(--hair); background: var(--panel); }
+.routes > .route-panel { box-shadow: none; }
+
+/* The region and its answer. */
+.route-list .region { padding: 18px 20px 14px; }
+.region-pick { height: 34px; padding: 0 10px; border: 1px solid var(--hair); border-radius: 8px; font-size: 13px; font-weight: 700; color: var(--ink-2);
+               background: var(--panel); }
+
+/* Where from and where to: a white box with a hairline { margin: 0 20px; padding: 0; border: 1px solid #c9ced4; border-radius: 6px; background: var(--panel); color: var(--ink); }
+
+/* Tabs: text, an underline for the one shown, counts light. */
+.route-list .tabs { padding: 14px 20px 0; gap: 18px; border-bottom: 1px solid var(--hair); }
+.route-list .tab { height: 40px; padding: 0 2px; font-size: 15px; font-weight: 600; color: var(--ink-2); }
+.route-list .tab .n { margin-left: 5px; font-weight: 600; }
+.route-list .tab.on { font-weight: 800; color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+
+/* Durations: the number large { display: inline-flex; align-items: baseline; gap: 1px; letter-spacing: -0.03em; line-height: 1; }
+
+/* The bar: a grey track,each leg as long as it took,its badge on its start { display: flex; gap: 0; height: 22px; margin-top: 14px; padding-left: 9px; border-radius: 11px; background: var(--surface); }
+
+/* A route card: white,hairline between { padding: 20px 20px 14px; border-bottom: 8px solid var(--surface); }
+
+/* The list's foot: when it was read, live updates, refresh. */
+.list-foot { display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px 0 20px; border-top: 1px solid var(--hair); font-size: 13px; color: var(--ink-2); }
+.list-foot .asof { flex: 1; font-variant-numeric: tabular-nums; }
+.list-foot .live { display: inline-flex; align-items: center; gap: 5px; }
+.list-foot .re { width: 32px; height: 32px; padding: 0; border: 1px solid var(--hair); border-radius: 16px; background: var(--panel); font-size: 16px; cursor: pointer; color: var(--ink); }
+
+/* The detail column: no title bar, the close in the corner, the summary like the app's. */
+.routes > .route-panel { position: relative; }
+.route-panel .dh-close { position: absolute; z-index: 2; top: 14px; right: 14px; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 18px;
+                         background: none; font-size: 22px; font-weight: 300; color: var(--ink); cursor: pointer; }
+.route-panel .dh-close:hover { background: var(--surface); }
+
+.inspect-link { display: block; margin-top: 14px; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; font-weight: 700;
+                color: var(--pick); cursor: pointer; }
+.inspect-link.on { color: var(--ink-2); }
+
+/* The map's controls: a stack on the right, refresh apart from zoom. */
+.zoomctl { right: 16px; bottom: 20px; border-radius: 8px; box-shadow: 0 1px 4px rgb(20 28 45 / .18); border: 1px solid var(--hair); }
+.zoomctl button { width: 38px; height: 38px; font-size: 20px; font-weight: 400; }
+.zoomctl button.fit { font-size: 11px; font-weight: 700; }
+
+/* Arrows inside the ridden lines, white as a map app runs them. */
+
+.metro .line-name { text-shadow: 0 0 2px var(--map-bg), 0 0 4px var(--map-bg), 0 0 6px var(--map-bg); }
+
+/* ---- The map, after Metro Typing's play screen: a pale ground, pastel lines with hollow
+   ring stations, the ridden line full and bold, a train where the route arrives, and a
+   platform sign along the foot. ---- */
+.routes { --map-bg: #eef2ea; }
+@media (prefers-color-scheme: dark) { .routes { --map-bg: #151b17; } }
+.routes > .metro { background:
+  radial-gradient(1200px 600px at 20% 10%, color-mix(in srgb, #cfe3c2 35%, transparent), transparent 70%),
+  radial-gradient(900px 500px at 90% 90%, color-mix(in srgb, #d6e6ef 40%, transparent), transparent 70%), var(--map-bg); }
+
+/* Lines: off the route they keep their colour, pale; on it, full and bold. */
+.metro .casing { stroke: var(--map-bg); stroke-width: 12; }
+.metro .track.main, .metro .track.branch { stroke-width: 6; }
+.metro.calm g.dim .track, .metro.calm .track.dim { stroke-width: 4.5; opacity: .32; }
+.metro.calm g.dim .track.main, .metro.calm .track.main.dim { stroke: var(--line-main); }
+.metro.calm g.dim .track.branch { stroke: var(--line-branch); }
+.metro.calm g.dim .track.branch.hot { stroke: var(--sig-red); }
+.metro.calm g.dim .casing { opacity: 0; }
+.metro.calm g:not(.dim) > .track.branch, .metro.calm .track.main:not(.dim):not(.idle) { stroke-width: 8; }
+
+/* Stations: white discs ringed in their line's colour; a stop filled with its verdict. */
+.metro .station .mark { stroke-width: 3.2; }
+.metro .station .mark.pass, .metro .station.on-main .mark.pass { fill: #fff; stroke: var(--line-main); }
+
+.metro .station.on-agent .mark.pass { stroke: var(--line-agent); }
+
+.metro .station .interchange { fill: #fff; stroke: var(--map-ink); stroke-width: 2.5; }
+.metro.calm .station.dim { opacity: .45; }
+.metro.calm .station.dim .mark { fill: #fff; }
+.metro.calm .station.dim .mark.pass { stroke: inherit; }
+.metro.calm .station.dim.on-main .mark.pass { stroke: var(--line-main); }
+
+.metro.calm .station.dim .mark.deny { fill: var(--sig-red); stroke: #fff; }
+
+/* Names flat, centred over their station: the route's dark and bold, the rest pale. */
+
+/* The train where the route arrives. */
+
+  
+ 
+
+/* The run along the top: which line, how far into the session. */
+
+  
+ 
+
+/* The platform sign. */
+
+  
+
+   
+
+/* Controls: one rounded pill on the right, as the game sets them. */
+.zoomctl { top: 50%; bottom: auto; transform: translateY(-50%); right: 18px; border-radius: 22px; border: 0; padding: 6px 0;
+           background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 4px 16px rgb(20 28 45 / .12); }
+.zoomctl button { width: 44px; height: 40px; background: none; }
+.zoomctl button + button { border-top: 0; }
+
+/* The station itself takes the room its name needs; the neighbours share what is left. */
+
+/* The neighbours stay inside the sign however narrow it gets. */
+
+/* The train stands on the line just over its station, clear of the station's mark. */
+
+/* A card's line keeps its whole name; where it was boarded gets what is left. */
+
+/* ---- Lines are agents: navy for the main agent, teal for a subagent's run. ---- */
+.metro .track.sub { stroke: var(--line-agent); stroke-width: 6; stroke-linejoin: round; }
+.metro.calm g.dim .track.sub { stroke: var(--line-agent); }
+.metro.calm g:not(.dim) > .track.sub { stroke-width: 8; }
+.metro .line-name.sub { color: var(--line-agent); font-size: 13.5px; }
+.metro .line-name.sub .lbadge { background: var(--line-agent); }
+/* Turn boundaries: a rule and the turn's name over it. */
+.metro .turn-rule { fill: none; stroke: color-mix(in srgb, var(--map-ink) 22%, transparent); stroke-width: 1.5; stroke-dasharray: 4 6; }
+
+/* One subgraph, one long station. */
+.metro .capsule { fill: #fff; stroke: color-mix(in srgb, var(--map-ink) 35%, transparent); stroke-width: 2; }
+.metro.calm .capsule.dim { opacity: .4; }
+/* The picked Call's cause link. */
+.metro .cause-link { fill: none; stroke: var(--sig-red); stroke-width: 2.5; stroke-dasharray: 6 5; stroke-linecap: round; }
+/* A review is a diamond, so a verdict never rests on colour alone. */
+.metro .station .mark.review { fill: var(--review); stroke: #fff; stroke-width: 2.5; }
+
+/* ---- The left columns, a size down: the map is what the eye should land on. ---- */
+.route-list { width: 300px; }
+.routes > .route-panel { width: 316px; }
+.route-list .region { padding: 12px 14px 10px; }
+.region-pick { height: 28px; font-size: 12px; padding: 0 8px; }
+
+.route-list .tabs { padding: 8px 14px 0; gap: 14px; }
+.route-list .tab { height: 32px; font-size: 13px; }
+.route-list .tab .n { margin-left: 3px; }
+
+.list-foot { height: 40px; padding: 0 12px 0 14px; font-size: 12px; }
+.list-foot .re { width: 28px; height: 28px; font-size: 14px; }
+/* The detail column, on the same scale. */
+
+.inspect-link { margin-top: 10px; font-size: 12px; }
+.route-panel .dh-close { top: 8px; right: 8px; width: 30px; height: 30px; font-size: 18px; }
+
+/* A card for a reviewer: what was done,how it was judged and why { padding: 11px 14px 10px; }
+
+/* The detail's head: the station and its verdict, then the actual call. */
+
+/* ---- The list as groups by cause, a line per Call. ---- */
+.route-list .find { position: relative; margin: 2px 14px 0; }
+.route-list .find input { box-sizing: border-box; width: 100%; height: 32px; padding: 0 10px 0 30px; border: 1px solid var(--hair); border-radius: 8px;
+                          background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%238b939e' stroke-width='2'%3E%3Ccircle cx='6' cy='6' r='4.5'/%3E%3Cpath d='m9.5 9.5 3 3'/%3E%3C/svg%3E") no-repeat 10px 50%;
+                          font: inherit; font-size: 12.5px; color: var(--ink); outline: none; }
+.route-list .find input:focus { background-color: var(--panel); border-color: var(--pick); }
+.route-list .find .suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; background: var(--panel); border: 1px solid var(--hair);
+                             border-radius: 8px; box-shadow: 0 8px 24px rgb(20 28 45 / .12); padding: 4px; }
+.route-list .find .sug { display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.route-list .find .sug:hover { background: var(--surface); }
+.route-list .find .sug .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.route-list .find .sug .t { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.route-list .find .none { padding: 8px; font-size: 12px; color: var(--ink-2); }
+.route-list .groups { flex: 1; overflow: auto; padding-bottom: 8px; }
+.route-list .group { padding: 10px 0 6px; border-bottom: 1px solid var(--hair); }
+.route-list .g-head { display: flex; align-items: center; gap: 8px; padding: 0 14px 4px; }
+
+.route-list .g-counts { flex: none; display: flex; gap: 6px; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.route-list .g-counts .deny { color: var(--sig-red); }
+.route-list .g-counts .review { color: var(--review); }
+.route-list .g-counts .pass { color: var(--ink-3); }
+
+.crow { padding: 5px 14px; cursor: pointer; }
+.crow:hover { background: var(--surface); }
+.crow.on { background: var(--pick-soft); box-shadow: inset 3px 0 0 var(--pick); }
+
+.crow .cr-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 7px;
+                 font-size: 8.5px; font-weight: 900; color: #fff; box-sizing: border-box; }
+.crow .cr-mark.deny { background: var(--sig-red); }
+.crow .cr-mark.review { background: var(--review); border-radius: 2px; transform: rotate(45deg) scale(.8); }
+.crow .cr-mark.pass { border: 2px solid color-mix(in srgb, var(--allow) 70%, var(--panel)); }
+.crow .cr-mark.quiet { border: 1.5px dashed var(--ink-3); }
+.crow .cr-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow.deny .cr-name, .crow.review .cr-name { font-weight: 800; }
+.crow.pass .cr-name { color: var(--ink-2); font-weight: 500; }
+.crow .cr-flag { flex: none; width: 15px; height: 15px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center;
+                 font-size: 10px; font-weight: 900; }
+.crow .cr-flag.undo { color: var(--review); background: color-mix(in srgb, var(--review) 15%, var(--panel)); }
+.crow .cr-flag.fail { color: var(--sig-red); background: color-mix(in srgb, var(--sig-red) 10%, var(--panel)); }
+.crow .cr-agent { flex: none; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-weight: 700;
+                  color: var(--line-agent); }
+.crow .cr-time { flex: none; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.route-list .tabs { margin-top: 8px; }
+
+/* ---- Icons: one set, a 2px round stroke on a 24 grid; colour from what they mean. ---- */
+.icon { display: block; flex: none; overflow: visible; }
+.icon .line, .icon .mark-line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.icon .line.dashed { stroke-dasharray: 3.2 3; }
+.icon .fill { fill: currentColor; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.icon .mark { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; }
+.icon.deny { color: var(--sig-red); }
+.icon.review { color: #d99a0b; }
+.icon.allow { color: var(--allow); }
+.icon.undecided { color: var(--ink-3); }
+.icon.undo { color: #d99a0b; }
+.icon.fail { color: var(--sig-red); }
+/* In the rows and the group heads: the icon replaces the old glyph discs. */
+.crow .cr-mark { width: 16px; height: 16px; border: 0 !important; background: none !important; transform: none !important; border-radius: 0; }
+.crow .cr-flag { width: auto; height: auto; background: none !important; }
+.route-list .g-counts .c { display: inline-flex; align-items: center; gap: 3px; }
+.route-list .g-counts .c.pass { color: var(--ink-2); }
+.route-list .g-counts .c.pass .icon { color: var(--ink-3); }
+/* On the map: the same signs, a white rim to stand off the line. */
+.metro .station .mark.review { fill: #d99a0b; stroke: #fff; stroke-width: 2.2; }
+.metro .station .mark.deny { fill: var(--sig-red); stroke: #fff; stroke-width: 2.2; stroke-linejoin: round; }
+.metro .station .glyph { stroke: #fff; stroke-width: 2.2; stroke-linecap: round; }
+
+/* ---- One shape for every Call row: icon | name, time | tool and target. ---- */
+.crow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 10px; row-gap: 3px; align-items: center;
+        padding: 7px 14px; box-shadow: none; }
+.crow .cr-mark { grid-row: 1; grid-column: 1; width: 16px; height: 16px; }
+.crow .cr-name { grid-row: 1; grid-column: 2; font-size: 13px; font-weight: 600; color: var(--ink); }
+.crow.deny .cr-name, .crow.review .cr-name, .crow.pass .cr-name { font-weight: 600; color: var(--ink); }
+.crow .cr-time { grid-row: 1; grid-column: 3; }
+.crow .cr-time.open { font-size: 11px; font-weight: 600; color: var(--pick); }
+.crow .cr-meta { grid-row: 2; grid-column: 2 / 4; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.crow .cr-tool { flex: none; font: 600 10.5px/16px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 5px; border-radius: 4px;
+                 color: var(--ink-2); background: var(--surface); box-shadow: inset 0 0 0 1px var(--hair); }
+.crow .cr-target { flex: 1; min-width: 0; font: 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-3);
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow .cr-flag { flex: none; display: inline-flex; }
+.crow .cr-agent { flex: none; font-size: 10.5px; font-weight: 700; line-height: 16px; padding: 0 5px; border-radius: 4px;
+                  color: var(--line-agent); background: color-mix(in srgb, var(--line-agent) 10%, var(--panel)); max-width: 80px; }
+
+.crow.on { background: var(--pick-soft); box-shadow: inset 3px 0 0 var(--pick); }
+.crow.on .cr-target { color: var(--ink-2); white-space: normal; word-break: break-all; }
+.crow.fold .cr-name { color: var(--ink-2); }
+.crow.fold .cr-mark .icon { color: var(--ink-3); }
+/* Group heads: one quiet style whatever the cause. */
+.route-list .group { padding: 8px 0 4px; }
+.route-list .g-head { padding: 0 14px 2px; }
+
+.route-list .region { padding-bottom: 8px; }
+
+/* ---- The detail column,lighter: one weight for names { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+
+.inspect-link { font-weight: 600; }
+
+/* The reason: its words full width, how sure the engine was under them. */
+
+/* ---- The detail's story: three kinds of stop { padding: 16px 16px 20px 6px; }
+
+/* Rail marks: a ring where it set out, a pill where it changed, the verdict's sign where it arrived. */
+.story .node.start { display: block; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: var(--panel);
+                     border: 3px solid var(--line-main); margin-top: 2px; }
+
+/* The words that caused it: quoted in prose, wrapped at words, labelled with where they came from. */
+
+/* The reason: one box, its words then how sure. */
+.story .why { margin-top: 8px; padding: 8px 10px; border-radius: 8px; }
+
+/* ---- The detail column: who told the agent, then the action, then what told it. ---- */
+.route-panel.detail { overflow: auto; }
+
+/* ---- The detail as a chain: request, (words that took over | a gap), action. ---- */
+.dp-top { padding: 14px 44px 4px 16px; }
+
+.ln-flag { flex: none; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 8px; color: #fff; background: var(--sig-red); }
+
+/* The links: solid where the agent did as asked, broken where something else took over. */
+
+.dp-foot { padding: 8px 16px 18px; }
+/* A result the agent used and the engine allowed: the branch's colour, no alarm. */
+
+/* ---- The detail as one line of the map stood on end. ---- */
+.strip { --c-up: var(--line-main); padding: 10px 18px 4px 14px; }
+.strip.text { --c-hot: var(--sig-red); }
+.strip .st, .strip .seg { display: grid; grid-template-columns: 30px 1fr; column-gap: 12px; }
+.strip .rl { position: relative; display: flex; justify-content: center; }
+/* Every rail piece is the line's own width and colour. */
+.strip .seg .rl::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; margin-left: -3px; border-left: 6px solid var(--line-main); }
+.strip .seg.broken .rl::before { border-left: 3px dashed color-mix(in srgb, var(--ink-3) 70%, var(--panel)); margin-left: -1.5px; }
+.strip .seg.broken.gapped .rl::before { border-left-color: color-mix(in srgb, #d99a0b 65%, var(--panel)); }
+.strip .seg.hot .rl::before { border-left-color: var(--sig-red); }
+.strip .seg.used .rl::before { border-left-color: var(--line-branch); }
+.strip .seg { min-height: 44px; align-items: center; }
+.strip .sg-label { font-size: 11.5px; font-weight: 600; color: var(--ink-3); padding: 6px 0; }
+.strip .sg-label.alarm { color: var(--sig-red); }
+/* A stop's rail: the line comes in above its station and leaves below it. */
+.strip .st .rl::before, .strip .st .rl::after { content: ""; position: absolute; left: 50%; margin-left: -3px; border-left: 6px solid transparent; }
+.strip .st .rl::before { top: 0; height: 12px; }
+.strip .st .rl::after { top: 12px; bottom: 0; }
+.strip .st.ask .rl::after { border-left-color: var(--line-main); }
+.strip.text .st.ask .rl::after, .strip.nobody .st.ask .rl::after { border-left-color: transparent; }
+.strip .st.xchg.hot .rl::after { border-left-color: var(--sig-red); }
+.strip .st.xchg.used .rl::before { border-left-color: var(--line-main); }
+.strip .st.xchg.used .rl::after { border-left-color: var(--line-branch); }
+.strip .node { position: relative; z-index: 1; display: block; box-sizing: border-box; background: var(--panel); }
+.strip .node.ring { width: 20px; height: 20px; margin-top: 2px; border-radius: 50%; border: 5px solid var(--line-main); }
+.strip .node.xchg { width: 26px; height: 26px; margin-top: -1px; border-radius: 50%; border: 5px solid var(--sig-red);
+                    box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px color-mix(in srgb, var(--sig-red) 35%, var(--panel)); }
+.strip .st.xchg.used .node.xchg { border-color: var(--line-branch); box-shadow: 0 0 0 3px var(--panel), 0 0 0 5px color-mix(in srgb, var(--line-branch) 30%, var(--panel)); }
+.strip .node.gap { width: 26px; height: 26px; margin-top: -1px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #b57f06;
+                   box-shadow: 0 0 0 3px var(--panel); }
+.strip .node.act { width: 30px; height: 30px; margin-top: -3px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                   box-shadow: 0 0 0 3px var(--panel); }
+.strip .bd { min-width: 0; padding: 2px 0 6px; }
+.strip .st-label { font-size: 11px; font-weight: 700; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.strip .st-said { margin-top: 4px; font-size: 15px; font-weight: 500; line-height: 1.5; color: var(--ink); letter-spacing: -0.01em; }
+.strip .st-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 15px; font-weight: 750; letter-spacing: -0.01em; color: var(--ink); line-height: 1.35; }
+.strip .st.xchg.hot .st-name { color: var(--sig-red); }
+.strip .st-of { font-weight: 500; color: var(--ink-2); margin-right: 4px; }
+.strip .st-quote { margin: 10px 0 8px; padding: 0 0 0 14px; border-left: 3px solid color-mix(in srgb, var(--sig-red) 45%, var(--panel)); }
+.strip .st.xchg.used .st-quote { border-left-color: color-mix(in srgb, var(--line-branch) 45%, var(--panel)); }
+.strip .st-quote .preview { margin: 0; padding: 0; background: none; font-family: inherit; font-size: 14px; line-height: 1.65; color: var(--ink);
+                            white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; }
+.strip .st.xchg { cursor: pointer; border-radius: 10px; }
+.strip .st.xchg:hover .st-name { text-decoration: underline; text-underline-offset: 3px; }
+.strip .st-meta { display: flex; align-items: flex-start; gap: 6px; min-width: 0; margin-top: 5px; font-size: 11.5px; color: var(--ink-2); }
+.strip .st-meta.faint { color: var(--ink-3); font-variant-numeric: tabular-nums; line-height: 1.5; }
+.strip .st-meta .cr-tool { flex: none; font: 600 10.5px/17px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 5px; border-radius: 4px;
+                           color: var(--ink-2); background: var(--surface); box-shadow: inset 0 0 0 1px var(--hair); }
+.strip .st-src { flex: 1; min-width: 0; font: 11px/17px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-2);
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.strip .seg { align-items: stretch; }
+.strip .seg .sg-label { align-self: center; }
+.strip .st-of { margin-left: -4px; }
+
+/* ---- The strip, calmer: a thinner line, smaller stops, raw text kept raw. ---- */
+.strip { padding: 8px 16px 4px 12px; }
+.strip .st, .strip .seg { grid-template-columns: 24px 1fr; column-gap: 12px; }
+.strip .seg { min-height: 22px; }
+.strip .seg .rl::before, .strip .st .rl::before, .strip .st .rl::after { border-left-width: 4px; margin-left: -2px; }
+.strip .seg.broken .rl::before { border-left-width: 2px; margin-left: -1px; }
+.strip .st .rl::before { height: 9px; }
+.strip .st .rl::after { top: 9px; }
+.strip .node.ring { width: 14px; height: 14px; margin-top: 2px; border-width: 3.5px; }
+.strip .node.xchg { width: 18px; height: 18px; margin-top: 0; border-width: 4px; box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px color-mix(in srgb, var(--sig-red) 30%, var(--panel)); }
+.strip .st.xchg.used .node.xchg { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px color-mix(in srgb, var(--line-branch) 28%, var(--panel)); }
+.strip .node.act { width: 22px; height: 22px; margin-top: -2px; }
+.strip .node.act .icon { width: 20px; height: 20px; }
+.strip .node.gap { width: 20px; height: 20px; }
+.strip .bd { padding: 0 0 4px; }
+.strip .st-label { font-size: 11px; font-weight: 600; }
+.strip .st-said { margin-top: 2px; font-size: 13.5px; line-height: 1.5; }
+.strip .st-name { font-size: 13.5px; font-weight: 650; gap: 0; }
+.strip .st-of { margin: 0 6px 0 0; font-weight: 500; color: var(--ink-3); }
+.strip .st-quote { margin: 8px 0 6px; padding: 8px 10px; border: 0; border-radius: 6px; background: var(--surface);
+                   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--sig-red) 55%, var(--panel)); }
+.strip .st.xchg.used .st-quote { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--line-branch) 55%, var(--panel)); }
+.strip .st-quote .preview { font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); white-space: pre-wrap;
+                            word-break: break-all; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.strip .st-meta { margin-top: 4px; }
+
+.strip .sg-label { font-size: 11px; padding: 3px 0; }
+.strip .st-of { margin-left: 4px; }
+.strip .st-quote .preview { word-break: normal; overflow-wrap: anywhere; -webkit-line-clamp: 8; }
+
+/* ---- Shared parts: the same tag, Call lines and reason box in the list and the detail. ---- */
+.ctag { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 11.5px; font-weight: 700; color: var(--ink-2); }
+.ctag .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--line-main); }
+.ctag .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctag.person .dot { background: var(--line-main); }
+.ctag.used .dot { background: var(--line-branch); }
+.ctag.text .dot { background: var(--sig-red); }
+.ctag.text { color: var(--sig-red); }
+.ctag.nobody .dot { background: #d99a0b; }
+.ctag.nobody { color: #a87505; }
+.route-list .g-head .ctag { flex: 1; }
+.dp-top .ctag { font-size: 12px; }
+.reason { padding: 7px 10px; border-radius: 6px; font-size: 12px; line-height: 1.5; color: var(--ink); background: var(--surface); }
+.reason.deny { background: color-mix(in srgb, var(--sig-red) 7%, var(--panel)); }
+.reason.review { background: color-mix(in srgb, #d99a0b 10%, var(--panel)); }
+.reason .p { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.cr-reason { grid-row: 3; grid-column: 2 / 4; margin-top: 4px; }
+/* The detail's action is the list's row, a size up, without the row's hover and padding. */
+.crow.big { padding: 0; background: none !important; box-shadow: none !important; cursor: default; }
+.crow.big .cr-name { font-size: 15px; font-weight: 650; }
+.crow.big .cr-target { white-space: normal; word-break: break-all; color: var(--ink-2); }
+.strip .st.act .bd > .cr-reason { margin-top: 8px; }
+.strip .st.act .rl .node.act { display: none; }
+.strip .st.act .rl::before { height: 9px; }
+/* The detail's other stops speak the same sizes. */
+.strip .st-name { font-size: 13px; }
+.strip .st-said { font-size: 13px; }
+/* The action's verdict icon stands on the line as its last station. */
+.strip .st.act .crow.big { margin-left: -32px; }
+.strip .st.act .crow.big .cr-mark { position: relative; z-index: 1; background: var(--panel); border-radius: 50%; box-shadow: 0 0 0 3px var(--panel); }
+.strip .st.act .bd > .cr-reason { margin-left: -6px; }
+
+/* ---- Restraint: red only where it stopped and where it changed; one text edge. ---- */
+.ctag, .ctag.text, .ctag.nobody { color: var(--ink-2); }
+.dp-top .ctag { color: var(--ink); font-size: 12px; }
+.strip .st.xchg.hot .st-name { color: var(--ink); }
+.strip .sg-label.alarm { color: var(--ink-3); }
+.strip .st-of { color: var(--ink-3); font-weight: 500; }
+.ln-flag { background: none; color: var(--sig-red); padding: 0; margin-left: 2px; font-size: 11px; }
+.ln-flag::before { content: "· "; color: var(--ink-3); }
+.reason .p { white-space: nowrap; }
+.route-list .g-counts .c.deny { color: var(--ink-2); }
+.route-list .g-counts .c.review { color: var(--ink-2); }
+/* Quotes: prose reads as prose, output as output. */
+.strip .st-quote.prose .preview { font: 400 13px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; letter-spacing: 0; }
+.strip .st-quote.out .preview { font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.strip .st-quote { background: var(--surface); }
+/* One text edge on the right: the action's name lines up with every stop above it. */
+.strip .st.act .crow.big { margin-left: -36px; grid-template-columns: 24px minmax(0, 1fr) auto; column-gap: 12px; }
+.strip .st.act .crow.big .cr-mark { justify-self: center; }
+.strip .st.act .bd > .cr-reason { margin-left: 0; }
+/* One scale: 15 for the action, 13 for every other name, 11.5 for what is under them. */
+.strip .st-said, .strip .st-name, .crow .cr-name { font-size: 13px; }
+.crow.big .cr-name { font-size: 15px; }
+.strip .st-meta, .strip .st-meta.faint, .crow .cr-target, .reason { font-size: 11.5px; }
+.strip .st-label, .strip .sg-label, .crow .cr-time { font-size: 11px; }
+.strip .st-quote.prose .preview { font-size: 12.5px; word-break: keep-all; overflow-wrap: break-word; }
+
+/* ---- Colour by turn; red is only for a denial. ---- */
+.icon.allow { color: var(--ink-3); }
+.route-list .g-counts .c.deny { color: var(--sig-red); }
+.route-list .g-counts .c.review { color: #b57f06; }
+.ctag.turn .dot { background: var(--turn); }
+.ctag.turn { color: var(--ink); }
+.route-list .turn { position: relative; padding: 10px 0 6px; border-bottom: 1px solid var(--hair); }
+.route-list .turn::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--turn); }
+.route-list .t-head { padding: 0 14px 6px 16px; }
+.route-list .t-top { display: flex; align-items: center; gap: 6px; }
+.route-list .t-no { font-size: 11px; font-weight: 800; color: var(--turn); }
+.route-list .t-who { flex: 1; font-size: 11px; font-weight: 600; color: var(--ink-3); }
+.route-list .t-said { margin-top: 2px; font-size: 12.5px; font-weight: 600; color: var(--ink); line-height: 1.4;
+                      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.crow { padding-left: 16px; }
+.crow.on { box-shadow: inset 3px 0 0 var(--turn, var(--pick)); background: color-mix(in srgb, var(--turn, var(--pick)) 7%, var(--panel)); }
+.crow .cr-cause { grid-row: 3; grid-column: 2 / 4; font-size: 11px; color: var(--ink-3); line-height: 1.4; }
+.crow.deny .cr-cause { color: var(--sig-red); }
+.crow .cr-cause + .cr-reason { grid-row: 4; }
+/* The detail's line before any takeover wears the turn's colour. */
+.strip .node.ring { border-color: var(--turn, var(--line-main)); }
+.strip .seg.main .rl::before, .strip .st.ask .rl::after, .strip .st.xchg.used .rl::before { border-left-color: var(--turn, var(--line-main)); }
+.strip.text .st.ask .rl::after, .strip.nobody .st.ask .rl::after { border-left-color: transparent; }
+.route-list .turn::before { width: 4px; }
+
+/* ---- The map in turn colours: each station rings in its turn's colour, its label and rule too. ---- */
+.metro .station .mark.pass, .metro .station.on-main .mark.pass, .metro .station.on-agent .mark.pass { stroke: var(--turn); }
+.metro.calm .station.dim .mark.pass, .metro.calm .station.dim.on-main .mark.pass { stroke: var(--turn); }
+
+.metro .turn-rule { opacity: .45; }
+.metro .track.sub { stroke-width: 4.5; }
+.metro.calm g:not(.dim) > .track.sub { stroke-width: 6; }
+.metro .line-name.sub { color: var(--ink-2); }
+.crow .cr-meta { align-items: flex-start; }
+.crow .cr-tool { margin-top: 0; }
+
+/* ── The map as the session at a glance ──────────────────────────────────────────────
+   The whole session fits; marks, lines and names keep their size on screen (--k is how much
+   larger than the map's scale they are drawn). Three sizes of station: what stopped, where
+   something told the agent, the rest small and quiet. Only red means blocked. */
+.routes .metro .casing { stroke-width: calc(12px * var(--k, 1)); }
+.routes .metro .track.main, .routes .metro .track.sub, .routes .metro .track.branch { stroke-width: calc(6px * var(--k, 1)); opacity: 1; }
+.routes .metro .track.main.idle { stroke-width: calc(2.5px * var(--k, 1)); stroke-dasharray: calc(1px * var(--k, 1)) calc(6px * var(--k, 1)); opacity: .5; }
+.routes .metro .terminus { stroke-width: calc(4.5px * var(--k, 1)); fill: #fff; }
+.routes .metro .turn-rule { stroke-width: calc(1.2px * var(--k, 1)); stroke-dasharray: calc(3px * var(--k, 1)) calc(5px * var(--k, 1)); opacity: .55; }
+.routes .metro .capsule { stroke-width: calc(1.5px * var(--k, 1)); }
+.routes .metro .cause-link { stroke-width: calc(2.2px * var(--k, 1)); stroke-dasharray: calc(5px * var(--k, 1)) calc(4px * var(--k, 1)); fill: none; stroke-linecap: round; }
+
+.routes .metro .station.minor .mark.pass { stroke-width: 2.4; stroke: color-mix(in srgb, var(--map-ink) 55%, var(--map-bg)); }
+.routes .metro .station .halo { fill: none; stroke: var(--turn); stroke-width: 3; opacity: 1; }
+.routes .metro .station .halo.stopped { stroke: var(--turn); }
+
+.routes .metro .turn-band { position: absolute; transform-origin: 0 0; display: flex; align-items: baseline; gap: 6px;
+  padding: 3px 8px 4px 0; border-top: 3px solid var(--turn); white-space: nowrap; overflow: hidden; cursor: pointer;
+  font-size: 12px; line-height: 1.3; color: var(--map-ink); }
+.routes .metro .turn-band b { flex: none; font-size: 11px; font-weight: 800; color: var(--turn); }
+.routes .metro .turn-band span { overflow: hidden; text-overflow: ellipsis; color: color-mix(in srgb, var(--map-ink) 72%, var(--map-bg)); font-weight: 600; }
+.routes .metro .turn-band:hover span { color: var(--map-ink); }
+
+.routes .metro .map-name { position: absolute; transform-origin: 0 0; white-space: nowrap; cursor: pointer;
+  font-size: 12px; font-weight: 650; line-height: 17px; color: var(--map-ink);
+  text-shadow: 0 0 2px var(--map-bg), 0 0 3px var(--map-bg), 0 0 5px var(--map-bg); }
+.routes .metro .map-name.deny { color: var(--sig-red); font-weight: 800; }
+.routes .metro .map-name.review { color: #a86f00; font-weight: 750; }
+.routes .metro .map-name.picked { padding: 0 7px; border-radius: 9px; background: var(--turn); color: #fff; text-shadow: none; font-weight: 800; }
+.routes .metro .map-name.picked.deny { background: var(--sig-red); }
+
+.routes .metro .line-name { transform-origin: 0 0; font-size: 12px; }
+.routes .metro .hovercard { transform-origin: 0 0; }
+
+/* ── A printed metro map ─────────────────────────────────────────────────────────────
+   One flat ground, each turn a faint district; lines in the turn's colour on a white casing;
+   plain stations as ticks, telling ones as white discs, interchanges in a heavy black ring. */
+.routes > .metro { --map-bg: #fbfbf8; --map-ink: #1d2129; background: var(--map-bg); }
+@media (prefers-color-scheme: dark) { .routes > .metro { --map-bg: #16191d; --map-ink: #e9ebee; } }
+.routes .metro .district { opacity: .055; }
+.routes .metro .casing { stroke: var(--map-bg); }
+.routes .metro .track.main.idle { stroke-width: calc(2px * var(--k, 1)); stroke-dasharray: none; opacity: .35; }
+
+.routes .metro .station .tick { fill: none; stroke: var(--turn); stroke-width: 2.6; stroke-linecap: butt; }
+.routes .metro .station .fold-count { font: 700 9.5px -apple-system, sans-serif; text-anchor: middle;
+  fill: color-mix(in srgb, var(--map-ink) 50%, var(--map-bg)); paint-order: stroke; stroke: var(--map-bg); stroke-width: 3px; }
+.routes .metro .station .hit { fill: transparent; }
+.routes .metro .station .mark.pass { fill: #fff; stroke: var(--turn); stroke-width: 2.6; }
+.routes .metro .station .mark.undecided { fill: #fff; stroke: color-mix(in srgb, var(--map-ink) 45%, var(--map-bg)); stroke-width: 2.2; stroke-dasharray: 2.5 2.5; }
+.routes .metro .station .xchg-ring { fill: #fff; stroke: var(--map-ink); stroke-width: 3.2; }
+.routes .metro .station .mark.deny { fill: var(--sig-red); stroke: #fff; stroke-width: 2; }
+.routes .metro .station .mark.review { fill: #e0a100; stroke: #fff; stroke-width: 2; }
+.routes .metro .station:hover .mark.pass, .routes .metro .station:hover .xchg-ring { stroke-width: 3.6; }
+.routes .metro .station:hover .tick { stroke-width: 3.4; }
+.routes .metro .terminus { fill: #fff; }
+
+.routes .metro .turn-band { border-top: 0; padding: 0; gap: 7px; align-items: center; font-size: 12.5px; }
+.routes .metro .turn-band b { padding: 1px 6px; border-radius: 4px; background: var(--turn); color: #fff; font-size: 11px; line-height: 16px; }
+.routes .metro .turn-band span { color: color-mix(in srgb, var(--map-ink) 62%, var(--map-bg)); font-weight: 600; }
+
+.routes .metro .map-name { color: var(--map-ink); font-weight: 600; }
+.routes .metro .map-name.picked { box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
+.routes .metro .casing { stroke-width: calc(10px * var(--k, 1)); }
+.routes .metro .track.main, .routes .metro .track.sub, .routes .metro .track.branch { stroke-width: calc(5px * var(--k, 1)); }
+.routes .metro .station .tick { stroke-width: 2.3; }
+
+.map-legend { position: absolute; left: 16px; bottom: 16px; z-index: 3; display: flex; flex-wrap: wrap; gap: 6px 14px; max-width: calc(100% - 120px);
+  padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--map-bg) 88%, #fff); color: color-mix(in srgb, var(--map-ink) 75%, var(--map-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--map-ink) 10%, transparent); font-size: 11.5px; font-weight: 600; }
+.map-legend .lg { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.map-legend .lg-deny { fill: var(--sig-red); }
+.map-legend .lg-review { fill: #e0a100; }
+.map-legend .lg-glyph { stroke: #fff; stroke-width: 1.8; stroke-linecap: round; fill: none; }
+.map-legend .lg-xchg { fill: #fff; stroke: var(--map-ink); stroke-width: 2.6; }
+.map-legend .lg-told { fill: #fff; stroke: #2b2f3a; stroke-width: 2.2; }
+.map-legend .lg-line { stroke: #2b2f3a; stroke-width: 4; }
+.map-legend .lg-tick { stroke: #2b2f3a; stroke-width: 2; }
+
+/* ── Route finder components on the metro map ───────────────────────────────────────
+   As a subway app draws a result: the legs ridden in their lines' colours, every other line
+   grey; 출발 / 환승 / 도착 pins; the walk between lines dotted; a summary card over the map;
+   a balloon over the station under the pointer; the line key in the corner. */
+.routes > .metro { --off: #d9dce1; --off-ink: #a7adb5; }
+@media (prefers-color-scheme: dark) { .routes > .metro { --off: #3a3f46; --off-ink: #6c737c; } }
+.routes .metro.routed.landed svg > .track, .routes .metro.routed.landed svg > g:not(.leg) > .track { stroke: var(--off) !important; }
+.routes .metro .leg .track { opacity: 1; }
+.routes .metro.routed .terminus.off { stroke: var(--off) !important; }
+
+.routes .metro .station .mark.pass { fill: #fff; stroke: var(--turn); stroke-width: 2.6; }
+.routes .metro .station .mark.xchg-ring, .routes .metro .station .xchg-ring { fill: #fff; stroke: var(--map-ink); stroke-width: 3; }
+.routes .metro .station .xchg-ring.outer { fill: none; }
+.routes .metro .station.off .mark.pass, .routes .metro .station.off .mark.xchg-ring, .routes .metro .station.off .xchg-ring { stroke: var(--off); }
+.routes .metro .station.off .mark.deny, .routes .metro .station.off .mark.review { fill: var(--off-ink); }
+.routes .metro .station.off .mark.undecided { stroke: var(--off); }
+.routes .metro .station .halo { fill: none; stroke: var(--turn); stroke-width: 2.5; opacity: .45; }
+.routes .metro .station .pass-pill { fill: #fff; stroke: var(--turn); stroke-width: 1.6; }
+.routes .metro .station .pass-count { font: 700 9.5px -apple-system, sans-serif; text-anchor: middle; fill: color-mix(in srgb, var(--map-ink) 70%, #fff); }
+.routes .metro .station.off .pass-pill { stroke: var(--off); }
+.routes .metro .station.off .pass-count { fill: var(--off-ink); }
+
+.routes .metro .walk-casing { fill: none; stroke: var(--map-bg); stroke-width: calc(7px * var(--k, 1)); stroke-linecap: round; }
+.routes .metro .walk { fill: none; stroke: #4a5160; stroke-width: calc(3.2px * var(--k, 1)); stroke-linecap: round;
+  stroke-dasharray: 0.1 calc(7px * var(--k, 1)); }
+
+.metro-world > .line-badge { position: absolute; transform-origin: 0 0; }
+.line-badge { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 22px; height: 22px; padding: 0 5px;
+  border-radius: 11px; color: #fff; font-size: 11.5px; font-weight: 800; letter-spacing: -.02em; box-shadow: 0 0 0 2px #fff; }
+.line-badge.small { min-width: 18px; height: 18px; font-size: 10px; border-radius: 9px; box-shadow: none; }
+
+.routes .metro .terminal { position: absolute; transform-origin: 0 0; display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  overflow: hidden; cursor: pointer; font-size: 12.5px; font-weight: 650; color: var(--map-ink); }
+.routes .metro .terminal b { flex: none; padding: 1px 7px; border-radius: 10px; background: var(--turn); color: #fff; font-size: 11px; line-height: 17px; }
+.routes .metro .terminal span { overflow: hidden; text-overflow: ellipsis; }
+.routes .metro .terminal.off { color: var(--off-ink); }
+.routes .metro .terminal.off b { background: var(--off-ink); }
+
+.routes .metro .map-name { display: inline-flex; align-items: center; gap: 4px; color: var(--map-ink); font-weight: 600; }
+.routes .metro .map-name.off { color: var(--off-ink); }
+.routes .metro .map-name.picked { padding: 0; background: none; box-shadow: none; color: var(--map-ink); font-weight: 800; text-shadow: 0 0 2px var(--map-bg), 0 0 4px var(--map-bg); }
+.routes .metro .map-name.deny:not(.off) { color: var(--sig-red); }
+.routes .metro .map-name.review:not(.off) { color: #9a6700; }
+.chip { display: inline-flex; align-items: center; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 800; line-height: 15px; text-shadow: none; color: #fff; background: var(--off-ink, #9aa0a8); }
+.chip.deny { background: var(--sig-red); }
+.chip.review { background: #d99a0b; }
+.chip.pass { background: #2f8a4c; }
+.map-name.off .chip { background: var(--off-ink); }
+
+.routes .metro .pin { --pin: var(--turn); position: absolute; transform-origin: 0 0; padding: 3px 10px; border-radius: 13px; background: var(--pin);
+  color: #fff; font-size: 12px; font-weight: 800; line-height: 16px; white-space: nowrap; box-shadow: 0 2px 6px rgb(15 20 30 / .25); pointer-events: none; }
+.routes .metro .pin::after { content: ""; position: absolute; left: 50%; top: 100%; margin-left: -5px; border: 5px solid transparent; border-top-color: var(--pin); border-bottom: 0; }
+.routes .metro .pin.end { --pin: #1d2129; font-size: 12.5px; padding: 4px 11px; }
+.routes .metro .pin.end.deny { --pin: var(--sig-red); }
+.routes .metro .pin.end.review { --pin: #d99a0b; }
+.routes .metro .pin.xfer { --pin: #fff; color: var(--map-ink); box-shadow: 0 0 0 1.5px var(--map-ink), 0 2px 6px rgb(15 20 30 / .18); padding: 2px 8px; font-size: 11px; }
+.routes .metro .pin.xfer::after { border-top-color: var(--map-ink); }
+
+.routes .metro .balloon { position: absolute; z-index: 5; transform-origin: 0 0; width: max-content; max-width: 300px; padding: 10px 12px 9px;
+  border-radius: 12px; background: #fff; color: #1d2129; box-shadow: 0 6px 20px rgb(15 20 30 / .18), 0 0 0 1px rgb(15 20 30 / .06); pointer-events: none; }
+.routes .metro .balloon::after { content: ""; position: absolute; left: 50%; top: 100%; margin-left: -7px; border: 7px solid transparent; border-top-color: #fff; border-bottom: 0; }
+.balloon .bl-head { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.balloon .bl-head b { font-weight: 800; }
+.balloon .bl-what { margin-top: 4px; font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: #5b626c; word-break: break-all; }
+.balloon .bl-foot { display: flex; justify-content: space-between; gap: 14px; margin-top: 6px; font-size: 11px; color: #7b828c; font-variant-numeric: tabular-nums; }
+.balloon .bl-hint { color: #2b2f3a; font-weight: 700; }
+
+.route-summary { position: absolute; left: 16px; top: 16px; z-index: 4; width: 340px; max-width: calc(100% - 110px); padding: 12px 14px 11px;
+  border-radius: 14px; background: #fff; color: #1d2129; box-shadow: 0 6px 22px rgb(15 20 30 / .12), 0 0 0 1px rgb(15 20 30 / .06); }
+.route-summary .rs-dest { display: flex; align-items: center; gap: 6px; font-size: 13px; min-width: 0; }
+.route-summary .rs-dest b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
+.route-summary .rs-to { flex: none; font-size: 11px; font-weight: 700; color: #7b828c; }
+.route-summary .rs-top { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
+.route-summary .rs-time { font-size: 22px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.route-summary .rs-meta { font-size: 12.5px; font-weight: 600; color: #5b626c; }
+.route-summary .rs-bar { display: flex; gap: 3px; margin-top: 9px; height: 22px; }
+.route-summary .rs-seg { position: relative; display: flex; align-items: center; min-width: 58px; padding-left: 2px; border-radius: 11px; background: var(--seg); overflow: hidden; }
+.route-summary .rs-seg.walk { background: repeating-linear-gradient(90deg, #c9cdd3 0 3px, transparent 3px 7px) center / 100% 3px no-repeat, #f1f2f4; }
+.route-summary .rs-badge { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; box-shadow: 0 0 0 1.5px #fff; color: #fff; font-size: 10px; font-weight: 800; }
+.route-summary .rs-badge.walk { background: #4a5160; }
+.route-summary .rs-span { margin-left: 5px; font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.route-summary .rs-seg.walk .rs-span { color: #4a5160; }
+.route-summary .rs-ends { display: flex; justify-content: space-between; gap: 10px; margin-top: 7px; font-size: 11.5px; color: #5b626c; font-variant-numeric: tabular-nums; }
+
+.map-legend .lg-title { flex-basis: 100%; font-size: 11px; font-weight: 800; color: var(--map-ink); }
+.map-legend .lg { gap: 4px; }
+.map-legend .lg-sep { width: 1px; align-self: stretch; background: color-mix(in srgb, var(--map-ink) 14%, transparent); }
+.map-legend .lg-walk { stroke: #4a5160; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 0.1 6; }
+.routes .metro .map-name.picked.deny { background: none; color: var(--sig-red); }
+.routes .metro .pin.lean-left::after { left: auto; right: 9px; margin-left: 0; }
+.routes .metro .pin.lean-right::after { left: 9px; margin-left: 0; }
+.routes .metro .line-name.off { color: var(--off-ink); }
+.routes .metro .line-name.off .lbadge { background: var(--off-ink) !important; }
+.routes .metro .leg .track.main.idle { opacity: .6; }
+
+/* ── As a map app draws a route (Naver Map's 길찾기) ─────────────────────────────────
+   Beige land with ward borders and grey ward names; the lines off the way as white roads in
+   grey casings; the way ridden thick, edged, with white arrows inside; stops in white label
+   bubbles; 출발 green; tools as a column of square buttons. */
+.routes > .metro { --map-bg: #f2efe9; --map-ink: #222831; --off: #ffffff; --off-ink: #8d939b; background: var(--map-bg); }
+@media (prefers-color-scheme: dark) { .routes > .metro { --map-bg: #1c1f23; --map-ink: #e7e9ec; --off: #3b4046; --off-ink: #7d848c; } }
+.routes .metro .district-edge { fill: none; stroke: #c9c3b8; stroke-width: calc(1.4px * var(--k, 1)); stroke-dasharray: calc(6px * var(--k, 1)) calc(4px * var(--k, 1)) calc(1.5px * var(--k, 1)) calc(4px * var(--k, 1)); }
+.routes .metro.routed .casing { stroke: #d3cdc2; stroke-width: calc(9px * var(--k, 1)); }
+.routes .metro.routed.landed svg > .track, .routes .metro.routed.landed svg > g:not(.leg) > .track { stroke: var(--off) !important; stroke-width: calc(5px * var(--k, 1)) !important; opacity: 1 !important; }
+.routes .metro.routed svg > g:not(.leg) > .casing { stroke: #d3cdc2; stroke-width: calc(9px * var(--k, 1)); }
+
+.routes .metro .leg-edge { fill: none; stroke: rgb(20 24 30 / .45); stroke-width: calc(10.5px * var(--k, 1)); stroke-linecap: round; stroke-linejoin: round; }
+.routes .metro .leg-line { fill: none; stroke-width: calc(8px * var(--k, 1)); stroke-linecap: round; stroke-linejoin: round; }
+.routes .metro .chevrons { fill: #fff; font-size: calc(10px * var(--k, 1)); font-weight: 900; pointer-events: none; }
+
+.routes .metro .station.off .mark.pass, .routes .metro .station.off .mark.xchg-ring { fill: #fff; stroke: #c4beb3; stroke-width: 2; }
+.routes .metro .station.off .pass-pill { fill: #fff; stroke: #d3cdc2; }
+.routes .metro .station.off .pass-count { fill: #a39d92; }
+.routes .metro .station.off .mark.deny { fill: #b9a9a4; }
+.routes .metro .station.off .mark.review { fill: #c4b48f; }
+.routes .metro .station:not(.off) .mark.pass { stroke: #222831; stroke-width: 2.6; }
+.routes .metro.routed .terminus.off { stroke: #c4beb3 !important; }
+
+.routes .metro .terminal { color: #6d675d; font-weight: 700; font-size: 13px; }
+.routes .metro .terminal b { background: none; color: var(--turn); padding: 0; font-size: 13px; }
+.routes .metro .terminal.off, .routes .metro .terminal.off b { color: #a39d92; background: none; }
+
+.routes .metro .map-name.stop { padding: 3px 9px 3px 4px; border-radius: 14px; background: #fff; color: #222831; font-weight: 700;
+  text-shadow: none; box-shadow: 0 1px 4px rgb(20 24 30 / .22); }
+.routes .metro .map-name.stop.picked { font-weight: 800; }
+.routes .metro .map-name .stop-ic { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; color: #fff; font-size: 10px; font-weight: 800; }
+.routes .metro .map-name.off { color: #8d939b; font-weight: 600; }
+
+.routes .metro .pin.start { --pin: #03c75a; }
+.routes .metro .pin { border-radius: 8px; padding: 4px 9px; }
+
+.routes .metro .zoomctl { right: 14px; width: 44px; padding: 0; gap: 0; border-radius: 6px; overflow: hidden; background: #fff;
+  box-shadow: 0 1px 4px rgb(20 24 30 / .25); }
+.routes .metro .zoomctl button { width: 44px; height: 44px; border: 0; border-bottom: 1px solid #ebe8e2; border-radius: 0; background: #fff;
+  color: #333; font-size: 20px; font-weight: 400; }
+.routes .metro .zoomctl button:last-child { border-bottom: 0; }
+.routes .metro .zoomctl button.fit { font-size: 11px; font-weight: 700; }
+.routes .metro .zoomctl button:hover { background: #f6f5f2; }
+
+/* The detail column as a route finder's result card and its steps. */
+.route-panel.nv .nv-head { display: flex; align-items: baseline; gap: 8px; margin: 10px 0 0; font-size: 13px; color: #444; font-variant-numeric: tabular-nums; }
+.route-panel.nv .nv-time { font-size: 26px; font-weight: 800; letter-spacing: -.03em; color: #111; }
+.route-panel.nv .nv-sep { width: 1px; height: 11px; background: #d5d5d5; align-self: center; }
+.route-panel.nv .nv-bar { display: flex; gap: 2px; margin: 10px 0 4px; height: 18px; padding: 0 1px; border-radius: 9px; background: #eef0f2; }
+.route-panel.nv .nv-seg { display: flex; align-items: center; min-width: 52px; border-radius: 9px; background: var(--seg); overflow: hidden; }
+.route-panel.nv .nv-seg.walk { background: none; }
+.route-panel.nv .nv-badge { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 9px; color: #fff; font-size: 10px; font-weight: 800; box-shadow: 0 0 0 1.5px #fff; }
+.route-panel.nv .nv-badge.walk { background: #4a5160; }
+.route-panel.nv .nv-badge.walk .icon { color: #fff; }
+.route-panel.nv .nv-span { margin: 0 auto; padding: 0 6px; font-size: 10.5px; font-weight: 700; color: #fff; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.route-panel.nv .nv-seg.walk .nv-span { color: #666; }
+.route-panel.nv .nv-steps { margin-top: 14px; border-top: 1px solid #eee; padding-top: 12px; }
+.route-panel.nv .nv-step { position: relative; display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding-bottom: 16px; }
+.route-panel.nv .nv-step::before { content: ""; position: absolute; left: 8px; top: 20px; bottom: -2px; width: 3px; border-radius: 2px; background: var(--line); }
+.route-panel.nv .nv-step.walk::before { background: none; border-left: 3px dotted #8d939b; width: 0; }
+.route-panel.nv .nv-step.end::before { display: none; }
+.route-panel.nv .nv-line { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.route-panel.nv .nv-line-name { font-size: 12.5px; font-weight: 800; color: var(--line, #333); line-height: 18px; word-break: keep-all; }
+.route-panel.nv .nv-step.end .nv-line-name { color: #777; font-weight: 700; }
+.route-panel.nv .nv-end-dot { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
+.route-panel.nv .nv-stop { min-width: 0; }
+.route-panel.nv .nv-stop-head { display: flex; align-items: center; gap: 6px; font-size: 13.5px; line-height: 18px; }
+.route-panel.nv .nv-stop-head b { font-weight: 800; color: #111; }
+.route-panel.nv .nv-stop-head.link { cursor: pointer; }
+.route-panel.nv .nv-stop-head.link:hover b { text-decoration: underline; }
+.route-panel.nv .nv-of { font-size: 12px; color: #777; }
+.route-panel.nv .nv-at { margin-left: auto; font-size: 11.5px; color: #888; font-variant-numeric: tabular-nums; }
+.route-panel.nv .nv-said { margin-top: 3px; font-size: 13px; line-height: 1.5; color: #333; }
+.route-panel.nv .nv-meta { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 12px; color: #555; min-width: 0; }
+.route-panel.nv .nv-meta.faint { color: #888; font-size: 11.5px; }
+.route-panel.nv .nv-src { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.route-panel.nv .nv-pass { margin-top: 5px; font-size: 11.5px; color: #888; }
+.route-panel.nv .st-quote { margin: 7px 0 0; }
+.route-panel.nv { padding-right: 18px; overflow-x: hidden; }
+.route-panel.nv > * { min-width: 0; max-width: 100%; }
+.route-panel.nv .nv-step { grid-template-columns: 96px minmax(0, 1fr); }
+.route-panel.nv .nv-stop-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.route-panel.nv .nv-stop-head > span { flex: none; white-space: nowrap; }
+.route-panel.nv .nv-meta .cr-tool { flex: none; }
+.route-panel.nv .crow.big { min-width: 0; }
+.route-panel.nv .nv-step.walk::before { border-left: 0; width: 3px; background: var(--line); }
+.route-panel.nv .nv-seg.walk { background: var(--seg); }
+.route-panel.nv .nv-seg.walk .nv-span { color: #fff; }
+.map-legend .lg-told { stroke: #4a5160; stroke-width: 5; stroke-linecap: round; }
+.route-panel.nv .nv-step { grid-template-columns: 86px minmax(0, 1fr); gap: 8px; }
+.route-panel.nv .nv-stop-head { flex-wrap: wrap; row-gap: 2px; }
+.route-panel.nv .nv-stop-head b { white-space: normal; overflow: visible; word-break: break-all; }
+.route-panel.nv .crow.big .cr-title, .route-panel.nv .crow.big b { white-space: normal; }
+
+/* ── The app's frame as a map app's: a menu rail down the left edge ── */
+.app { flex-direction: row; }
+.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rail { flex: none; width: 68px; display: flex; flex-direction: column; align-items: stretch; background: #fff; border-right: 1px solid #e5e5e5; z-index: 6; }
+.rail-logo { height: 64px; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; color: #2b2f3a;
+  letter-spacing: -.04em; border-bottom: 1px solid #eee; }
+.rail-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 0 10px; border: 0; border-radius: 0;
+  background: none; color: #444; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.rail-item:hover { background: #f5f6f8; }
+.rail-item.on { background: #2b2f3a; color: #fff; }
+.rail-item svg { display: block; }
+.rail-spacer { flex: 1; }
+.rail-item .rail-dot { position: absolute; top: 10px; right: 18px; width: 7px; height: 7px; border-radius: 50%; background: #2f8a4c; box-shadow: 0 0 0 2px #fff; }
+.rail-item.demo .rail-dot { background: #2b2f3a; }
+.rail-item.down .rail-dot { background: var(--sig-red); }
+.rail-item.wait .rail-dot { background: #aaa; }
+@media (prefers-color-scheme: dark) {
+  .rail { background: #1e2124; border-right-color: #2c3035; }
+  .rail-logo { border-bottom-color: #2c3035; color: #8fb0ff; }
+  .rail-item { color: #c9ccd1; }
+  .rail-item:hover { background: #26292d; }
+}
+
+/* ── The land under the lines, in a map app's colours ── */
+.routes .metro .land .park { fill: #d3e8c4; }
+.routes .metro .land .street-edge { fill: none; stroke: #e2dccf; stroke-width: 9; stroke-linecap: round; }
+.routes .metro .land .street { fill: none; stroke: #ffffff; stroke-width: 6; stroke-linecap: round; }
+.routes .metro .land .avenue-edge { fill: none; stroke: #ecc875; stroke-width: 15; stroke-linecap: round; }
+.routes .metro .land .avenue { fill: none; stroke: #fde9a9; stroke-width: 11; stroke-linecap: round; }
+.routes .metro .land .river-bank { fill: none; stroke: #c6dcf0; stroke-width: 62; stroke-linejoin: round; stroke-linecap: round; }
+.routes .metro .land .river { fill: none; stroke: #a9cdef; stroke-width: 48; stroke-linejoin: round; stroke-linecap: round; }
+@media (prefers-color-scheme: dark) {
+  .routes .metro .land .park { fill: #23372a; }
+  .routes .metro .land .street-edge { stroke: #2a2e33; }
+  .routes .metro .land .street { stroke: #33383e; }
+  .routes .metro .land .avenue-edge { stroke: #4b4330; }
+  .routes .metro .land .avenue { stroke: #5a5038; }
+  .routes .metro .land .river-bank { stroke: #1f3347; }
+  .routes .metro .land .river { stroke: #24425e; }
+}
+/* Lines off the way: grey roads, apart from the white streets. */
+.routes .metro.routed.landed svg > .track, .routes .metro.routed.landed svg > g:not(.leg) > .track { stroke: #bdb7ad !important; }
+.routes .metro.routed.landed .casing { stroke: #fff; }
+/* A subagent's run named as a park. */
+.routes .metro.landed .line-name.sub { background: none; color: #3b7d34; font-weight: 700; text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 5px #fff; }
+.routes .metro.landed .line-name.sub .lbadge { background: #4c9a43 !important; }
+.routes .metro.landed .line-name.sub.off { color: #6f9a68; }
+/* Ward names, as a map writes them: grey, haloed. */
+.routes .metro.landed .terminal { color: #5b564d; text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 6px #fff; font-size: 14px; }
+.routes .metro.landed .terminal b { font-size: 14px; }
+
+/* 지도 / 노선도, as a map app's map kinds; the scale in the corner. */
+.routes .metro .maptype { position: absolute; top: 14px; right: 14px; z-index: 4; display: flex; gap: 6px; }
+.routes .metro .maptype .mt { display: flex; flex-direction: column; align-items: stretch; width: 74px; padding: 3px 3px 4px; border: 1px solid #d9d6d0;
+  border-radius: 6px; background: #fff; color: #333; font-size: 11.5px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 3px rgb(20 24 30 / .15); }
+.routes .metro .maptype .mt.on { border-color: #2b2f3a; color: #2b2f3a; box-shadow: 0 0 0 1px #2b2f3a; }
+.routes .metro .maptype .mt-thumb { height: 40px; margin-bottom: 3px; border-radius: 3px; }
+.routes .metro .maptype .mt-thumb.land { background:
+  linear-gradient(100deg, transparent 46%, #a9cdef 46% 56%, transparent 56%),
+  linear-gradient(0deg, transparent 44%, #fde9a9 44% 52%, transparent 52%),
+  radial-gradient(circle at 22% 30%, #d3e8c4 0 22%, transparent 23%), #f2efe9; }
+.routes .metro .maptype .mt-thumb.lines { background:
+  linear-gradient(0deg, transparent 46%, #2b2f3a 46% 56%, transparent 56%),
+  radial-gradient(circle at 30% 51%, #fff 0 5%, #2b2f3a 6% 9%, transparent 10%),
+  radial-gradient(circle at 70% 51%, #fff 0 5%, #2b2f3a 6% 9%, transparent 10%), #fafaf8; }
+.routes .metro .zoomctl { top: auto; bottom: 56px; }
+.routes .metro .scalebar { position: absolute; right: 16px; bottom: 18px; z-index: 4; display: flex; align-items: flex-end; gap: 8px;
+  font-size: 11px; font-weight: 700; color: #333; text-shadow: 0 0 2px #fff, 0 0 3px #fff; }
+.routes .metro .scalebar .sb-brand { color: #2b2f3a; font-weight: 900; letter-spacing: .02em; }
+.routes .metro .scalebar .sb-bar { height: 6px; border: 2px solid #333; border-top: 0; }
+
+/* The list's head as a route finder's: modes, where from and to, the two buttons. */
+.route-list .nv-modes { display: flex; gap: 4px; margin: 2px 0 10px; }
+.route-list .nv-modes .tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 9px 4px; border: 1px solid #e4e4e4;
+  border-radius: 6px; background: #fff; color: #333; font-size: 13px; font-weight: 700; border-bottom: 1px solid #e4e4e4; }
+.route-list .nv-modes .tab .n { font-weight: 600; color: #888; }
+.route-list .nv-modes .tab.on { background: #2b2f3a; border-color: #2b2f3a; color: #fff; }
+.route-list .nv-modes .tab.on .n { color: #dfe6ff; }
+.route-list .nv-modes .tab:disabled { color: #bbb; background: #fafafa; }
+.route-list .nv-od { border: 1px solid #cfcfcf; border-radius: 6px; background: #fff; }
+.route-list .nv-od .od-row { position: relative; display: flex; align-items: center; gap: 9px; padding: 0 12px; height: 46px; }
+.route-list .nv-od .od-row + .od-row { border-top: 1px solid #ececec; }
+.route-list .nv-od .od-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; border: 2px solid #03c75a; }
+.route-list .nv-od .od-dot.end { border-color: #e8442f; }
+.route-list .nv-od select, .route-list .nv-od input { flex: 1; min-width: 0; height: 40px; border: 0; background: none; font-size: 14.5px; font-weight: 600; color: #111; outline: none; box-shadow: none; padding: 0; }
+.route-list .nv-od input::placeholder { color: #aaa; font-weight: 500; }
+.route-list .nv-od .suggest { top: 46px; left: 0; right: 0; }
+.route-list .nv-actions { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0 8px; }
+.route-list .nv-actions button { height: 38px; padding: 0 14px; border-radius: 6px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+.route-list .nv-actions .nv-reset { border: 1px solid #d5d5d5; background: #fff; color: #444; }
+.route-list .nv-actions .nv-go { border: 0; background: #2b2f3a; color: #fff; padding: 0 18px; }
+.route-list .nv-when { display: flex; align-items: center; gap: 7px; padding: 10px 0 9px; border-top: 1px solid #eee; border-bottom: 1px solid #eee; margin-bottom: 4px; font-size: 13px; }
+.route-list .nv-when .on-pill { height: 20px; padding: 0 7px; border: 0; border-radius: 10px; background: #bbb; color: #fff; font-size: 10.5px; font-weight: 800; cursor: pointer; }
+.route-list .nv-when .on-pill.on { background: #2b2f3a; }
+.route-list .nv-when .nv-live { color: #2b2f3a; font-weight: 700; }
+.route-list .nv-when .nv-asof { color: #555; font-variant-numeric: tabular-nums; }
+.route-list .nv-when .nv-re { margin-left: auto; border: 0; background: none; color: #555; font-size: 12.5px; cursor: pointer; }
+.routes .metro .map-legend { max-width: calc(100% - 330px); }
+.routes .metro .land .street-edge { stroke-width: 10; }
+.routes .metro .land .street { stroke-width: 7; }
+.rail .rail-item.on, .rail .rail-item.on:hover { background: #2b2f3a; color: #fff; }
+.routes .metro .land .park { fill: none; stroke: #d3e8c4; stroke-width: 110; stroke-linecap: round; stroke-linejoin: round; }
+@media (prefers-color-scheme: dark) { .routes .metro .land .park { stroke: #23372a; } }
+.routes .metro .track, .routes .metro .casing, .routes .metro .leg-line, .routes .metro .leg-edge { stroke-linejoin: round; stroke-linecap: round; }
+.route-panel.nv .crow.big .cr-target { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+
+/* ── 노선도: a clean metro map, as the city's own (white ground, a colour per line, rounded
+   45° turns, names in bold with what they acted on in small type, bars at the line's ends) ── */
+.routes > .metro.plain { --map-bg: #ffffff; background: #ffffff; }
+@media (prefers-color-scheme: dark) { .routes > .metro.plain { --map-bg: #141619; background: #141619; } }
+.routes .metro.plain .district-edge { stroke: #e6e6e6; stroke-dasharray: none; stroke-width: calc(1px * var(--k, 1)); }
+.routes .metro .end-cap { fill: none; stroke-width: calc(5px * var(--k, 1)); stroke-linecap: butt; }
+.routes .metro.plain .casing { stroke: var(--map-bg); stroke-width: calc(10px * var(--k, 1)); }
+.routes .metro.plain.routed svg > .track, .routes .metro.plain.routed svg > g:not(.leg) > .track { opacity: .3; stroke-width: calc(5px * var(--k, 1)); }
+.routes .metro.plain.routed .station.off { opacity: .55; }
+.routes .metro.plain.routed .line-name.off { opacity: .6; }
+.routes .metro.plain.routed .end-cap { opacity: .5; }
+.routes .metro.plain .leg-edge, .routes .metro.plain .chevrons { display: none; }
+.routes .metro.plain .leg-line { stroke-width: calc(6.5px * var(--k, 1)); }
+.routes .metro.plain .station.off .mark.pass, .routes .metro.plain .station.off .mark.xchg-ring { stroke: #c9c9c9; }
+.routes .metro.plain .station:not(.off) .mark.pass { stroke: var(--turn); }
+.routes .metro.plain .station .mark.xchg-ring { stroke: #222; }
+
+.routes .metro .map-name { flex-direction: column; align-items: center; gap: 0; line-height: 1.15; }
+.routes .metro .map-name .mn-main { display: inline-flex; align-items: center; gap: 4px; }
+.routes .metro .map-name .mn-sub { font-size: 9.5px; font-weight: 500; color: #8a8f96; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -.01em; }
+.routes .metro.plain .map-name, .routes .metro.plain .map-name.stop { padding: 0; background: none; box-shadow: none; color: #1d1f22; font-weight: 800; font-size: 12.5px;
+  text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 5px #fff; }
+.routes .metro.plain .map-name .stop-ic { display: none; }
+.routes .metro.plain .map-name.off { color: #a3a7ad; font-weight: 700; }
+.routes .metro.plain .map-name.deny:not(.off) { color: var(--sig-red); }
+.routes .metro.plain .map-name.review:not(.off) { color: #9a6700; }
+.routes .metro.plain .terminal { color: #444; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }
+.routes .metro.plain .line-name.sub { background: none; color: #333; font-weight: 800; text-shadow: 0 0 2px #fff, 0 0 4px #fff; }
+.routes .metro.plain .line-name.sub .lbadge { background: inherit; }
+
+/* The key in the top corner, as a metro map lists its lines. */
+.routes .metro .map-legend { top: 14px; left: 14px; bottom: auto; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 5px;
+  max-width: 300px; padding: 10px 12px; background: rgb(255 255 255 / .94); }
+.map-legend .lg-row { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: #333; white-space: nowrap; }
+.map-legend .lg-bar { display: inline-flex; width: 26px; height: 5px; border-radius: 3px; overflow: hidden; flex: none; margin-right: 2px; }
+.map-legend .lg-bar span { flex: 1; }
+.map-legend .lg-note { font-weight: 500; color: #888; font-size: 10.5px; }
+.map-legend .lg-marks { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; padding-top: 6px; border-top: 1px solid #eee; }
+.map-legend .lg-marks .lg { font-size: 11px; font-weight: 600; color: #555; }
+.routes .metro.plain .district-edge { display: none; }
+/* With branches as spurs the main line runs on whole while a run is out. */
+.routes .metro.plain .track.main.idle { stroke-width: calc(5px * var(--k, 1)); stroke-dasharray: none; opacity: 1; }
+.routes .metro.plain .leg .track.main.idle { opacity: 1; }
+.routes .metro.plain.routed svg > .track.main.idle { opacity: .3; }
+.routes .metro.plain .terminal { padding: 1px 7px 1px 4px; border-radius: 5px; background: rgb(255 255 255 / .92); }
+@media (prefers-color-scheme: dark) { .routes .metro.plain .terminal { background: rgb(20 22 25 / .92); } }
+
+/* ── Less: a metro map has lines in their colours, stations, interchanges and names ── */
+.routes .metro .route-glow { fill: none; stroke-width: calc(20px * var(--k, 1)); stroke-linecap: round; stroke-linejoin: round; opacity: .18; }
+.routes .metro .track.main, .routes .metro .track.sub { stroke-width: calc(6px * var(--k, 1)); opacity: 1; }
+.routes .metro .track.main.idle { stroke-width: calc(6px * var(--k, 1)); stroke-dasharray: none; opacity: 1; }
+.routes .metro .casing { stroke: var(--map-bg); stroke-width: calc(11px * var(--k, 1)); }
+.routes .metro .station .mark.pass, .routes .metro .station .mark.undecided { fill: #fff; stroke: var(--turn); stroke-width: 2.6; stroke-dasharray: none; }
+.routes .metro .station .mark.pass.fold { stroke-width: 2.2; }
+.routes .metro .station .mark.xchg-ring { fill: #fff; stroke: #1d1f22; stroke-width: 3.2; }
+.routes .metro .terminus { fill: #fff; stroke-width: calc(3.5px * var(--k, 1)); }
+.routes .metro .map-name { flex-direction: row; padding: 0; background: none; box-shadow: none; font-size: 12px; font-weight: 700; color: #26292d;
+  line-height: 17px; text-shadow: 0 0 2px var(--map-bg), 0 0 3px var(--map-bg), 0 0 5px var(--map-bg); }
+.routes .metro .map-name.picked { font-weight: 800; color: #111; }
+.routes .metro .map-name.deny { color: var(--sig-red); }
+.routes .metro .map-name.review { color: #9a6700; }
+.routes .metro .terminal { padding: 0 4px 0 0; gap: 5px; font-size: 12px; font-weight: 700; color: #6b7078; background: rgb(255 255 255 / .9); border-radius: 4px; }
+.routes .metro .terminal b { padding: 0 6px; border-radius: 4px; background: var(--turn); color: #fff; font-size: 10.5px; line-height: 17px; }
+@media (prefers-color-scheme: dark) {
+  .routes .metro .map-name { color: #e4e6e9; }
+  .routes .metro .terminal { background: rgb(20 22 25 / .9); color: #a5abb3; }
+}
+.map-legend .lg-glow { stroke: #2b2f3a; stroke-width: 9; stroke-linecap: round; opacity: .22; }
+.routes .metro .route-glow { stroke-width: calc(22px * var(--k, 1)); opacity: .22; }
+.map-legend .lg-row.turns { gap: 4px; }
+.map-legend .lg-turn { padding: 0 5px; border-radius: 4px; color: #fff; font-size: 10px; font-weight: 800; line-height: 16px; }
+
+/* ── Thinner: a printed metro map's weights ── */
+.routes .metro .track.main, .routes .metro .track.sub, .routes .metro .track.main.idle { stroke-width: calc(3.6px * var(--k, 1)); }
+.routes .metro .casing { stroke-width: calc(7px * var(--k, 1)); }
+.routes .metro .route-glow { stroke-width: calc(13px * var(--k, 1)); opacity: .2; }
+.routes .metro .end-cap { stroke-width: calc(3px * var(--k, 1)); }
+.routes .metro .terminus { stroke-width: calc(2.4px * var(--k, 1)); }
+.routes .metro .station .mark.pass, .routes .metro .station .mark.undecided { stroke-width: 1.8; }
+.routes .metro .station .mark.xchg-ring, .routes .metro .station .xchg-ring { stroke-width: 2.2; }
+.routes .metro .station .mark.deny, .routes .metro .station .mark.review { stroke-width: 1.5; }
+.routes .metro .station .glyph { stroke-width: 1.8; }
+.routes .metro .xchg-capsule { fill: #fff; stroke: #1d1f22; stroke-width: calc(2px * var(--k, 1)); }
+.routes .metro .line-badge { min-width: 18px; height: 18px; font-size: 10px; border-radius: 9px; box-shadow: 0 0 0 1.5px #fff; }
+.routes .metro .map-name { font-size: 11.5px; font-weight: 600; }
+.routes .metro .map-name.picked { font-weight: 800; }
+.routes .metro .pin { padding: 2px 8px; font-size: 11px; border-radius: 6px; }
+.routes .metro .pin.end { padding: 3px 9px; font-size: 11.5px; }
+.routes .metro .terminal { font-size: 11.5px; font-weight: 600; }
+.routes .metro .terminal b { font-size: 10px; line-height: 15px; }
+@media (prefers-color-scheme: dark) { .routes .metro .xchg-capsule { fill: #141619; stroke: #e4e6e9; } }
+
+/* ── As Seoul's own metro map: white dots in the lines, transfers as black-ringed pills of
+   coloured dots, names in bold with a small line under them ── */
+.routes .metro .track.main, .routes .metro .track.sub, .routes .metro .track.main.idle { stroke-width: calc(4.6px * var(--k, 1)); }
+.routes .metro .casing { stroke-width: calc(8px * var(--k, 1)); }
+.routes .metro .station .mark.dot { fill: #fff; stroke: none; }
+.routes .metro .station:hover .mark.dot { r: 2.4; }
+.routes .metro .station .mark.xchg-ring { fill: #fff; stroke: #111; stroke-width: 2.2; }
+.routes .metro .xchg-capsule { fill: #fff; stroke: #111; stroke-width: calc(2.2px * var(--k, 1)); }
+.routes .metro .xchg-dot { stroke: none; pointer-events: none; }
+.routes .metro .map-name { flex-direction: column; align-items: center; gap: 0; line-height: 1.15; color: #1a1a1a; font-weight: 500; font-size: 11.5px; letter-spacing: -.01em; }
+.routes .metro .map-name .mn-main { white-space: nowrap; }
+.routes .metro .map-name .mn-sub { font-size: 8.5px; font-weight: 500; color: #555; font-family: -apple-system, "Helvetica Neue", sans-serif; letter-spacing: 0; }
+.routes .metro .map-name.hub { font-size: 14px; font-weight: 800; }
+.routes .metro .map-name.hub .mn-sub { font-size: 9.5px; font-weight: 600; color: #333; }
+.routes .metro .map-name.picked .mn-main { font-weight: 800; }
+.routes .metro .map-name.deny .mn-main { color: var(--sig-red); }
+.routes .metro .map-name.review .mn-main { color: #9a6700; }
+@media (prefers-color-scheme: dark) {
+  .routes .metro .map-name { color: #eee; }
+  .routes .metro .map-name .mn-sub { color: #aaa; }
+  .routes .metro .xchg-capsule, .routes .metro .station .mark.xchg-ring { fill: #141619; stroke: #eee; }
+}
+.routes .metro .pin.end.side::after { left: 100%; top: 50%; margin: -5px 0 0; border: 5px solid transparent; border-left-color: var(--pin); border-right: 0; }
+
+/* ── Our colours on a metro map's grammar, and less of everything ── */
+.routes .metro .track.sub.told { stroke-dasharray: calc(5px * var(--k, 1)) calc(4px * var(--k, 1)); stroke-linecap: butt; }
+.routes .metro .route-glow { opacity: .14; }
+.routes .metro .terminal { color: #8a8f98; font-weight: 500; }
+.routes .metro .terminal b { font-weight: 700; }
+.routes .metro .map-name { font-weight: 500; color: #2b2f3a; }
+.routes .metro .map-name.hub { font-size: 13px; font-weight: 700; }
+.routes .metro .map-name .mn-sub { color: #9aa0a8; font-size: 8.5px; }
+.routes .metro .map-name.hub .mn-sub { color: #7d838c; font-size: 9px; font-weight: 500; }
+.routes .metro .xchg-capsule, .routes .metro .station .mark.xchg-ring { stroke: #2b2f3a; stroke-width: calc(1.8px * var(--k, 1)); }
+.routes .metro .station .mark.xchg-ring { stroke-width: 1.8; }
+.routes .metro .xchg-dot { r: calc(2.9px * var(--k, 1)); }
+.routes .metro .pin.start { --pin: #1f9e89; }
+.routes .metro .pin.end { --pin: #2b2f3a; }
+.routes .metro .map-legend { box-shadow: none; border: 1px solid #ececec; }
+.map-legend .lg-pill { fill: #fff; stroke: #2b2f3a; stroke-width: 1.6; }
+.map-legend .lg-xchg { stroke: #2b2f3a; stroke-width: 1.8; }
+.map-legend .lg-glow { stroke: #2b2f3a; opacity: .16; }

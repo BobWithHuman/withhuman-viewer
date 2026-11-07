@@ -547,7 +547,7 @@ pub fn TracePath(model: Arc<Model>, seq: i64) -> Element {
 
 /// The start of a result that caused the Call: the paragraph it was traced to, or the result.
 #[component]
-pub fn Preview(seq: i64, paragraph: Option<i64>) -> Element {
+pub fn Preview(seq: i64, paragraph: Option<i64>, #[props(default)] lines: bool) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let state = use_context::<AppState>();
     let found = use_resource(move || {
@@ -590,7 +590,13 @@ pub fn Preview(seq: i64, paragraph: Option<i64>) -> Element {
     if text.is_empty() {
         return rsx! {};
     }
-    rsx! { div { class: "preview", "{clip(&super::metro::excerpt(&text), 240)}" } }
+    // Raw text keeps its lines, so tool output reads as it was printed.
+    let shown = if lines {
+        super::metro::excerpt_lines(&text)
+    } else {
+        clip(&super::metro::excerpt(&text), 240)
+    };
+    rsx! { div { class: "preview", "{shown}" } }
 }
 
 /// What the agent was asked and has done, as the verdict saw it.
@@ -725,7 +731,7 @@ fn attempt(payload: &Value) -> (Vec<(char, String)>, Option<String>) {
 
 /// Why the engine stopped a Call, as sentences from its trace: the worst breach of the first
 /// question, what the second check found, and how hard it is to undo.
-fn reasons(trace: &Value) -> Vec<(String, String)> {
+pub(super) fn reasons(trace: &Value) -> Vec<(String, String)> {
     let d = &trace["deviation"];
     let mut out = Vec::new();
     if let Some(worst) = d["worst"].as_str().filter(|w| *w != "none") {
