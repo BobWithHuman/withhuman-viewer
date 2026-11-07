@@ -348,6 +348,8 @@ pub(super) fn RoutePanel(
     mut detail: Signal<bool>,
 ) -> Element {
     let mut state = use_context::<AppState>();
+    // The words a Call followed are folded to their first lines until opened, per Call.
+    let mut quote_open = use_signal(|| None::<i64>);
     let m = &metro;
     let Some(dest) = dest.and_then(|d| m.station(d)).cloned() else {
         return rsx! {
@@ -485,8 +487,21 @@ pub(super) fn RoutePanel(
                                                         if let Some(q) = src.clone() {
                                                             // Keyed in a list, so another paragraph makes a new quote.
                                                             for q in [q] {
-                                                                blockquote { key: "{q.result}-{q.paragraph:?}", class: if bs.action == crate::metro::Action::Run { "st-quote out" } else { "st-quote prose" },
-                                                                    super::trace::Preview { seq: q.result, paragraph: q.paragraph, lines: true }
+                                                                {
+                                                                    let open = quote_open() == Some(dest.seq);
+                                                                    let kind = if bs.action == crate::metro::Action::Run { "out" } else { "prose" };
+                                                                    let cls = if open { format!("st-quote {kind}") } else { format!("st-quote {kind} folded") };
+                                                                    let d = dest.seq;
+                                                                    rsx! {
+                                                                        blockquote { key: "{q.result}-{q.paragraph:?}", class: "{cls}",
+                                                                            super::trace::Preview { seq: q.result, paragraph: q.paragraph, lines: true }
+                                                                        }
+                                                                        button {
+                                                                            class: "nv-quote-toggle",
+                                                                            onclick: move |_| quote_open.set(if open { None } else { Some(d) }),
+                                                                            if open { "근거 글 접기" } else { "근거 글 펼치기" }
+                                                                        }
+                                                                    }
                                                                 }
                                                                 super::trace::ParagraphTags { seq: q.result, paragraph: q.paragraph }
                                                                 div { class: "nv-meta",

@@ -1669,8 +1669,12 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .fx-title { pointer-events: none; position: absolute; bottom: 24px; left: 32px; max-width: 300px; }
 .fx-title .big { font-size: 26px; font-weight: 800; line-height: 1; letter-spacing: -.02em; color: var(--z900); }
 .fx-title p { margin: 6px 0 0; font-size: 12px; line-height: 1.6; color: var(--z500); }
-.fx-legend { position: absolute; bottom: 24px; right: 96px; display: grid; grid-template-columns: repeat(2, auto); column-gap: 24px; row-gap: 6px; }
-.fx .fx-leg { display: flex; align-items: center; gap: 8px; text-align: left; font-size: 12.5px; color: var(--z600); max-width: 220px; }
+/* Between the title on the left and the brand under the zoom buttons on the right. */
+.fx-legend { position: absolute; bottom: 24px; left: 360px; right: 128px; display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); justify-content: end; column-gap: 24px; row-gap: 6px; }
+.fx .fx-leg { display: flex; min-width: 0; align-items: center; gap: 8px; text-align: left; font-size: 12.5px; color: var(--z600); max-width: 220px; }
+.fx-leg.bare .no { border: 1.5px dashed var(--z300); color: var(--z400); }
+.fx-leg .none { flex: none; font-size: 11px; color: var(--z400); }
+.fx-ov-empty { position: absolute; left: 0; right: 0; top: 45%; text-align: center; font-size: 13px; color: var(--z400); pointer-events: none; }
 .fx .fx-leg.on { font-weight: 700; color: var(--z900); }
 .fx .fx-leg.dim { opacity: .4; }
 .fx-leg .no { display: grid; width: 24px; height: 24px; flex: none; place-items: center; border-radius: 99px; font-size: 10.5px; font-weight: 700; color: #fff; }
@@ -1680,3 +1684,36 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .fx-line.dragging { cursor: grabbing; }
 .fx-line-svg { position: absolute; left: 0; top: 0; display: block; transition: transform .12s ease-out; }
 .fx-line.dragging .fx-line-svg { transition: none; }
+
+/* The route panel as a card over the map's right side (`CARD_W` in ui/flow.rs is its width
+   with the margin), clear of the zoom buttons under it. */
+.fx-main > .route-panel { position: absolute; z-index: 4; left: auto; right: 16px; top: 16px; bottom: auto; width: 360px;
+  max-height: calc(100% - 210px); border: 1px solid var(--z200); border-radius: 12px; background: #fff;
+  box-shadow: 0 10px 30px rgb(20 28 45 / .12); }
+.fx-main > .route-panel .st-quote.folded { position: relative; max-height: 5.2em; overflow: hidden; }
+.fx-main > .route-panel .st-quote.folded::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2.2em;
+  background: linear-gradient(transparent, var(--surface, #f4f4f5)); }
+.fx .nv-quote-toggle { margin: 4px 0 2px; padding: 0; border: 0; background: none; font-size: 12px; font-weight: 600; color: var(--z600); cursor: pointer; }
+.fx .nv-quote-toggle:hover { color: var(--z900); }
+
+/* The session's name, a button opening the session list: drawn as a field, so it reads as one. */
+.fx .fx-pick-btn { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; border: 0; background: none; padding: 0;
+  text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.fx-pick-btn .lb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-pick-btn .act { display: inline-flex; flex: none; align-items: center; gap: 3px; padding: 3px 8px; border-radius: 6px;
+  background: var(--z100); font-size: 12px; font-weight: 600; color: var(--z600); }
+.fx-pick-btn .chev { font-size: 10px; }
+.fx-pick-btn:hover .act { background: var(--z900); color: #fff; }
+.fx .fx-session-pick { margin-top: 6px; padding: 9px 10px 9px 12px; border: 1px solid var(--z200); border-radius: 8px; background: #fff;
+  font-size: 14.5px; font-weight: 700; color: var(--z900); transition: border-color .15s; }
+.fx .fx-session-pick:hover { border-color: var(--z400); }
+.fx .fx-od-pick.fx-pick-btn { font-size: 14px; font-weight: 500; }
+
+/* The session list over the map, from the left: search, folder, flagged only, days, pins. */
+.fx-pick-shade { position: absolute; inset: 0; z-index: 20; background: rgb(24 24 27 / .18); }
+.fx-pick-pop { position: absolute; z-index: 21; left: 12px; top: 12px; bottom: 12px; width: 400px; display: flex; flex-direction: column;
+  border: 1px solid var(--z200); border-radius: 12px; background: #fff; box-shadow: 0 16px 40px rgb(20 28 45 / .18); overflow: hidden; }
+.fx-pick-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 4px; font-size: 14px; }
+.fx .fx-pick-close { width: 30px; height: 30px; border: 0; border-radius: 15px; background: none; color: var(--z500); cursor: pointer; }
+.fx .fx-pick-close:hover { background: var(--z100); color: var(--z900); }
+.fx-pick-pop .sidebar { width: auto; flex: 1; border-right: 0; background: #fff; }

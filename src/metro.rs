@@ -131,7 +131,7 @@ impl Station {
                 t.to_owned()
             }
         };
-        let file = short(&place_name(&self.what), 16);
+        let file = clip_file(&place_name(&self.what), 26);
         match (self.tool.as_str(), self.action) {
             ("Write", _) => format!("{file} 작성"),
             (_, Action::Change) => format!("{file} 수정"),
@@ -141,10 +141,12 @@ impl Station {
             (_, Action::Search) => format!("‘{}’ 찾기", short(&self.what, 12)),
             (_, Action::Run) => {
                 let name = command_name(&self.what);
-                if name.is_empty() {
+                if let Some((_, op)) = mcp_parts(&self.tool) {
+                    op.to_owned()
+                } else if name.is_empty() {
                     self.tool.clone()
                 } else {
-                    short(&name, 16)
+                    clip_file(&name, 22)
                 }
             }
             _ if self.what.is_empty() => self.tool.clone(),
@@ -298,6 +300,8 @@ pub struct Verdicts {
 pub fn place_key(s: &Station) -> String {
     match s.action {
         Action::Read | Action::Change if !s.what.is_empty() => format!("f:{}", s.what),
+        // Each MCP tool is a place of its own; it has no command to name it by.
+        Action::Run if mcp_parts(&s.tool).is_some() => format!("o:{}", s.tool),
         Action::Run => format!("r:{}", command_name(&s.what)),
         Action::Search => format!("s:{}", s.tool),
         Action::Delegate => format!("d:{}", s.seq),
@@ -318,10 +322,12 @@ pub fn place_label(s: &Station) -> String {
         }
     };
     match s.action {
-        Action::Read | Action::Change if !s.what.is_empty() => short(&place_name(&s.what), 22),
+        Action::Read | Action::Change if !s.what.is_empty() => clip_file(&place_name(&s.what), 26),
         Action::Run => {
             let c = command_name(&s.what);
-            if c.is_empty() {
+            if let Some((_, op)) = mcp_parts(&s.tool) {
+                short(op, 20)
+            } else if c.is_empty() {
                 s.tool.clone()
             } else if !c.contains(' ') && c.contains('.') {
                 // A script run is told apart from the script read.
@@ -335,6 +341,20 @@ pub fn place_label(s: &Station) -> String {
         Action::Delegate if s.what.trim().is_empty() => "에이전트에 맡김".to_owned(),
         Action::Delegate => format!("맡김 · {}", short(&s.what, 14)),
         _ => s.tool.clone(),
+    }
+}
+
+/// An MCP tool's server and operation: `mcp__gmail__send_email` is `gmail` and `send_email`.
+pub fn mcp_parts(tool: &str) -> Option<(&str, &str)> {
+    let (server, op) = tool.strip_prefix("mcp__")?.split_once("__")?;
+    (!server.is_empty() && !op.is_empty()).then_some((server, op))
+}
+
+/// A tool as the map writes it: an MCP tool by its server and operation, others as they are.
+pub fn tool_label(tool: &str) -> String {
+    match mcp_parts(tool) {
+        Some((server, op)) => format!("{server} · {op}"),
+        None => tool.to_owned(),
     }
 }
 
@@ -426,6 +446,21 @@ fn arg_is_script(w: &str) -> bool {
 
 /// What a read or a change acts on, as a station names it: a file by its name, a web page by
 /// the last two parts of its path ("issues/42"), or its host when it has no path.
+/// A file's name cut to `n` characters in its middle, so its kind stays:
+/// `diagnostic_payload_backup.json` is `diagnostic_payl….json`.
+pub fn clip_file(name: &str, n: usize) -> String {
+    let len = name.chars().count();
+    if len <= n {
+        return name.to_owned();
+    }
+    let ext = name
+        .rfind('.')
+        .filter(|&i| i > 0 && name.len() - i <= 6)
+        .map_or("", |i| &name[i..]);
+    let keep = n.saturating_sub(ext.chars().count() + 1).max(1);
+    format!("{}…{ext}", name.chars().take(keep).collect::<String>())
+}
+
 pub fn place_name(what: &str) -> String {
     let Some(rest) = what.split_once("://").map(|(_, r)| r) else {
         return file_name(what).to_owned();
@@ -1116,6 +1151,14 @@ mod tests {
 
     // The main agent rides one line, whatever told it to act; the README's hidden instruction
     // shows as an interchange at the README read, not as a line of its own.
+    #[test]
+    fn a_file_name_is_cut_in_its_middle_keeping_its_kind() {
+        use super::clip_file;
+        assert_eq!(clip_file("config.yaml", 22), "config.yaml");
+        assert_eq!(clip_file("diagnostic_payload_backup.json", 22), "diagnostic_paylo….json");
+        assert_eq!(clip_file("a_very_long_name_without_a_kind", 10), "a_very_lo…");
+    }
+
     #[test]
     fn the_main_agent_rides_the_main_line() {
         let m = metro(&session("fa6576f7"));

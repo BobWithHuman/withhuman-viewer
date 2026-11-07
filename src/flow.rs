@@ -39,7 +39,10 @@ const LINE_STOPS: usize = 9;
 pub struct Call {
     pub seq: i64,
     pub title: String,
+    /// The tool as the map writes it (`metro::tool_label`).
     pub tool: String,
+    /// The MCP server, for an MCP tool.
+    pub server: Option<String>,
     pub arg: String,
     pub at: Option<i64>,
     pub warn: bool,
@@ -60,7 +63,8 @@ impl Call {
         Call {
             seq: s.seq,
             title: s.name(),
-            tool: s.tool.clone(),
+            tool: crate::metro::tool_label(&s.tool),
+            server: crate::metro::mcp_parts(&s.tool).map(|(srv, _)| srv.to_owned()),
             arg: s.what.clone(),
             at: s.at,
             warn: s.decision.as_deref() == Some("REVIEW"),
@@ -74,19 +78,24 @@ impl Call {
         }
     }
 
-    /// Nothing to single out: allowed or undecided, told by the request, and it worked.
-    fn plain(&self, s: &Station) -> bool {
-        !self.warn && !self.blocked && self.by.is_none() && !self.loose && !s.failed
+    /// Nothing to single out: let through, and traced to what told it. A Call that followed
+    /// words in a tool result, or that failed, is folded too: an agent acting on what it read,
+    /// and tools erring, are most of a real session, and the map is read for what was stopped.
+    fn plain(&self) -> bool {
+        !self.warn && !self.blocked && !self.loose
     }
 
-    /// The line under its name: the tool, and the folder for a file.
+    /// The line under its name: the tool, and the folder for a file; an MCP tool's server.
     pub fn sub(&self) -> String {
+        if let Some(srv) = &self.server {
+            return format!("{srv} MCP");
+        }
         if !self.key.starts_with("f:") {
             return self.tool.clone();
         }
         match self.arg.rsplit_once('/') {
             Some((d, _)) if !d.is_empty() => format!("{} · {d}", self.tool),
-            _ => format!("{} · .", self.tool),
+            _ => self.tool.clone(),
         }
     }
 }
@@ -99,10 +108,22 @@ pub enum Item {
         calls: Vec<usize>,
         label: String,
         tools: Vec<(String, usize)>,
+        /// How many of them followed words in a tool result.
+        followed: usize,
     },
 }
 
 impl Item {
+    /// A group's line under its name: its tools, and how many followed words read.
+    pub fn note(tools: &[(String, usize)], followed: usize) -> String {
+        let tools = Self::sub(tools);
+        if followed > 0 {
+            format!("{tools} · 글 따름 {followed}")
+        } else {
+            tools
+        }
+    }
+
     /// The tools a group ran: "Read 24 · Grep 7 · 외 4".
     pub fn sub(tools: &[(String, usize)]) -> String {
         let mut parts: Vec<String> = tools
@@ -125,6 +146,8 @@ pub struct Turn {
     pub req: String,
     /// The subagent whose report the engine recorded as this turn; none when a person wrote it.
     pub agent: Option<String>,
+    /// When the engine saw the request, in milliseconds.
+    pub asked: Option<i64>,
     pub calls: Vec<Call>,
     pub items: Vec<Item>,
 }
@@ -139,8 +162,9 @@ impl Turn {
     pub fn ok(&self) -> usize {
         self.calls.iter().filter(|c| c.allowed).count()
     }
+    /// When it began: the request, or its first Call when the request has no time.
     pub fn at(&self) -> Option<i64> {
-        self.calls.iter().find_map(|c| c.at)
+        self.asked.or_else(|| self.calls.iter().find_map(|c| c.at))
     }
 }
 
@@ -187,6 +211,7 @@ impl Flow {
                 n: i + 1,
                 req: a.text.clone(),
                 agent: a.agent.clone(),
+                asked: a.at,
                 calls: Vec::new(),
                 items: Vec::new(),
             })
@@ -196,6 +221,7 @@ impl Flow {
                 n: 1,
                 req: String::new(),
                 agent: None,
+                asked: None,
                 calls: Vec::new(),
                 items: Vec::new(),
             });
@@ -205,7 +231,7 @@ impl Flow {
         for s in order {
             let t = m.asks.iter().rposition(|a| a.x <= s.x).unwrap_or(0);
             let c = Call::of(m, s);
-            plain[t].push(c.plain(s));
+            plain[t].push(c.plain());
             at.insert(c.seq, (t, turns[t].calls.len()));
             turns[t].calls.push(c);
         }
@@ -227,10 +253,12 @@ impl Flow {
                     } else {
                         format!("호출 {}개", run.len())
                     };
+                    let followed = run.iter().filter(|&&i| calls[i].by.is_some()).count();
                     items.push(Item::Group {
                         calls: std::mem::take(run),
                         label,
                         tools,
+                        followed,
                     });
                 } else {
                     items.extend(run.drain(..).map(Item::Call));
@@ -426,6 +454,8 @@ pub struct Overview {
     pub lines: Vec<OLine>,
     pub stops: Vec<OStop>,
     pub xfers: Vec<OXfer>,
+    /// The chapter's tasks that went nowhere, talk only: listed, but drawn as no line.
+    pub bare: Vec<usize>,
 }
 
 impl Overview {
@@ -612,18 +642,21 @@ impl Flow {
         let k = ((w - 90.0) / TW).min((h - 210.0) / TH).max(0.2);
         let (ox, oy) = ((w - TW * k) / 2.0, 92.0);
         let s = |p: &Pt| (ox + p.0 * k, oy + p.1 * k);
-        let lines: Vec<(usize, Vec<Pt>)> = tasks
-            .clone()
-            .enumerate()
-            .map(|(i, t)| (t, TEMPLATES[i].iter().map(s).collect()))
-            .collect();
         let path = |t: usize| paths.get(&t).cloned().unwrap_or_default();
+        // A task keeps its shape and colour by its place in the chapter, drawn or not.
+        let (drawn, bare): (Vec<_>, Vec<_>) =
+            tasks.clone().enumerate().partition(|(_, t)| !path(*t).is_empty());
+        let bare: Vec<usize> = bare.into_iter().map(|(_, t)| t).collect();
+        let lines: Vec<(usize, usize, Vec<Pt>)> = drawn
+            .into_iter()
+            .map(|(i, t)| (i, t, TEMPLATES[i].iter().map(s).collect()))
+            .collect();
 
         // Interchanges: where two shapes cross, a place both tasks went to.
         let mut fixed: HashMap<usize, Vec<(usize, f64)>> = HashMap::new();
         let mut xfers: Vec<OXfer> = Vec::new();
-        for (i, (a, ta)) in lines.iter().enumerate() {
-            for (b, tb) in lines.iter().skip(i + 1) {
+        for (i, (_, a, ta)) in lines.iter().enumerate() {
+            for (_, b, tb) in lines.iter().skip(i + 1) {
                 let mut shared: Vec<usize> = path(*a)
                     .into_iter()
                     .filter(|&p| places[p].tasks.contains(b) && !xfers.iter().any(|x| x.place == p))
@@ -647,7 +680,7 @@ impl Flow {
 
         // The rest of each line's stations, evenly along it, stepping aside from interchanges.
         let mut stops = Vec::new();
-        for (t, tpl) in &lines {
+        for (_, t, tpl) in &lines {
             let l = path_len(tpl);
             let fx = fixed.get(t).cloned().unwrap_or_default();
             let margin = 36.0 * k.max(0.8);
@@ -682,8 +715,7 @@ impl Flow {
 
         let lines = lines
             .iter()
-            .enumerate()
-            .map(|(i, (t, tpl))| {
+            .map(|(i, t, tpl)| {
                 let end = |e: Pt, n: Pt| {
                     let (dx, dy) = (e.0 - n.0, e.1 - n.1);
                     let l = dx.hypot(dy).max(1.0);
@@ -703,6 +735,7 @@ impl Flow {
             lines,
             stops,
             xfers,
+            bare,
         }
     }
 }
@@ -836,7 +869,7 @@ impl Flow {
             off += MARK_STEP;
             for (gi, item) in turn.items.iter().enumerate() {
                 match item {
-                    Item::Group { label, tools, .. } => {
+                    Item::Group { label, tools, followed, .. } => {
                         stops.push(Stop {
                             id: format!("t{t}-{gi}"),
                             turn: t,
@@ -844,7 +877,7 @@ impl Flow {
                             y: TOP,
                             kind: Kind::Tick,
                             label: label.clone(),
-                            sub: Item::sub(tools),
+                            sub: Item::note(tools, *followed),
                             branch: false,
                             up: {
                                 parity += 1;
@@ -860,7 +893,7 @@ impl Flow {
                         let c = &turn.calls[*i];
                         let name = short(
                             c.title.trim_end_matches(" 읽기").trim_end_matches(" 수정"),
-                            16,
+                            28,
                         );
                         if let (Some(via), Some(b)) = (&c.via, c.by) {
                             // The words it followed: a branch off the place they were read at.
@@ -940,11 +973,11 @@ impl Flow {
                             },
                             label: name,
                             sub: if c.blocked {
-                                format!("{} · 차단", c.tool)
+                                format!("{} · 차단", c.sub())
                             } else if c.warn {
-                                format!("{} · 확인 요청", c.tool)
+                                format!("{} · 확인 요청", c.sub())
                             } else if c.loose {
-                                format!("{} · 시킨 것 없음", c.tool)
+                                format!("{} · 시킨 것 없음", c.sub())
                             } else {
                                 c.sub()
                             },
@@ -1125,7 +1158,10 @@ mod tests {
     fn the_overview_draws_a_line_per_task_of_the_chapter() {
         let f = long("c4000a1b");
         let o = f.overview(0, 1100.0, 760.0);
-        assert_eq!(o.lines.len(), f.chapter_tasks(0).len());
+        assert_eq!(o.lines.len() + o.bare.len(), f.chapter_tasks(0).len());
+        for l in &o.lines {
+            assert!(o.stops.iter().any(|s| s.task == l.task) || o.xfers.iter().any(|x| x.tasks.contains(&l.task)));
+        }
         for x in &o.xfers {
             for t in x.tasks {
                 assert!(o.places[x.place].tasks.contains(&t));

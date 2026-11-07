@@ -14,6 +14,9 @@ use crate::flow::{
 use crate::layout::clip;
 use crate::metro::Metro;
 
+/// The width of the card over the map, with its margin: kept in step with `.fx-main > .route-panel`.
+const CARD_W: f64 = 392.0;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Level {
     Overview,
@@ -85,6 +88,37 @@ pub fn FlowMap() -> Element {
     let mut zoom = use_signal(|| 1.0_f64);
     let mut detail = use_signal(|| true);
     let hovered = use_signal(|| None::<i64>);
+    // The session list, opened from the session's name in either level.
+    let mut picking = use_context_provider(|| Picking(Signal::new(false))).0;
+    let opened = use_signal(|| None::<Option<String>>);
+    use_effect(move || {
+        // Another session opened from the list closes it.
+        let now = (state.current)();
+        let mut opened = opened;
+        if opened.peek().as_ref().is_some_and(|was| was.is_some() && *was != now) {
+            picking.set(false);
+        }
+        opened.set(Some(now));
+    });
+    use_effect(move || {
+        if picking() {
+            document::eval("requestAnimationFrame(() => document.getElementById('session-search')?.focus())");
+        }
+    });
+    let pick_list = rsx! {
+        if picking() {
+            div { class: "fx-pick-shade", onclick: move |_| picking.set(false) }
+            div {
+                class: "fx-pick-pop",
+                onkeydown: move |e: KeyboardEvent| if e.key() == Key::Escape { picking.set(false) },
+                div { class: "fx-pick-head",
+                    b { "세션 고르기" }
+                    button { class: "fx-pick-close", title: "닫기", onclick: move |_| picking.set(false), "✕" }
+                }
+                super::sidebar::Sidebar {}
+            }
+        }
+    };
 
     // A new session opens on its first stop; one task opens on its line, more on the network.
     let drawn = use_signal(|| None::<Option<String>>);
@@ -149,7 +183,7 @@ pub fn FlowMap() -> Element {
     });
 
     let (Some(m), Some(f)) = (metro(), flow()) else {
-        return rsx! { div { class: "routes fx" } };
+        return rsx! { div { class: "routes fx", {pick_list} } };
     };
     let t = turn().min(f.turns.len() - 1);
     let task = f.task_of(t);
@@ -200,6 +234,8 @@ pub fn FlowMap() -> Element {
             zoom.set((zoom() - 0.15).max(0.7))
         }
     };
+    // Only over the line: the network is read whole, and picking there opens the line.
+    let card = is_detail && detail() && picked.is_some();
     let task_name = f.tasks[task].name.clone();
     let (a, b) = (f.tasks[task].from + 1, f.tasks[task].to + 1);
     let anim = if is_detail {
@@ -244,15 +280,12 @@ pub fn FlowMap() -> Element {
                     }
                 }
             }
-            if detail() && picked.is_some() {
-                super::metro::RoutePanel { metro: m.clone(), dest: picked, hovered, detail }
-            }
             main { class: "fx-main",
                 div { key: "{is_detail}", class: "{anim}",
                     if !is_detail {
                         OverviewMap { flow: f.clone(), turn, hover, level, zoom }
                     } else if !visible.is_empty() {
-                        LineMap { flow: f.clone(), turns: visible.clone(), turn, zoom: zoom(), detail }
+                        LineMap { flow: f.clone(), turns: visible.clone(), turn, zoom: zoom(), zoom_to: zoom, detail, covered: if card { CARD_W } else { 0.0 } }
                     } else {
                         div { class: "fx-empty", "이 조건에 맞는 턴이 없습니다" }
                     }
@@ -268,7 +301,12 @@ pub fn FlowMap() -> Element {
                     }
                 }
                 div { class: "fx-brand", "WITHHUMAN" }
+                // Who told the agent to make the Call picked: a card over the map's right side.
+                if card {
+                    super::metro::RoutePanel { metro: m.clone(), dest: picked, hovered, detail }
+                }
             }
+            {pick_list}
         }
     }
 }
@@ -325,7 +363,6 @@ fn TaskPanel(
         .collect();
     let blocked = f.turns.iter().filter(|t| t.blocked() > 0).count();
     let warn = f.turns.iter().filter(|t| t.warn() > 0).count();
-    let name = session_name(&state);
     let stats = [
         ("노선", f.tasks.len(), ""),
         ("역", places.len(), ""),
@@ -336,7 +373,7 @@ fn TaskPanel(
         div { class: "fx-tasks",
             div { class: "fx-tasks-head",
                 div { class: "fx-kicker", "세션 노선망" }
-                div { class: "fx-session", "{name}" }
+                SessionPick { class: "fx-session-pick" }
                 div { class: "fx-stats",
                     for (l, n, c) in stats {
                         div { class: "fx-stat",
@@ -458,23 +495,50 @@ fn TaskRow(
     }
 }
 
-fn session_name(state: &AppState) -> String {
+/// Whether the session list is open over the map.
+#[derive(Clone, Copy)]
+struct Picking(Signal<bool>);
+
+/// The session's name, opening the session list to switch to another.
+#[component]
+fn SessionPick(class: &'static str) -> Element {
+    let state = use_context::<AppState>();
+    let mut picking = use_context::<Picking>().0;
     let current = state.current.read().clone().unwrap_or_default();
-    match &*state.sessions.read() {
+    let label = match &*state.sessions.read() {
         Load::Ready(list) => list
             .iter()
             .find(|s| s.id == current)
             .map(|s| {
                 let folder = s.folder();
-                if folder.is_empty() {
-                    clip(s.title(), 28)
-                } else {
-                    folder
-                }
+                let title = clip(s.title(), 40);
+                let when = day_time(s.last_at.or(s.created_at));
+                [folder, title, when]
+                    .into_iter()
+                    .filter(|t| !t.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" · ")
             })
-            .unwrap_or_else(|| "세션".into()),
-        _ => "세션".into(),
+            .unwrap_or_else(|| "세션 고르기".into()),
+        _ => "세션 불러오는 중".into(),
+    };
+    rsx! {
+        button {
+            class: "{class} fx-pick-btn",
+            title: "{label} · 다른 세션 고르기",
+            onclick: move |_| picking.toggle(),
+            span { class: "lb", "{label}" }
+            span { class: "act", "바꾸기" span { class: "chev", "▾" } }
+        }
     }
+}
+
+/// A moment as the session picker writes it: the day and the time.
+fn day_time(ms: Option<i64>) -> String {
+    use chrono::TimeZone;
+    ms.and_then(|ms| chrono::Local.timestamp_millis_opt(ms).single())
+        .map(|t| t.format("%m/%d %H:%M").to_string())
+        .unwrap_or_default()
 }
 
 /// The line's list: the tabs, where from and where to, then the task's turns as cards.
@@ -500,22 +564,6 @@ fn Sidebar(
         .into_iter()
         .map(|k| (k, scope.iter().filter(|&&i| k.holds(&f.turns[i])).count()))
         .collect();
-    let sessions: Vec<(String, String)> = match &*state.sessions.read() {
-        Load::Ready(list) => list
-            .iter()
-            .map(|s| {
-                let folder = s.folder();
-                let label = if folder.is_empty() {
-                    clip(s.title(), 34)
-                } else {
-                    format!("{folder} · {}", clip(s.title(), 28))
-                };
-                (s.id.clone(), label)
-            })
-            .collect(),
-        _ => Vec::new(),
-    };
-    let current = state.current.read().clone().unwrap_or_default();
     let found: Vec<(i64, String, String)> = if searching() {
         metro
             .find(&query())
@@ -559,15 +607,7 @@ fn Sidebar(
                 div { class: "fx-od",
                     div { class: "fx-od-row",
                         span { class: "fx-od-dot start" }
-                        select {
-                            class: "fx-od-pick",
-                            title: "세션 바꾸기",
-                            onchange: move |e| state.open_session(e.value()),
-                            for (id, label) in sessions {
-                                option { value: "{id}", selected: id == current, "{label} · {f.turns.len()}턴" }
-                            }
-                        }
-                        span { class: "fx-od-swap", "⇅" }
+                        SessionPick { class: "fx-od-pick" }
                     }
                     div { class: "fx-od-row find",
                         span { class: "fx-od-dot end" }
@@ -680,7 +720,7 @@ fn TurnCard(
                 div { class: "fx-items",
                     for (gi, item) in t.items.iter().enumerate() {
                         match item {
-                            Item::Group { label, tools, .. } => {
+                            Item::Group { label, tools, followed, .. } => {
                                 let shown = groups().contains(&gi);
                                 rsx! {
                                     div { key: "{gi}",
@@ -693,7 +733,7 @@ fn TurnCard(
                                                 if shown { "접기" } else { "펼치기" }
                                             }
                                         }
-                                        if shown { div { class: "fx-item-sub", "{Item::sub(tools)}" } }
+                                        if shown { div { class: "fx-item-sub", "{Item::note(tools, *followed)}" } }
                                     }
                                 }
                             }
@@ -886,8 +926,13 @@ fn OverviewMap(
                         let turns: Vec<&Turn> = r.clone().flat_map(|ti| f.task_turns(ti)).map(|i| &f.turns[i]).collect();
                         let b = turns.iter().filter(|t| t.blocked() > 0).count();
                         let wn = turns.iter().filter(|t| t.warn() > 0).count();
-                        let from_t = hm(turns.first().and_then(|t| t.at()));
-                        let to_t = hm(turns.last().and_then(|t| t.at()));
+                        let from_t = hm(turns.iter().find_map(|t| t.at()));
+                        let to_t = hm(turns.iter().rev().find_map(|t| t.at()));
+                        let span = match (from_t.is_empty(), from_t == to_t) {
+                            (true, _) => String::new(),
+                            (false, true) => from_t,
+                            (false, false) => format!("{from_t}–{to_t}"),
+                        };
                         let first = f.tasks[r.start].from;
                         let fl = flow.clone();
                         let n_tasks = r.len();
@@ -896,7 +941,7 @@ fn OverviewMap(
                                 key: "c{c}",
                                 class: if c == ch { "fx-chapter on" } else { "fx-chapter" },
                                 onclick: move |_| select_turn(turn, state, &fl, first),
-                                span { class: "top", "{c + 1}구간" span { class: "tm", "{from_t}–{to_t}" } }
+                                span { class: "top", "{c + 1}구간" if !span.is_empty() { span { class: "tm", "{span}" } } }
                                 span { class: "bot",
                                     "작업 {n_tasks}"
                                     if b > 0 { span { class: "red", i { class: "d" } "차단 {b}" } }
@@ -907,6 +952,9 @@ fn OverviewMap(
                     }
                 }
             }
+            if o.lines.is_empty() {
+                div { class: "fx-ov-empty", "이 구간의 작업은 대화만 하고 파일이나 명령을 쓰지 않았습니다." }
+            }
             div { class: "fx-title",
                 div { class: "big", "{ch + 1}구간 노선망" }
                 p { "노선은 작업, 역은 파일·명령입니다. 두 노선이 만나는 역은 두 작업이 함께 건드린 파일입니다." }
@@ -916,22 +964,27 @@ fn OverviewMap(
                     {
                         let from = f.tasks[task].from;
                         let fl = flow.clone();
+                        let bare = o.bare.contains(&task);
                         let cls = format!(
-                            "fx-leg{}{}",
+                            "fx-leg{}{}{}",
                             if task == sel_task { " on" } else { "" },
-                            if dim(task) { " dim" } else { "" }
+                            if dim(task) { " dim" } else { "" },
+                            if bare { " bare" } else { "" }
                         );
-                        let col = color_of(task);
+                        let col = if bare { "transparent" } else { color_of(task) };
                         let n = num(task);
+                        let tip = if bare { "역 없음: 대화만 한 작업이라 지도에 노선을 그리지 않았습니다" } else { "" };
                         rsx! {
                             button {
                                 key: "lg{task}",
                                 class: "{cls}",
+                                title: "{tip}",
                                 onmouseenter: move |_| hover.set(Some(task)),
                                 onmouseleave: move |_| hover.set(None),
                                 onclick: move |_| select_turn(turn, state, &fl, from),
                                 span { class: "no", style: "background: {col}", "{n}" }
                                 span { class: "nm", "{f.tasks[task].name}" }
+                                if bare { span { class: "none", "역 없음" } }
                             }
                         }
                     }
@@ -1017,7 +1070,11 @@ fn LineMap(
     turns: Vec<usize>,
     turn: Signal<usize>,
     zoom: f64,
+    /// Where the line asks for less zoom, once, when a turn and its Call do not fit the view.
+    zoom_to: Signal<f64>,
     detail: Signal<bool>,
+    /// How much of the view's right side a card covers.
+    covered: f64,
 ) -> Element {
     let mut state = use_context::<AppState>();
     let mut detail = detail;
@@ -1033,7 +1090,9 @@ fn LineMap(
         Selection::Node(seq) => Some(seq),
         Selection::None => None,
     };
-    let (w, h) = size();
+    let (w_all, h) = size();
+    // Framing keeps to the part of the view no card covers; panning still reaches all of it.
+    let w = (w_all - covered).max(w_all * 0.4);
     let (lw, lh) = (line.width * zoom, line.height * zoom);
     let max_scroll = (lw - w).max(0.0);
     let clamp = move |v: f64| v.clamp(0.0, max_scroll);
@@ -1041,26 +1100,64 @@ fn LineMap(
     // A turn picked is brought to the left fifth of the view.
     let mark_x = line.marks.iter().find(|m| m.turn == t).map(|m| m.x);
     let framed = use_signal(|| None::<(usize, u64, Option<i64>)>);
+    let fitted = use_signal(|| None::<(usize, Option<i64>)>);
     let zkey = (zoom * 1000.0) as u64;
     // A Call picked further on than the view reaches is brought into it.
+    // A Call folded into a group is found at the group.
+    let in_group = |s: &Stop, seq: i64| {
+        matches!(
+            s.group.and_then(|g| f.turns[s.turn].items.get(g)),
+            Some(Item::Group { calls, .. }) if calls.iter().any(|&i| f.turns[s.turn].calls[i].seq == seq)
+        )
+    };
+    let grouped = picked.and_then(|seq| {
+        line.stops
+            .iter()
+            .find(|s| s.turn == t && in_group(s, seq))
+            .cloned()
+    });
     let target_x = picked
         .and_then(|seq| {
             line.stops
                 .iter()
                 .find(|s| s.seq == Some(seq) && s.turn == t)
         })
+        .or(grouped.as_ref())
         .map(|s| s.x);
     if let Some(mx) = mark_x
         && w > 0.0
         && *framed.peek() != Some((t, zkey, picked))
     {
+        // Room kept left of the turn's start (its pin) and right of the Call (its name).
+        const LM: f64 = 60.0;
+        const RM: f64 = 200.0;
+        // The first time a turn and its Call are framed, zoom out so both its start and the
+        // Call show, as far as the zoom goes down; a zoom chosen afterwards is kept.
+        let mut fitted = fitted;
+        if *fitted.peek() != Some((t, picked)) {
+            fitted.set(Some((t, picked)));
+            if let Some(tx) = target_x.filter(|&tx| tx > mx) {
+                let fit = ((w - LM - RM) / (tx - mx)).clamp(0.7, 1.0);
+                if fit < zoom - 0.01 {
+                    let mut zoom_to = zoom_to;
+                    zoom_to.set(fit);
+                }
+            }
+        }
         let mut framed = framed;
         framed.set(Some((t, zkey, picked)));
-        let mut to = mx * zoom - w * 0.2;
+        // A line that fits the view is shown whole, from its start.
+        let mut to = if lw <= w { 0.0 } else { mx * zoom - w * 0.2 };
         if let Some(tx) = target_x
-            && tx * zoom - to > w - 160.0
+            && tx * zoom - to > w - RM
         {
-            to = tx * zoom - w * 0.6;
+            // The turn's start at the left when the Call still shows; else only as far as the
+            // Call takes, so as much of the start stays in view.
+            to = if (tx - mx) * zoom <= w - LM - RM {
+                mx * zoom - LM
+            } else {
+                tx * zoom - (w - RM)
+            };
         }
         scroll.set(to.clamp(0.0, max_scroll));
     }
@@ -1081,6 +1178,7 @@ fn LineMap(
                     .find(|s| s.seq == Some(seq) && s.turn == t)
             })
             .cloned()
+            .or(grouped.clone())
     });
     let col = move |n: usize| if n == t { LINE_COLOR } else { LINE_MUTED };
     let mut segs = line.segs.clone();
@@ -1269,7 +1367,15 @@ fn LineMap(
                     {pin(first.x, first.y - 14.0, "출발", GREEN)}
                 }
                 if let Some(tg) = target.as_ref().filter(|s| s.kind != Kind::Start) {
-                    {pin(tg.x, tg.y - 16.0, "도착", if tg.kind == Kind::Blocked { RED } else { "#1f2125" })}
+                    {
+                        // Under the line when the station's name is written above it, not on it.
+                        let color = if tg.kind == Kind::Blocked { RED } else { "#1f2125" };
+                        if tg.up == Some(true) && !tg.label.is_empty() {
+                            pin_below(tg.x, tg.y + 16.0, "도착", color)
+                        } else {
+                            pin(tg.x, tg.y - 16.0, "도착", color)
+                        }
+                    }
                 }
             }
         }
@@ -1284,6 +1390,19 @@ fn pin(x: f64, y: f64, label: &str, color: &str) -> Element {
             rect { x: "{x - w / 2.0}", y: "{y - h - 8.0}", width: "{w}", height: "{h}", rx: "7", fill: "{color}" }
             path { d: "{tip}", fill: "{color}" }
             text { x: "{x}", y: "{y - 8.0 - h / 2.0 + 7.0}", text_anchor: "middle", font_size: "19", font_weight: "700", fill: "#fff", "{label}" }
+        }
+    }
+}
+
+/// A pin under its point, its tip up.
+fn pin_below(x: f64, y: f64, label: &str, color: &str) -> Element {
+    let (w, h) = (62.0, 36.0);
+    let tip = format!("M{} {}l7 -8 7 8z", x - 7.0, y + 8.0);
+    rsx! {
+        g { class: "fx-nohit",
+            rect { x: "{x - w / 2.0}", y: "{y + 8.0}", width: "{w}", height: "{h}", rx: "7", fill: "{color}" }
+            path { d: "{tip}", fill: "{color}" }
+            text { x: "{x}", y: "{y + 8.0 + h / 2.0 + 7.0}", text_anchor: "middle", font_size: "19", font_weight: "700", fill: "#fff", "{label}" }
         }
     }
 }
