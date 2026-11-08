@@ -1941,3 +1941,9 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .fx .fx-trace .dot { width: 18px; height: 0; border-top: 2.5px dashed #b8acd9; }
 .fx .fx-trace.on { border-color: #8e7cc3; background: #f6f3fc; color: #5b4a8a; }
 .fx .fx-trace.on .dot { border-top-color: #8e7cc3; }
+
+/* A value that came out of an earlier turn's tool result: in its own amber-brown. */
+.fx-cause.val { background: #fff7ed; box-shadow: inset 0 0 0 1px #fdba74; color: #9a3412; }
+.fx-cause.val .k { background: #c2410c; }
+.fx-cause.val .from { color: #c2410c; }
+.fx-text-chip.cross { background: #fff7ed; color: #c2410c; box-shadow: inset 0 0 0 1px #fdba74; }

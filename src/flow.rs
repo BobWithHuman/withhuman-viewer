@@ -45,6 +45,9 @@ pub struct Call {
     pub server: Option<String>,
     /// What in a tool result told it, when the engine traced it to one.
     pub cause: Option<Cause>,
+    /// A value it used (an address, a key, a path outside the project) that first came out of a
+    /// tool result in an earlier turn and never from the person: where that was.
+    pub origin: Option<Origin>,
     /// What kind of thing it did, for its colour.
     pub tone: Tone,
     /// Which kind of tool, for its icon.
@@ -71,6 +74,7 @@ impl Call {
             title: s.name(),
             tool: crate::metro::tool_label(&s.tool),
             server: crate::metro::mcp_parts(&s.tool).map(|(srv, _)| srv.to_owned()),
+            origin: None,
             cause: s.source.as_ref().filter(|_| by.is_some()).map(|src| Cause {
                 result: src.result,
                 paragraph: src.paragraph,
@@ -123,6 +127,17 @@ pub struct Cause {
     pub p: f64,
     pub error: bool,
     pub quote: Option<String>,
+}
+
+/// Where a value a Call used first came out, in an earlier turn: the value as indexed, its kind,
+/// the tool result it was in, the Call that result came from, and that Call's turn.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Origin {
+    pub value: String,
+    pub kind: String,
+    pub result: i64,
+    pub from: i64,
+    pub turn: usize,
 }
 
 /// One entry of a turn: a Call, or plain Calls in a row folded together.
@@ -309,6 +324,11 @@ pub fn outcome(text: &str, n: usize) -> String {
         .map(|(l, _, _)| l.clone())
         .unwrap_or_default();
     gist(&pick, n)
+}
+
+/// A value without the quotes a command line wrapped it in.
+fn bare(s: &str) -> &str {
+    s.trim().trim_matches(|c| matches!(c, '\'' | '"' | '`'))
 }
 
 /// A turn's heading: what it was for (the intent, else the request) and how it ended.
@@ -672,6 +692,75 @@ impl Flow {
 
     pub fn call(&self, seq: i64) -> Option<&Call> {
         self.at.get(&seq).map(|&(t, i)| &self.turns[t].calls[i])
+    }
+
+    /// Finds, for each Call, a value it used that came from a tool result of an earlier turn
+    /// (see `Origin`), from the values the Generator indexed. A value the person wrote is
+    /// theirs; paths inside the session's folder or under /tmp are everyday and skipped.
+    pub fn trace_values(&mut self, model: &crate::layout::Model) {
+        use crate::model::TokenRow;
+        let cwd = model
+            .nodes
+            .iter()
+            .find_map(|n| n.props.get("cwd").and_then(serde_json::Value::as_str).map(str::to_owned))
+            .unwrap_or_default();
+        // A path inside the project, relative or under its folder, or a scratch one, is what any
+        // turn names anyway; it says nothing of where the value came from.
+        let everyday = |t: &TokenRow| {
+            let v = bare(&t.text);
+            matches!(t.kind.as_str(), "path" | "unc_path")
+                && (!(v.starts_with('/') || v.starts_with('~') || v.starts_with('\\'))
+                    || v.starts_with("/tmp")
+                    || v.starts_with("/private/tmp")
+                    || (!cwd.is_empty() && (v.starts_with(&cwd) || cwd.starts_with(v))))
+        };
+        let mut by_key: HashMap<&str, Vec<&TokenRow>> = HashMap::new();
+        for t in &model.tokens {
+            by_key.entry(t.key.as_str()).or_default().push(t);
+        }
+        // What a value says, for choosing among a Call's: secrets and personal data first, then
+        // where data can go, then paths; a fragment too short to mean anything not at all.
+        let weight = |t: &TokenRow| -> i32 {
+            let meaningful = bare(&t.text).chars().filter(|c| c.is_alphanumeric()).count() >= 4;
+            if !meaningful {
+                return -1;
+            }
+            match t.category.as_str() {
+                "credential" | "pii" | "financial" | "device" => 4,
+                _ => match t.kind.as_str() {
+                    "url" | "email" | "socket_address" | "db_dsn" | "cloud_arn" | "ip" => 3,
+                    _ => 1,
+                },
+            }
+        };
+        let mut found: Vec<(i64, i32, Origin)> = Vec::new();
+        for t in model.tokens.iter().filter(|t| t.slot == "agent" && !everyday(t) && weight(t) >= 0) {
+            let Some(turn) = self.turn_of(t.seq) else { continue };
+            let same = &by_key[t.key.as_str()];
+            if same.iter().any(|o| o.slot == "user" && o.seq <= t.seq) {
+                continue;
+            }
+            let Some(first) = same.iter().filter(|o| o.slot == "external" && o.seq < t.seq).min_by_key(|o| o.seq) else {
+                continue;
+            };
+            let Some(&from) = model.call_of.get(&first.seq) else { continue };
+            let Some(from_turn) = self.turn_of(from) else { continue };
+            if from_turn >= turn {
+                continue;
+            }
+            let w = weight(t) * 1000 + t.text.chars().count().min(999) as i32;
+            let origin = Origin { value: bare(&t.text).to_owned(), kind: t.kind.clone(), result: first.seq, from, turn: from_turn };
+            match found.iter_mut().find(|(s, _, _)| *s == t.seq) {
+                Some(slot) if slot.1 < w => *slot = (t.seq, w, origin),
+                Some(_) => {}
+                None => found.push((t.seq, w, origin)),
+            }
+        }
+        for (seq, _, origin) in found {
+            if let Some(&(ti, ci)) = self.at.get(&seq) {
+                self.turns[ti].calls[ci].origin = Some(origin);
+            }
+        }
     }
 
     /// The turn a Call was made in.
@@ -1222,6 +1311,8 @@ pub struct Stop {
     pub tier: u8,
     /// Its Call followed words read in a tool result: the stretch to it is the words' violet.
     pub follows: bool,
+    /// A value it used first came out of a tool result in this earlier turn (by index).
+    pub crossing: Option<usize>,
 }
 
 impl Stop {
@@ -1387,6 +1478,7 @@ impl Flow {
                 also: Vec::new(),
                 tier: 0,
                 follows: false,
+                crossing: None,
             });
             off += MARK_STEP;
             for (gi, item) in turn.items.iter().enumerate() {
@@ -1414,6 +1506,7 @@ impl Flow {
                                 also: Vec::new(),
                                 tier: 0,
                                 follows: false,
+                                crossing: None,
                             });
                             off += step_after(label, 14.0, MINI);
                         }
@@ -1445,6 +1538,7 @@ impl Flow {
                                 also: Vec::new(),
                                 tier: 0,
                                 follows: false,
+                                crossing: c.origin.as_ref().map(|o| o.turn),
                             });
                             off += step_after(&stops[stops.len() - 1].label, 12.0, MINI);
                         }
@@ -1477,6 +1571,7 @@ impl Flow {
                             also: Vec::new(),
                             tier: 0,
                             follows: false,
+                            crossing: None,
                         });
                         off += step_after(label, 14.0, TICK);
                     }
@@ -1547,6 +1642,7 @@ impl Flow {
                             also: Vec::new(),
                             tier: 0,
                             follows: c.via.is_some(),
+                            crossing: c.origin.as_ref().map(|o| o.turn),
                         });
                         let base = if important { IMPORTANT } else { STOP };
                         off += step_after(&stops[stops.len() - 1].label, 15.5, base);
@@ -1580,6 +1676,7 @@ impl Flow {
                     also: Vec::new(),
                     tier: 0,
                     follows: false,
+                    crossing: None,
                 });
                 off += STOP;
             }
@@ -1839,6 +1936,50 @@ impl Flow {
                 about: if dips_here { Vec::new() } else { about },
             });
         }
+        // A value that came from a tool result of an earlier turn: a passage (shown with the way
+        // back) from the station whose result held it, and a note of the value under the Call.
+        for (fi, f) in stops.iter().enumerate() {
+            let Some(origin) = f.seq.and_then(|q| self.call(q)).and_then(|c| c.origin.clone()) else {
+                continue;
+            };
+            let Some(ci) = stops.iter().position(|st| st.is(origin.from)) else { continue };
+            let c = &stops[ci];
+            let below = row_y(row_of(offsets[ci])) + BR_DY + LINK_DY;
+            let pts = vec![(c.x, c.y + 14.0), (c.x, below), (f.x, below), (f.x, f.y - 16.0)];
+            let about = vec![origin.from, f.seq.unwrap_or_default()];
+            segs.push(Seg {
+                turn: f.turn,
+                d: rounded(&pts, 16.0),
+                branch: true,
+                end: None,
+                ret: false,
+                unsure: false,
+                link: true,
+                about: about.clone(),
+            });
+            let _ = fi;
+            let cause = Cause {
+                result: origin.result,
+                paragraph: None,
+                p: -1.0,
+                error: false,
+                quote: Some(origin.value.clone()),
+            };
+            let qw = quote_width(&cause).max(240.0);
+            branch_labels.push(BranchLabel {
+                turn: f.turn,
+                x: f.x,
+                y: f.y,
+                rev: false,
+                text: format!("턴 {} · {}", origin.turn + 1, c.label),
+                end: false,
+                cause: Some(cause),
+                qx: f.x - 40.0,
+                qy: f.y + 54.0,
+                qw,
+                about,
+            });
+        }
         // The arrows: between stations far enough apart on one track, and down each turn.
         let mut arrows: Vec<(f64, f64, f64)> = Vec::new();
         for w in along.windows(2) {
@@ -2016,6 +2157,53 @@ mod tests {
         assert!(line.stops.iter().any(|s| s.follows), "fa6576f7 has a Call told by a tool result");
         assert!(line.stops.iter().any(|s| s.kind == Kind::Transfer || s.xfer));
         assert!(line.segs.iter().any(|s| s.link));
+    }
+
+    #[test]
+    fn a_value_from_an_earlier_turns_result_is_traced_across_the_turn() {
+        use crate::model::TokenRow;
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mock/long.json")).unwrap();
+        let demo = Demo::parse(&text);
+        let id = demo
+            .sessions()
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["id"].as_str())
+            .find(|id| id.starts_with("c4000a1b"))
+            .unwrap()
+            .to_owned();
+        let model = Model::build(&serde_json::from_value(demo.graph(&id).unwrap()).unwrap());
+        let all: HashSet<i64> = model.nodes.iter().map(|n| n.seq()).collect();
+        let base = Flow::build(&Metro::build_with(&model, &all));
+        // A result of a Call in an earlier turn, and a Call some turns later.
+        let (&result, &from) = model
+            .call_of
+            .iter()
+            .filter(|(_, c)| base.turn_of(**c).is_some_and(|t| t < 3))
+            .min_by_key(|(r, _)| **r)
+            .unwrap();
+        let later = base.turns[6].calls[0].seq;
+        let token = |seq: i64, slot: &str| TokenRow {
+            seq,
+            key: "https://evil.example/upload".into(),
+            kind: "url".into(),
+            slot: slot.into(),
+            category: "address".into(),
+            text: "https://evil.example/upload".into(),
+        };
+        let mut m = model.clone();
+        m.tokens = vec![token(result, "external"), token(later, "agent")];
+        let mut f = base.clone();
+        f.trace_values(&m);
+        let origin = f.call(later).and_then(|c| c.origin.clone()).expect("traced across turns");
+        assert_eq!((origin.from, origin.result), (from, result));
+        assert_eq!(Some(origin.turn), base.turn_of(from));
+        // The person wrote the value: it is theirs, not the result's.
+        m.tokens.push(token(base.turns[0].calls[0].seq.min(result) - 1, "user"));
+        let mut f = base.clone();
+        f.trace_values(&m);
+        assert!(f.call(later).and_then(|c| c.origin.clone()).is_none());
     }
 
     #[test]

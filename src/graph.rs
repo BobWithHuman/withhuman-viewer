@@ -55,6 +55,16 @@ RETURN properties(g) AS props, COLLECT { MATCH (g)-[:MEMBER]->(m) RETURN m.seq }
 ORDER BY g.number
 "#;
 
+/// Every value the Generator indexed in the session (URLs, paths, keys, ...), by the node that
+/// mentions it and who wrote it there: `user` (a prompt), `agent` (a Call or message),
+/// `external` (a tool result). Equal values share a key; sensitive ones are hashed and masked.
+const TOKENS: &str = r#"
+MATCH (t:Token {session_id: $session})
+RETURN t.node_seq AS seq, t.key AS key, t.key_kind AS kind, t.slot AS slot,
+       t.category AS category, coalesce(t.decoded, t.key) AS text
+ORDER BY t.node_seq
+"#;
+
 const EDGES: &str = r#"
 MATCH (:Session {session_id: $session})-[:CONTAINS]->(a)-[r:NEXT|RESULT_OF]->(b)
 RETURN a.seq AS source, b.seq AS target, type(r) AS type, properties(r) AS props,
@@ -252,8 +262,9 @@ impl Neo4j<'_> {
             })
             .collect();
         let subgraphs = self.read(SUBGRAPHS, parameters.clone()).await?;
-        let edges = self.read(EDGES, parameters).await?;
-        Ok(json!({"nodes": nodes, "subgraphs": subgraphs, "edges": edges}))
+        let edges = self.read(EDGES, parameters.clone()).await?;
+        let tokens = self.read(TOKENS, parameters).await?;
+        Ok(json!({"nodes": nodes, "subgraphs": subgraphs, "edges": edges, "tokens": tokens}))
     }
 
     pub async fn node(&self, session: &str, seq: i64) -> Result<Value, ApiError> {

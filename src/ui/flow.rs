@@ -87,7 +87,12 @@ pub fn FlowMap() -> Element {
     });
     let flow = use_memo(move || {
         let m = metro()?;
-        Some(Arc::new(Flow::build(&m)))
+        let mut f = Flow::build(&m);
+        // Values a Call used that first came out of an earlier turn's tool result.
+        if let Load::Ready(model) = &*state.graph.peek() {
+            f.trace_values(model);
+        }
+        Some(Arc::new(f))
     });
     let mut level = use_signal(|| Level::Overview);
     let mut turn = use_signal(|| 0usize);
@@ -951,6 +956,10 @@ fn call_row(c: &crate::flow::Call, key: String, picked: Option<i64>, mut state: 
             if times > 1 { span { class: "times", "×{times}" } }
             if inner { span { class: "tool", "{c.tool}" } }
             if c.via.is_some() { span { class: "fx-text-chip", "글" } }
+            // A value it used came out of an earlier turn's tool result.
+            if let Some(o) = c.origin.as_ref() {
+                span { class: "fx-text-chip cross", title: "‘{o.value}’: 턴 {o.turn + 1}의 도구 결과에서 처음 나온 값", "턴{o.turn + 1}" }
+            }
             span { class: "tm", "{hm(c.at)}" }
         }
     }
@@ -1354,11 +1363,17 @@ fn LineMap(
         let mut cur = picked;
         let mut seen = HashSet::new();
         while let Some(q) = cur.filter(|q| seen.insert(*q)) {
-            let by = f.call(q).and_then(|c| c.by);
+            let call = f.call(q);
+            let by = call.and_then(|c| c.by);
+            // Across turns too: from the Call whose result first held a value it used.
+            let from = call.and_then(|c| c.origin.as_ref()).map(|o| o.from);
             if let Some(b) = by {
                 trace.push((b, q));
             }
-            cur = by;
+            if let Some(o) = from {
+                trace.push((o, q));
+            }
+            cur = by.or(from);
         }
     }
     // The quotes shown (each over its stretch of the lower track; one tied to Calls only when
@@ -1637,8 +1652,9 @@ fn LineMap(
                             // and how sure the engine was. Clicked, it opens the words whole.
                             if let Some(c) = b.cause.as_ref() {
                                 {
-                                    let kind = if c.error { "오류" } else { "출력" };
-                                    let cls = format!("fx-cause{}{}", if c.error { " err" } else { "" }, if on { " on" } else { "" });
+                                    let value = c.p < 0.0;
+                                    let kind = if c.error { "오류" } else if value { "값" } else { "출력" };
+                                    let cls = format!("fx-cause{}{}{}", if c.error { " err" } else { "" }, if value { " val" } else { "" }, if on { " on" } else { "" });
                                     let quote = c.quote.clone().unwrap_or_else(|| "결과 보기".into());
                                     let p = (c.p * 100.0).round();
                                     rsx! {
@@ -1650,10 +1666,14 @@ fn LineMap(
                                                 div { class: "row",
                                                     span { class: "k", "{kind}" }
                                                     span { class: "q", "“{quote}”" }
-                                                    span { class: "p", "{p}%" }
+                                                    if !value { span { class: "p", "{p}%" } }
                                                 }
                                                 // The station whose output it was.
-                                                div { class: "from", "← {b.text}의 {kind}" }
+                                                if value {
+                                                    div { class: "from", "← {b.text} 결과에서 처음 나온 값" }
+                                                } else {
+                                                    div { class: "from", "← {b.text}의 {kind}" }
+                                                }
                                             }
                                         }
                                     }
@@ -1750,9 +1770,9 @@ fn LineMap(
             if let Some(b) = cause_open().and_then(|i| line.branch_labels.get(i)) {
                 if let Some(c) = b.cause.clone() {
                     {
-                        let kind = if c.error { "오류 출력" } else { "도구 출력" };
+                        let kind = if c.error { "오류 출력" } else if c.p < 0.0 { "값이 처음 나온 결과" } else { "도구 출력" };
                         let p = (c.p * 100.0).round();
-                        let reading = format!("{} · 원인일 확률 {p}%", b.text);
+                        let reading = if c.p < 0.0 { b.text.clone() } else { format!("{} · 원인일 확률 {p}%", b.text) };
                         rsx! {
                             div {
                                 class: "fx-prompt cause",
@@ -1925,6 +1945,13 @@ fn LineStop(
             // A stopped Call whose result also told another: the interchange's ring around it.
             if s.xfer && s.kind != Kind::Transfer {
                 circle { cx: "{x}", cy: "{y}", r: "16", fill: "none", stroke: TEXT_COLOR, stroke_width: "2.5" }
+            }
+            // A value it used came from an earlier turn: a small tag with that turn over it.
+            if let Some(n) = s.crossing {
+                g { class: "fx-nohit",
+                    rect { x: "{x + 11.0}", y: "{y + 6.0}", width: "40", height: "16", rx: "8", fill: "#fff", stroke: "#c2410c", stroke_width: "1.5" }
+                    text { x: "{x + 31.0}", y: "{y + 17.5}", text_anchor: "middle", font_size: "10", font_weight: "700", fill: "#c2410c", "↶턴{n + 1}" }
+                }
             }
             if sel {
                 circle { cx: "{x}", cy: "{y}", r: "19", fill: "{color}", opacity: "0.14" }

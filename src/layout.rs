@@ -46,6 +46,8 @@ pub struct Model {
     shown: Vec<i64>,
     flows: Vec<(i64, i64)>,
     pub causes: Vec<Cause>,
+    /// The indexed values, as the graph gave them.
+    pub tokens: Vec<crate::model::TokenRow>,
 }
 
 /// What a selection picks out: element ids to paint, the rest fades.
@@ -151,6 +153,7 @@ impl Model {
             shown: shown_list,
             flows,
             causes,
+            tokens: data.tokens.clone(),
         }
     }
 
