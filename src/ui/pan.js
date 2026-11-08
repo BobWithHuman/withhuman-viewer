@@ -114,6 +114,18 @@ window.fxMap = window.fxMap || (() => {
       S.y = (r.height - 70 - h * k) / 2;
       apply(true);
     },
+    // The box (x0, y0)-(x1, y1) in view, centred, no closer than full size: the way back from a
+    // Call to what told it, however far apart.
+    box: (x0, y0, x1, y1) => {
+      if (!attach()) return;
+      const r = S.el.getBoundingClientRect();
+      const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+      const k = Math.min(1, Math.max(0.05, Math.min((r.width - 120) / w, (r.height - 190) / h)));
+      S.k = k;
+      S.x = r.width / 2 - (x0 + w / 2) * k;
+      S.y = (r.height - 70) / 2 - (y0 + h / 2) * k;
+      apply(true);
+    },
     // (ax, ay): the turn's zone corner, to the top left; (tx, ty): the Call picked, near the
     // middle when it would lie outside the view.
     // A turn on a row running left (rev) is put at the view's right, its zone's right edge

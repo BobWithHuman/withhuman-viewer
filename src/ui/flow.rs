@@ -21,6 +21,10 @@ const CARD_W: f64 = 328.0;
 const SHOW_ROUTE_CARD: bool = false;
 /// Moving and zooming the line map in the page (see the file).
 const PAN_JS: &str = include_str!("pan.js");
+/// The way back from a Call to what told it, while it is shown.
+const TRACE_COLOR: &str = "#7c3aed";
+/// The rest of the line meanwhile: grey, out of the way.
+const DIM_COLOR: &str = "#d4d6db";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Level {
@@ -1334,13 +1338,16 @@ fn LineMap(
     let mut say_open = use_signal(|| None::<usize>);
     // The branch whose cause is opened to the words read, whole.
     let mut cause_open = use_signal(|| None::<usize>);
-    // Whether the way back from the Call picked to what told it is drawn: the passages from it to
-    // the station whose output it followed, from that one to its own, and so on up.
-    let mut trace_on = use_signal(|| false);
     let picked = match (state.selected)() {
         Selection::Node(seq) => Some(seq),
         Selection::None => None,
     };
+    // A stopped or held Call picked that something in a tool result told: the way back from it to what
+    // told it, and from that to its own cause, up across turns, is shown in colour, the rest of
+    // the line grey.
+    let tracing = picked
+        .and_then(|p| f.call(p))
+        .is_some_and(|c| (c.blocked || c.warn) && (c.by.is_some() || c.origin.is_some()));
     let (w_all, h) = size();
     let framed = use_signal(|| None::<(usize, Option<i64>, u64)>);
     // A Call folded into a group is found at the group.
@@ -1372,6 +1379,7 @@ fn LineMap(
     let lkey = (line.width as u64) << 20 ^ line.height as u64;
     if let Some((mx, my, mw, rev)) = mark_at
         && h > 0.0
+        && !tracing
         && *framed.peek() != Some((t, picked, lkey))
     {
         let mut framed = framed;
@@ -1399,7 +1407,7 @@ fn LineMap(
     let has_branch = !line.branch_labels.is_empty();
     // The way back, when it is on: (cause, follower) pairs from the Call picked up its causes.
     let mut trace: Vec<(i64, i64)> = Vec::new();
-    if trace_on() {
+    if tracing {
         let mut cur = picked;
         let mut seen = HashSet::new();
         while let Some(q) = cur.filter(|q| seen.insert(*q)) {
@@ -1416,12 +1424,38 @@ fn LineMap(
             cur = by.or(from);
         }
     }
+    // The Calls on the way back, the one picked with them: in colour while the rest is grey.
+    let chain: HashSet<i64> = trace.iter().flat_map(|&(c, f)| [c, f]).chain(picked.filter(|_| tracing)).collect();
+    // A quote under a station on the way back, or about two of them.
+    let on_chain = |b: &crate::flow::BranchLabel| {
+        b.about.iter().any(|q| chain.contains(q))
+            || (b.about.is_empty()
+                && line.stops.iter().any(|s| (s.x - b.x).abs() < 0.5 && (s.y - b.y).abs() < 0.5 && s.seq.is_some_and(|q| chain.contains(&q))))
+    };
+    // The whole way back brought into view, its far end and the Call picked both.
+    let boxed = use_signal(|| None::<(Option<i64>, u64)>);
+    if tracing && h > 0.0 && *boxed.peek() != Some((picked, lkey)) {
+        let pts: Vec<(f64, f64)> = line.stops.iter().filter(|s| s.seq.is_some_and(|q| chain.contains(&q))).map(|s| (s.x, s.y)).collect();
+        if !pts.is_empty() {
+            let mut boxed = boxed;
+            boxed.set(Some((picked, lkey)));
+            let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
+            let (y0, y1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+            // Room for the names over the stations and the quote boxes under them.
+            let (x0, y0, x1, y1) = (x0 - 160.0, y0 - 110.0, x1 + 260.0, y1 + 170.0);
+            document::eval(&format!("{PAN_JS}\nrequestAnimationFrame(() => fxMap.box({x0}, {y0}, {x1}, {y1}));"));
+        }
+    } else if !tracing && boxed.peek().is_some() {
+        let mut boxed = boxed;
+        boxed.set(None);
+    }
     // The quotes shown (each over its stretch of the lower track; one tied to Calls only when
     // one of them is picked), each moved down under any shown before it that it would cover.
     let mut quote_y: HashMap<usize, f64> = HashMap::new();
     let mut placed: Vec<(f64, f64, f64)> = Vec::new();
     for (bi, b) in line.branch_labels.iter().enumerate() {
-        if !(b.about.is_empty() || picked.is_some_and(|p| b.about.contains(&p))) {
+        let shown = if tracing { on_chain(b) } else { b.about.is_empty() || picked.is_some_and(|p| b.about.contains(&p)) };
+        if !shown {
             continue;
         }
         let mut y = b.qy;
@@ -1531,17 +1565,22 @@ fn LineMap(
                     {
                         // Under the coloured stretches the line is grey: where it runs on past a
                         // turn's last station nothing was done.
-                        let c = if s.branch {
+                        let c = if tracing && s.link {
+                            TRACE_COLOR
+                        } else if tracing {
+                            DIM_COLOR
+                        } else if s.branch {
                             if s.turn == t { TEXT_COLOR } else { TEXT_MUTED }
                         } else {
                             LINE_MUTED
                         };
+                        let lw = if tracing && s.link { "3.5" } else { "2.5" };
                         rsx! {
                             g { key: "seg{i}", class: "fx-nohit",
                                 if s.link {
                                     // A passage from the station whose output was read to the
                                     // Call that followed it: thin, under the line, not ridden.
-                                    path { d: "{s.d}", fill: "none", stroke: "{c}", stroke_width: "2.5", stroke_dasharray: if s.unsure { "5 5" } else { "none" }, stroke_linecap: "round", stroke_linejoin: "round", opacity: "0.9" }
+                                    path { d: "{s.d}", fill: "none", stroke: "{c}", stroke_width: "{lw}", stroke_dasharray: if s.unsure { "5 5" } else { "none" }, stroke_linecap: "round", stroke_linejoin: "round", opacity: "0.9" }
                                     path { d: "{arrow_head(&s.d)}", fill: "{c}" }
                                 } else if s.ret {
                                     // The way back to the next row: faint and dashed, not a stretch ridden.
@@ -1563,10 +1602,11 @@ fn LineMap(
                 // colour of the station it reaches. Other turns keep them, faint.
                 for (i, ts) in line.tones.iter().enumerate() {
                     {
-                        let op = if ts.turn == t { "1" } else { "0.28" };
+                        let op = if tracing || ts.turn == t { "1" } else { "0.28" };
+                        let stroke = if tracing { DIM_COLOR } else { ts.tone.color() };
                         let d = ts.d.clone();
                         rsx! {
-                            path { key: "tone{i}", class: "fx-nohit", d: "{d}", fill: "none", stroke: ts.tone.color(), stroke_width: "7", stroke_linecap: "round", opacity: "{op}" }
+                            path { key: "tone{i}", class: "fx-nohit", d: "{d}", fill: "none", stroke: "{stroke}", stroke_width: "7", stroke_linecap: "round", opacity: "{op}" }
                         }
                     }
                 }
@@ -1587,9 +1627,14 @@ fn LineMap(
                 }
                 for s in line.stops.iter().cloned() {
                     {
-                        let color = if s.branch {
-                            if s.turn == t { TEXT_COLOR } else { "#c9c2dd" }
-                        } else if s.turn == t {
+                        // With the way back shown, only its stations keep their colour and names.
+                        let lit = s.seq.is_some_and(|q| chain.contains(&q));
+                        let dim = tracing && !lit;
+                        let color = if dim {
+                            DIM_COLOR
+                        } else if s.branch {
+                            if s.turn == t || lit { TEXT_COLOR } else { "#c9c2dd" }
+                        } else if s.turn == t || lit {
                             s.tone.color()
                         } else {
                             col(s.turn)
@@ -1604,7 +1649,8 @@ fn LineMap(
                                 stop: s.clone(),
                                 color: color.to_string(),
                                 sel,
-                                detail: s.turn == t,
+                                detail: if tracing { lit } else { s.turn == t },
+                                dim,
                                 open,
                                 onsel: move |_| {
                                     select_turn(turn, state, &fl, st.turn);
@@ -1677,7 +1723,7 @@ fn LineMap(
                 for (bi, b) in line.branch_labels.iter().enumerate().filter(|(i, _)| quote_y.contains_key(i)) {
                     {
                         let qy = quote_y[&bi];
-                        let on = b.turn == t;
+                        let on = b.turn == t || tracing;
                         let (op, fill) = if on { ("1", TEXT_COLOR) } else { ("0.55", "#c9c2dd") };
                         let opened = cause_open() == Some(bi);
                         rsx! {
@@ -1837,14 +1883,13 @@ fn LineMap(
                 }
             }
             }
-            // Showing the way back from the Call picked to what told it.
-            button {
-                class: if trace_on() { "fx-trace on" } else { "fx-trace" },
-                title: "고른 호출이 어떤 출력을 보고 한 일인지 거슬러 올라가는 길을 점선으로 보여 줍니다",
-                onmousedown: move |e| e.stop_propagation(),
-                onclick: move |_| trace_on.toggle(),
-                span { class: "dot" }
-                if trace_on() { "원인 경로 켜짐" } else { "원인 경로" }
+            // While the way back from a stopped Call is shown, what it is and how to leave it.
+            if tracing {
+                div { class: "fx-trace on", onmousedown: move |e| e.stop_propagation(),
+                    span { class: "dot" }
+                    {if picked.and_then(|p| f.call(p)).is_some_and(|c| c.blocked) { "차단된" } else { "확인 요청된" }}
+                    " 호출의 원인 경로 · 다른 역을 누르면 돌아가요"
+                }
             }
             // What the colours mean.
             div { class: "fx-tones", onmousedown: move |e| e.stop_propagation(),
@@ -1923,6 +1968,9 @@ fn LineStop(
     color: String,
     sel: bool,
     detail: bool,
+    /// Off the way back being shown: grey, unnamed, faint.
+    #[props(default)]
+    dim: bool,
     open: bool,
     onsel: EventHandler<()>,
 ) -> Element {
@@ -1931,7 +1979,7 @@ fn LineStop(
     // On a turn not picked only the stations that tell its story keep their names, faint:
     // what was stopped, interchanges, files changed, and how it ended.
     let key = important || s.xfer || s.tone == Tone::Change || s.kind == Kind::Say;
-    let show = !s.label.is_empty() && (detail || key);
+    let show = !s.label.is_empty() && (detail || (key && !dim));
     let faint = if detail { "1" } else { "0.55" };
     let mini = s.kind == Kind::Mini;
     let minor = s.kind == Kind::Tick || mini;
@@ -1949,6 +1997,7 @@ fn LineStop(
     let sy = if up { s.y - gap - lift } else { s.y + gap + 8.0 + step + lift };
     let (x, y) = (s.x, s.y);
     let fill = match s.kind {
+        _ if dim => DIM_COLOR,
         Kind::Mini => color.as_str(),
         Kind::Blocked => RED,
         Kind::Warn => "#a8790c",
@@ -1980,15 +2029,16 @@ fn LineStop(
     rsx! {
         g {
             class: "fx-hit",
+            opacity: if dim { "0.7" } else { "1" },
             onclick: move |e| { e.stop_propagation(); onsel.call(()); },
             title { "{tip}" }
             circle { cx: "{x}", cy: "{y}", r: "20", fill: "transparent" }
             // A stopped Call whose result also told another: the interchange's ring around it.
-            if s.xfer && s.kind != Kind::Transfer {
+            if s.xfer && s.kind != Kind::Transfer && !dim {
                 circle { cx: "{x}", cy: "{y}", r: "16", fill: "none", stroke: TEXT_COLOR, stroke_width: "2.5" }
             }
             // A value it used came from an earlier turn: a small tag with that turn over it.
-            if let Some(n) = s.crossing {
+            if let Some(n) = s.crossing.filter(|_| !dim) {
                 g { class: "fx-nohit",
                     rect { x: "{x + 11.0}", y: "{y + 6.0}", width: "40", height: "16", rx: "8", fill: "#fff", stroke: "#c2410c", stroke_width: "1.5" }
                     text { x: "{x + 31.0}", y: "{y + 17.5}", text_anchor: "middle", font_size: "10", font_weight: "700", fill: "#c2410c", "↶턴{n + 1}" }
@@ -2011,21 +2061,21 @@ fn LineStop(
                 },
                 Kind::Transfer => rsx! {
                     g {
-                        rect { x: "{x - 9.0}", y: "{y - 15.0}", width: "18", height: "30", rx: "9", fill: "#fff", stroke: "#1f2125", stroke_width: "3" }
+                        rect { x: "{x - 9.0}", y: "{y - 15.0}", width: "18", height: "30", rx: "9", fill: "#fff", stroke: if dim { DIM_COLOR } else { "#1f2125" }, stroke_width: "3" }
                         circle { cx: "{x}", cy: "{y - 5.5}", r: "4", fill: "{color}" }
-                        circle { cx: "{x}", cy: "{y + 5.5}", r: "4", fill: TEXT_COLOR }
+                        circle { cx: "{x}", cy: "{y + 5.5}", r: "4", fill: if dim { DIM_COLOR } else { TEXT_COLOR } }
                     }
                 },
                 Kind::Warn => rsx! {
                     g { transform: "translate({x - 12.0} {y - 12.0})",
-                        path { d: "M12 1L24 22H0z", fill: AMBER, stroke: "#fff", stroke_width: "2", stroke_linejoin: "round" }
+                        path { d: "M12 1L24 22H0z", fill: if dim { DIM_COLOR } else { AMBER }, stroke: "#fff", stroke_width: "2", stroke_linejoin: "round" }
                         rect { x: "10.9", y: "7.5", width: "2.2", height: "7.5", rx: "1", fill: "#fff" }
                         circle { cx: "12", cy: "18", r: "1.3", fill: "#fff" }
                     }
                 },
                 Kind::Blocked => rsx! {
                     g {
-                        circle { cx: "{x}", cy: "{y}", r: "11", fill: RED, stroke: "#fff", stroke_width: "2" }
+                        circle { cx: "{x}", cy: "{y}", r: "11", fill: if dim { DIM_COLOR } else { RED }, stroke: "#fff", stroke_width: "2" }
                         path { d: "{x_d}", stroke: "#fff", stroke_width: "2.4", stroke_linecap: "round" }
                     }
                 },

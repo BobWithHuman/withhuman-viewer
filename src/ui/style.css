@@ -1950,3 +1950,7 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 
 /* The turn whose prompt ← and → stopped at: its heading marked, nothing opened over the map. */
 .fx-turnhead.pick { box-shadow: inset 3px 0 0 #2f3542; padding-left: 10px; }
+.fx .fx-trace.on { border-color: #7c3aed; background: #7c3aed; color: #fff; }
+.fx .fx-trace.on .dot { border-top-color: #fff; }
+/* The note of the way back shown: over the map's top, clear of the stations and the step buttons. */
+.fx div.fx-trace { cursor: default; top: 14px; bottom: auto; right: auto; left: 50%; transform: translateX(-50%); white-space: nowrap; }
