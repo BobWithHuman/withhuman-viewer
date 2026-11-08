@@ -325,19 +325,59 @@ pub fn FlowMap() -> Element {
 
     rsx! {
         div { class: "routes fx",
-            aside { class: "fx-aside",
-                div { class: "fx-levels",
-                    button {
-                        class: if !is_detail { "on" } else { "" },
-                        onclick: move |_| level.set(Level::Overview),
-                        "전체"
-                    }
-                    button {
-                        class: if is_detail { "on" } else { "" },
-                        onclick: move |_| focus_turn(t),
-                        "자세히"
+            // The controls of the map, down its left as a design app keeps its tools: the
+            // network or one line, zoom, fit, stepping through the Calls, reading live.
+            nav { class: "fx-tools",
+                button { class: if !is_detail { "on" } else { "" }, title: "전체 노선망", onclick: move |_| level.set(Level::Overview),
+                    {tool_icon("M4 6.5l5-2 6 2 5-2v13l-5 2-6-2-5 2zM9 4.5v13M15 6.5v13")}
+                }
+                button { class: if is_detail { "on" } else { "" }, title: "자세히 · 고른 턴의 노선", onclick: move |_| focus_turn(t),
+                    {tool_icon("M3 12h18M8.6 12a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0zM18.6 12a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0z")}
+                }
+                i { class: "sep" }
+                button { title: "확대", onclick: zoom_in, {tool_icon("M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM15.3 15.3L20 20M7.5 10.5h6M10.5 7.5v6")} }
+                button { title: "축소", disabled: !is_detail, onclick: zoom_out, {tool_icon("M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM15.3 15.3L20 20M7.5 10.5h6")} }
+                button {
+                    title: "노선 전체를 한 화면에",
+                    disabled: !is_detail,
+                    onclick: move |_| { document::eval(&format!("{PAN_JS}\nfxMap.fit()")); },
+                    {tool_icon("M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5")}
+                }
+                i { class: "sep" }
+                // Stepping through the Calls in the order made: buttons, and ← → anywhere but in
+                // a text field (the page clicks these for the keys).
+                button { id: "fx-prev", title: "이전 (←)", disabled: total == 0 || at == Some(0), onclick: move |_| step_prev(-1), {tool_icon("M14.5 6l-6 6 6 6")} }
+                span { class: "n", title: "지금 몇 번째인지",
+                    if let Some(i) = at { "{i + 1}" } else { "–" }
+                    span { class: "of", "{total}" }
+                }
+                button { id: "fx-next", title: "다음 (→)", disabled: total == 0 || at == Some(total.saturating_sub(1)), onclick: move |_| step_next(1), {tool_icon("M9.5 6l6 6-6 6")} }
+                div { class: "fill" }
+                button {
+                    class: if (state.live)() { "on live" } else { "" },
+                    title: if (state.live)() { "자동 갱신 켜짐 · 3초마다 다시 읽기" } else { "자동 갱신 꺼짐" },
+                    onclick: move |_| state.live.toggle(),
+                    {tool_icon("M19 12a7 7 0 1 1-2.05-4.95M19 4.5V9h-4.5")}
+                }
+            }
+            main { class: "fx-main",
+                div { key: "{is_detail}", class: "{anim}",
+                    if !is_detail {
+                        OverviewMap { flow: f.clone(), turn, hover, level, zoom }
+                    } else if !visible.is_empty() {
+                        LineMap { flow: f.clone(), turns: visible.clone(), turn, detail, covered: if card { CARD_W } else { 0.0 } }
+                    } else {
+                        div { class: "fx-empty", "이 조건에 맞는 턴이 없습니다" }
                     }
                 }
+                div { class: "fx-brand", "WITHHUMAN" }
+                // Who told the agent to make the Call picked: a card over the map's right side.
+                if card {
+                    super::metro::RoutePanel { metro: m.clone(), dest: picked, hovered, detail }
+                }
+            }
+            // What is looked at, in detail: the session's tasks, or the turns of the line.
+            aside { class: "fx-aside",
                 div { class: "fx-slide-wrap",
                     div { class: "fx-slide", style: "transform: {slide}",
                         div { class: "fx-pane", aria_hidden: is_detail,
@@ -360,52 +400,16 @@ pub fn FlowMap() -> Element {
                     }
                 }
             }
-            main { class: "fx-main",
-                div { key: "{is_detail}", class: "{anim}",
-                    if !is_detail {
-                        OverviewMap { flow: f.clone(), turn, hover, level, zoom }
-                    } else if !visible.is_empty() {
-                        LineMap { flow: f.clone(), turns: visible.clone(), turn, detail, covered: if card { CARD_W } else { 0.0 } }
-                    } else {
-                        div { class: "fx-empty", "이 조건에 맞는 턴이 없습니다" }
-                    }
-                }
-                // Stepping through the Calls in the order made: buttons, and ← → anywhere but
-                // in a text field (the page clicks these for the keys).
-                if total > 0 {
-                    div { class: "fx-step",
-                        button { id: "fx-prev", title: "이전 (←)", disabled: at == Some(0), onclick: move |_| step_prev(-1), "‹" }
-                        span { class: "n",
-                            if let Some(i) = at { "{i + 1}" } else { "–" }
-                            span { class: "of", " / {total}" }
-                        }
-                        button { id: "fx-next", title: "다음 (→)", disabled: at == Some(total - 1), onclick: move |_| step_next(1), "›" }
-                    }
-                }
-                div { class: "fx-zoom",
-                    button { title: "확대", onclick: zoom_in, "+" }
-                    button { title: "축소", disabled: !is_detail, onclick: zoom_out, "−" }
-                    button {
-                        class: "fit",
-                        title: "노선 전체를 한 화면에",
-                        disabled: !is_detail,
-                        onclick: move |_| { document::eval(&format!("{PAN_JS}\nfxMap.fit()")); },
-                        "맞춤"
-                    }
-                    button {
-                        class: if !is_detail { "fit on" } else { "fit" },
-                        title: "전체 노선망",
-                        onclick: move |_| level.set(Level::Overview),
-                        "노선망"
-                    }
-                }
-                div { class: "fx-brand", "WITHHUMAN" }
-                // Who told the agent to make the Call picked: a card over the map's right side.
-                if card {
-                    super::metro::RoutePanel { metro: m.clone(), dest: picked, hovered, detail }
-                }
-            }
             {pick_list}
+        }
+    }
+}
+
+/// A control's outline icon.
+fn tool_icon(d: &'static str) -> Element {
+    rsx! {
+        svg { width: "18", height: "18", view_box: "0 0 24 24",
+            path { d, fill: "none", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round", stroke_linejoin: "round" }
         }
     }
 }
@@ -472,7 +476,6 @@ fn TaskPanel(
         div { class: "fx-tasks",
             div { class: "fx-tasks-head",
                 div { class: "fx-kicker", "세션 노선망" }
-                SessionPick { class: "fx-session-pick" }
                 div { class: "fx-stats",
                     for (l, n, c) in stats {
                         div { class: "fx-stat",
@@ -743,7 +746,6 @@ fn Sidebar(
         detail.set(true);
     };
     let first_found = found.first().map(|c| c.0);
-    let live = (state.live)();
     // The picked turn's card stays in view in the list.
     use_effect(move || {
         let t = turn();
@@ -768,10 +770,6 @@ fn Sidebar(
                     }
                 }
                 div { class: "fx-od",
-                    div { class: "fx-od-row",
-                        span { class: "fx-od-dot start" }
-                        SessionPick { class: "fx-od-pick" }
-                    }
                     div { class: "fx-od-row find",
                         span { class: "fx-od-dot end" }
                         input {
@@ -801,15 +799,6 @@ fn Sidebar(
                         }
                     }
                 }
-            }
-            div { class: "fx-live",
-                button {
-                    class: if live { "pill on" } else { "pill" },
-                    onclick: move |_| state.live.toggle(),
-                    if live { "ON" } else { "OFF" }
-                }
-                span { class: "lbl", "자동 갱신" }
-                span { class: "cnt", "{visible.len()}개 턴" }
             }
             div { class: "fx-turns",
                 if visible.is_empty() { div { class: "fx-none", "이 조건에 맞는 턴이 없습니다" } }
