@@ -4,6 +4,7 @@
 
 mod api;
 mod demo;
+mod engine;
 mod flow;
 mod graph;
 mod layout;

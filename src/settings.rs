@@ -30,6 +30,22 @@ pub struct Settings {
     /// No settings were saved yet: the app greets instead of reporting a failed connection.
     #[serde(skip)]
     pub first_run: bool,
+    /// Where the engine runs, as chosen on the first launch.
+    pub engine: Engine,
+    /// The engine's folder, when the viewer starts it on this Mac.
+    pub engine_dir: Option<String>,
+    /// A Jev key was taken by Jev and is kept in the keychain.
+    pub jev_saved: bool,
+}
+
+/// Where the engine runs: started by the viewer on this Mac, or reached on a server.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Unset,
+    Local,
+    Server,
 }
 
 impl Default for Settings {
@@ -46,6 +62,9 @@ impl Default for Settings {
             new_password: false,
             demo: std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1"),
             first_run: false,
+            engine: Engine::Unset,
+            engine_dir: None,
+            jev_saved: false,
         }
     }
 }
@@ -60,6 +79,9 @@ pub struct Public {
     pub demo: bool,
     pub first_run: bool,
     pub path: String,
+    pub engine: Engine,
+    pub engine_dir: Option<String>,
+    pub jev_saved: bool,
 }
 
 /// A change from the settings form; a missing password keeps the stored one.
@@ -92,6 +114,14 @@ mod keychain {
     }
 }
 
+/// The keychain account the Jev API key is kept under.
+const JEV_ACCOUNT: &str = "jev-api-key";
+
+/// Keeps a Jev API key Jev took in the keychain.
+pub fn save_jev_key(key: &str) -> Result<(), String> {
+    keychain::set(JEV_ACCOUNT, key.trim())
+}
+
 impl Settings {
     /// The keychain account: the same user on another server is another password.
     fn account(&self) -> String {
@@ -108,6 +138,9 @@ impl Settings {
             demo: self.demo,
             first_run: self.first_run,
             path: path.display().to_string(),
+            engine: self.engine,
+            engine_dir: self.engine_dir.clone(),
+            jev_saved: self.jev_saved,
         }
     }
 
@@ -128,6 +161,9 @@ impl Settings {
             new_password: self.new_password,
             demo: change.demo,
             first_run: self.first_run,
+            engine: self.engine,
+            engine_dir: self.engine_dir.clone(),
+            jev_saved: self.jev_saved,
         };
         match change.password {
             Some(password) => {

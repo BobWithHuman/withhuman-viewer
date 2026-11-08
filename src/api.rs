@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::demo::Demo;
 use crate::graph::{ApiError, Neo4j};
 use crate::model::{GraphData, NodeDetail, Session};
-use crate::settings::{Change, Public, Settings};
+use crate::settings::{Change, Engine, Public, Settings};
 
 pub struct Backend {
     client: reqwest::Client,
@@ -157,6 +157,83 @@ impl Backend {
         Ok(settings.public(&self.path))
     }
 
+    /// Whether the first launch's setup is still to do: no Jev key was registered.
+    /// `VIEWER_ONBOARD=1` shows it again; the demo (`VIEWER_MOCK=1`) skips it.
+    pub fn needs_setup(&self) -> bool {
+        if std::env::var("VIEWER_ONBOARD").is_ok_and(|v| v == "1") {
+            return true;
+        }
+        if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") {
+            return false;
+        }
+        !self.settings.lock().expect("settings lock").jev_saved
+    }
+
+    /// Asks Jev whether it takes the key.
+    pub async fn check_jev(&self, key: &str) -> Result<(), String> {
+        crate::engine::check_jev(&self.client, key).await
+    }
+
+    /// Starts the engine in `dir` with the Jev key, then waits for its Neo4j to answer. Docker's
+    /// lines go to `log` as they come. Gives the connection the viewer reads it with.
+    pub async fn start_local(
+        &self,
+        dir: std::path::PathBuf,
+        key: String,
+        log: std::sync::Arc<Mutex<Vec<String>>>,
+    ) -> Result<Change, String> {
+        let local = crate::engine::Local::read(&dir)?;
+        let change = Change {
+            neo4j_url: format!("http://127.0.0.1:{}", local.port),
+            database: "neo4j".into(),
+            user: "neo4j".into(),
+            password: Some(local.password.clone()),
+            demo: false,
+        };
+        let l = log.clone();
+        tokio::task::spawn_blocking(move || local.up(&key, &l))
+            .await
+            .map_err(|e| e.to_string())??;
+        if let Ok(mut l) = log.lock() {
+            l.push("Neo4j가 응답하기를 기다리는 중…".into());
+        }
+        let mut last = String::new();
+        for _ in 0..60 {
+            match self.test(clone_change(&change)).await {
+                Ok(probe) => {
+                    if let Ok(mut l) = log.lock() {
+                        l.push(format!("Neo4j 연결됨 · 세션 {}개", probe.sessions));
+                    }
+                    return Ok(change);
+                }
+                Err(e) => last = e,
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+        Err(format!("엔진은 떴지만 Neo4j가 2분 안에 응답하지 않았습니다. ({last})"))
+    }
+
+    /// Ends the first launch's setup: keeps the Jev key in the keychain and the connection
+    /// in the settings, with where the engine runs.
+    pub fn finish_setup(
+        &self,
+        key: &str,
+        change: Change,
+        engine: Engine,
+        dir: Option<String>,
+    ) -> Result<Public, String> {
+        crate::settings::save_jev_key(key)?;
+        let mut settings = self.settings.lock().expect("settings lock");
+        let mut next = settings.apply(change)?;
+        next.engine = engine;
+        next.engine_dir = dir;
+        next.jev_saved = true;
+        next.demo = false;
+        next.save(&self.path)?;
+        *settings = next;
+        Ok(settings.public(&self.path))
+    }
+
     /// Switches between the demo graph and Neo4j, keeping the connection as it is.
     pub fn set_demo(&self, demo: bool) -> Result<Public, String> {
         let mut settings = self.settings.lock().expect("settings lock");
@@ -197,6 +274,17 @@ impl Backend {
             sessions,
             ms: started.elapsed().as_millis(),
         })
+    }
+}
+
+/// A form's change again, for one more try.
+fn clone_change(c: &Change) -> Change {
+    Change {
+        neo4j_url: c.neo4j_url.clone(),
+        database: c.database.clone(),
+        user: c.user.clone(),
+        password: c.password.clone(),
+        demo: c.demo,
     }
 }
 
