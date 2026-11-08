@@ -168,6 +168,33 @@ impl Turn {
     }
 }
 
+/// One leg of a task's summary, as a route finder lists a route's rides: the request, the
+/// words read that a stopped Call followed, the stopped Call, or the Calls let through.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Leg {
+    Ask(usize),
+    Text(String),
+    /// Calls denied or held in a row at one place count as one leg.
+    Stopped { blocked: bool, name: String, times: usize },
+    Allowed(usize),
+}
+
+/// A task at a glance: how long it took, its legs (at most `LEGS`, with how many more), and
+/// its counts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Summary {
+    pub took: Option<i64>,
+    pub legs: Vec<Leg>,
+    pub more: usize,
+    pub turns: usize,
+    pub calls: usize,
+    pub blocked: usize,
+    pub warn: usize,
+}
+
+/// How many legs a summary shows.
+const LEGS: usize = 5;
+
 /// Turns in a row that worked on the same files: a line of the overview.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Task {
@@ -635,6 +662,68 @@ impl Flow {
         (places, paths)
     }
 
+    /// A task's summary. The legs are the turns with a Call denied or held, each with the words
+    /// those Calls followed and the Calls; a task with none is its request and the Calls let
+    /// through.
+    pub fn summary(&self, task: usize) -> Summary {
+        let turns: Vec<&Turn> = self.task_turns(task).map(|i| &self.turns[i]).collect();
+        let start = turns.iter().find_map(|t| t.at());
+        let end = turns
+            .iter()
+            .flat_map(|t| t.calls.iter().filter_map(|c| c.at))
+            .max();
+        let took = match (start, end) {
+            (Some(a), Some(b)) if b >= a => Some(b - a),
+            _ => None,
+        };
+        let calls: usize = turns.iter().map(|t| t.calls.len()).sum();
+        let mut legs = Vec::new();
+        for t in &turns {
+            let stopped: Vec<&Call> = t.calls.iter().filter(|c| c.blocked || c.warn).collect();
+            if stopped.is_empty() {
+                continue;
+            }
+            legs.push(Leg::Ask(t.n));
+            let mut read: Option<&String> = None;
+            for c in stopped {
+                if let Some(via) = c.via.as_ref().filter(|v| read != Some(*v)) {
+                    legs.push(Leg::Text(short(via, 18)));
+                    read = Some(via);
+                }
+                let name = short(&c.title, 16);
+                match legs.last_mut() {
+                    Some(Leg::Stopped { blocked, name: n, times })
+                        if *blocked == c.blocked && *n == name =>
+                    {
+                        *times += 1
+                    }
+                    _ => legs.push(Leg::Stopped {
+                        blocked: c.blocked,
+                        name,
+                        times: 1,
+                    }),
+                }
+            }
+        }
+        if legs.is_empty() {
+            legs.push(Leg::Ask(turns.first().map_or(1, |t| t.n)));
+            if calls > 0 {
+                legs.push(Leg::Allowed(calls));
+            }
+        }
+        let more = legs.len().saturating_sub(LEGS);
+        legs.truncate(LEGS);
+        Summary {
+            took,
+            legs,
+            more,
+            turns: turns.len(),
+            calls,
+            blocked: turns.iter().map(|t| t.blocked()).sum(),
+            warn: turns.iter().map(|t| t.warn()).sum(),
+        }
+    }
+
     /// The overview of a chapter on a `w` × `h` canvas.
     pub fn overview(&self, chapter: usize, w: f64, h: f64) -> Overview {
         let tasks = self.chapter_tasks(chapter);
@@ -912,7 +1001,7 @@ impl Flow {
                                         y: TOP,
                                         kind: Kind::Transfer,
                                         label: via.clone(),
-                                        sub: "읽은 글".into(),
+                                        sub: "결과 읽음 · 글 따라 환승".into(),
                                         branch: false,
                                         // Over the line: its branch leaves under it.
                                         up: {
@@ -1028,7 +1117,7 @@ impl Flow {
                 turn: t,
                 x: end_x + 18.0,
                 y: by,
-                text: format!("{via}에서 읽은 글"),
+                text: format!("{via} 결과의 글을 따라감"),
             });
         }
         let marks = marks
@@ -1151,6 +1240,29 @@ mod tests {
         assert!(line.segs.iter().any(|s| s.branch));
         for s in branch {
             assert!(s.y > TOP);
+        }
+    }
+
+    #[test]
+    fn a_summary_leads_with_what_was_stopped() {
+        let f = long("c4000a1b");
+        for task in 0..f.tasks.len() {
+            let s = f.summary(task);
+            assert!(!s.legs.is_empty() && s.legs.len() <= LEGS);
+            assert!(matches!(s.legs[0], Leg::Ask(_)));
+            let stopped: usize = s
+                .legs
+                .iter()
+                .map(|l| match l {
+                    Leg::Stopped { times, .. } => *times,
+                    _ => 0,
+                })
+                .sum();
+            if s.blocked + s.warn == 0 {
+                assert_eq!(stopped, 0);
+            } else if s.more == 0 {
+                assert_eq!(stopped, s.blocked + s.warn);
+            }
         }
     }
 

@@ -8,8 +8,8 @@ use dioxus::prelude::*;
 
 use super::{AppState, Load, Selection};
 use crate::flow::{
-    AMBER, Flow, GREEN, Item, Kind, LINE_COLOR, LINE_MUTED, Overview, RED, Stop, TEXT_COLOR,
-    TEXT_MUTED, Turn,
+    AMBER, Flow, GREEN, Item, Kind, LINE_COLOR, LINE_MUTED, Leg, Overview, RED, Stop, Summary,
+    TEXT_COLOR, TEXT_MUTED, Turn,
 };
 use crate::layout::clip;
 use crate::metro::Metro;
@@ -274,6 +274,7 @@ pub fn FlowMap() -> Element {
                                         div { class: "fx-where-sub", "턴 {a}–{b} · {scope.len()}턴" }
                                     }
                                 }
+                                {route_summary(&f.summary(task))}
                             }
                             Sidebar { flow: f.clone(), metro: m.clone(), scope: scope.clone(), visible: visible.clone(), turn, tab, detail }
                         }
@@ -460,6 +461,7 @@ fn TaskRow(
                         if b > 0 { b { class: "red", " · 차단 {b}" } }
                         if w > 0 { b { class: "amber", " · 확인 {w}" } }
                     }
+                    {legs(&f.summary(task))}
                 }
             }
             if on {
@@ -491,6 +493,58 @@ fn TaskRow(
                     }
                 }
             }
+        }
+    }
+}
+
+/// How long a task took, as a route finder heads a route: "1시간 27분", "12분", "40초".
+fn span_text(ms: i64) -> String {
+    let secs = ms.max(0) / 1000;
+    if secs < 60 {
+        format!("{secs}초")
+    } else if secs < 3600 {
+        format!("{}분", secs / 60)
+    } else {
+        format!("{}시간 {}분", secs / 3600, secs % 3600 / 60)
+    }
+}
+
+/// A task's legs as a row of badges, as a route finder lists a route's rides.
+fn legs(s: &Summary) -> Element {
+    rsx! {
+        span { class: "fx-legs",
+            for (i, l) in s.legs.iter().enumerate() {
+                if i > 0 { span { class: "sep", "›" } }
+                match l {
+                    Leg::Ask(n) => rsx! { span { class: "leg ask", "턴 {n}" } },
+                    Leg::Text(via) => rsx! { span { class: "leg text", title: "{via} 결과의 글을 따름", "글 · {via}" } },
+                    Leg::Stopped { blocked, name, times } => {
+                        let (cls, mark) = if *blocked { ("leg deny", "✕") } else { ("leg hold", "▲") };
+                        let n = if *times > 1 { format!(" ×{times}") } else { String::new() };
+                        rsx! { span { class: "{cls}", "{mark} {name}{n}" } }
+                    }
+                    Leg::Allowed(n) => rsx! { span { class: "leg ok", "허용 {n}" } },
+                }
+            }
+            if s.more > 0 { span { class: "leg more", "+{s.more}" } }
+        }
+    }
+}
+
+/// A task's summary over its list: how long it took in large type, its counts, its legs.
+fn route_summary(s: &Summary) -> Element {
+    let took = s.took.map(span_text).unwrap_or_else(|| "—".into());
+    rsx! {
+        div { class: "fx-sum",
+            div { class: "fx-sum-head",
+                b { class: "took", "{took}" }
+                span { class: "facts",
+                    "턴 {s.turns} · 호출 {s.calls}"
+                    if s.blocked > 0 { span { class: "red", " · 차단 {s.blocked}" } }
+                    if s.warn > 0 { span { class: "amber", " · 확인 {s.warn}" } }
+                }
+            }
+            {legs(s)}
         }
     }
 }
@@ -823,8 +877,10 @@ fn OverviewMap(
                         let l = &o.lines[i];
                         let task = l.task;
                         let from = f.tasks[task].from;
-                        let sw = if task == sel_task { "11" } else { "9" };
-                        let op = if dim(task) { "0.15" } else { "1" };
+                        let sw = if task == sel_task { "11" } else { "7" };
+                        // The other tasks step back as a route finder's other routes do: a faint
+                        // trace, their stations unnamed, until hovered.
+                        let op = if dim(task) { "0.13" } else { "1" };
                         let fl = flow.clone();
                         rsx! {
                             path {
@@ -871,7 +927,8 @@ fn OverviewMap(
                 for (si, s) in o.stops.iter().enumerate() {
                     {
                         let p = &o.places[s.place];
-                        let op = if dim(s.task) { "0.15" } else { "1" };
+                        let faint = dim(s.task);
+                        let op = if faint { "0.22" } else { "1" };
                         let turn_n = s.turn;
                         let fl = flow.clone();
                         let fl2 = flow.clone();
@@ -887,7 +944,9 @@ fn OverviewMap(
                                 title { "{tip}" }
                                 circle { cx: "{x}", cy: "{y}", r: "11", fill: "transparent" }
                                 {overview_mark(x, y, p.blocked, p.warn)}
-                                {overview_label(x, y, s.level, &p.name, label_fill(p), s.task == sel_task || p.blocked || p.warn)}
+                                if !faint {
+                                    {overview_label(x, y, s.level, &p.name, label_fill(p), s.task == sel_task || p.blocked || p.warn)}
+                                }
                             }
                         }
                     }
@@ -912,7 +971,9 @@ fn OverviewMap(
                                 ondoubleclick: move |_| focus(turn_n, &fl2),
                                 title { "{tip}" }
                                 circle { cx: "{x.x}", cy: "{x.y}", r: "8", fill: "{fill}", stroke: "#2b2e34", stroke_width: "2.5" }
-                                {overview_label(x.x, x.y, false, &p.name, label_fill(p), true)}
+                                if !faded {
+                                    {overview_label(x.x, x.y, false, &p.name, label_fill(p), true)}
+                                }
                             }
                         }
                     }
@@ -1100,7 +1161,10 @@ fn LineMap(
     // A turn picked is brought to the left fifth of the view.
     let mark_x = line.marks.iter().find(|m| m.turn == t).map(|m| m.x);
     let framed = use_signal(|| None::<(usize, u64, Option<i64>)>);
-    let fitted = use_signal(|| None::<(usize, Option<i64>)>);
+    // The turn last framed whole, and whether a Call was picked in it then.
+    let fitted = use_signal(|| None::<(usize, bool)>);
+    // A move the map makes itself glides; one the hand makes follows at once.
+    let mut glide = use_signal(|| false);
     let zkey = (zoom * 1000.0) as u64;
     // A Call picked further on than the view reaches is brought into it.
     // A Call folded into a group is found at the group.
@@ -1132,17 +1196,26 @@ fn LineMap(
         const LM: f64 = 60.0;
         const RM: f64 = 200.0;
         // The first time a turn and its Call are framed, zoom out so both its start and the
-        // Call show, as far as the zoom goes down; a zoom chosen afterwards is kept.
+        // Call show, as far as the zoom goes down. A Call picked after that in the same turn is
+        // a step looked into, as a route finder zooms to a leg: it comes to the middle, at
+        // full size.
         let mut fitted = fitted;
-        if *fitted.peek() != Some((t, picked)) {
-            fitted.set(Some((t, picked)));
+        let first = match *fitted.peek() {
+            Some((ft, had)) => ft != t || (!had && picked.is_some()),
+            None => true,
+        };
+        let step = !first && target_x.is_some();
+        let mut zoom_to = zoom_to;
+        if first {
+            fitted.set(Some((t, picked.is_some())));
             if let Some(tx) = target_x.filter(|&tx| tx > mx) {
                 let fit = ((w - LM - RM) / (tx - mx)).clamp(0.7, 1.0);
                 if fit < zoom - 0.01 {
-                    let mut zoom_to = zoom_to;
                     zoom_to.set(fit);
                 }
             }
+        } else if step && (*framed.peek()).map(|f| f.2) != Some(picked) && zoom < 0.99 {
+            zoom_to.set(1.0);
         }
         let mut framed = framed;
         framed.set(Some((t, zkey, picked)));
@@ -1159,6 +1232,10 @@ fn LineMap(
                 tx * zoom - (w - RM)
             };
         }
+        if let Some(tx) = target_x.filter(|_| step) {
+            to = tx * zoom - w * 0.5;
+        }
+        glide.set(true);
         scroll.set(to.clamp(0.0, max_scroll));
     }
 
@@ -1187,6 +1264,8 @@ fn LineMap(
     let x0 = scroll().min(max_scroll);
     let moving = if drag().is_some_and(|d| d.2) {
         "fx-line dragging"
+    } else if glide() {
+        "fx-line glide"
     } else {
         "fx-line"
     };
@@ -1201,12 +1280,14 @@ fn LineMap(
             },
             onwheel: move |e| {
                 e.prevent_default();
+                glide.set(false);
                 let d = e.delta().strip_units();
                 let cur = *scroll.peek();
                 scroll.set(clamp(cur + d.x + d.y));
             },
             onmousedown: move |e| {
                 let p = e.client_coordinates();
+                glide.set(false);
                 drag.set(Some((p.x, *scroll.peek(), false)));
                 dragged.set(false);
             },
@@ -1507,7 +1588,11 @@ fn LineStop(
             onclick: move |e| { e.stop_propagation(); onsel.call(()); },
             title { "{tip}" }
             circle { cx: "{x}", cy: "{y}", r: "20", fill: "transparent" }
-            if sel { circle { cx: "{x}", cy: "{y}", r: "19", fill: "{color}", opacity: "0.14" } }
+            if sel {
+                circle { cx: "{x}", cy: "{y}", r: "19", fill: "{color}", opacity: "0.14" }
+                // A ring that spreads once from the station just picked, to say where it is.
+                circle { class: "fx-pulse", cx: "{x}", cy: "{y}", r: "16", fill: "none", stroke: "{color}", stroke_width: "3" }
+            }
             match s.kind {
                 Kind::Start => rsx! { circle { cx: "{x}", cy: "{y}", r: "10", fill: "#fff", stroke: "{color}", stroke_width: "4" } },
                 Kind::Tick if open => rsx! { circle { cx: "{x}", cy: "{y}", r: "8", fill: "#fff", stroke: "{color}", stroke_width: "3.5" } },
