@@ -18,6 +18,9 @@ const PREVIEW_CHARS: usize = 4000;
 /// A decision trace stays whole: the page reads it as JSON for the Jev panels.
 const WHOLE: &[&str] = &["trace_json"];
 
+/// Every session, newest first. The cap is far over what one engine records (a thousand
+/// sessions read in a quarter of a second); at 200 a busy engine's older sessions could not be
+/// opened at all.
 const SESSIONS: &str = r#"
 MATCH (s:Session) WHERE s.created_at IS NOT NULL
 RETURN s.session_id AS id, s.version AS version, s.created_at AS created_at,
@@ -37,7 +40,7 @@ RETURN s.session_id AS id, s.version AS version, s.created_at AS created_at,
          AS client,
        COLLECT { MATCH (s)-[:CONTAINS]->(n) WHERE n.observed_at IS NOT NULL
                  RETURN n.observed_at ORDER BY n.observed_at DESC LIMIT 1 }[0] AS last_at
-ORDER BY s.created_at DESC LIMIT 200
+ORDER BY s.created_at DESC LIMIT 5000
 "#;
 
 const NODES: &str = r#"
