@@ -1767,3 +1767,177 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
   border: 0; border-bottom: 7px solid var(--z50); outline: 1px solid var(--z100); outline-offset: -1px;
   font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--z700); white-space: pre-wrap;
   word-break: normal; overflow-wrap: anywhere; user-select: text; cursor: text; }
+
+/* Smaller, so the line is what the eye meets first: the card (300px, `CARD_W` with its margin),
+   the summary as a line of type rather than a box, the badges. */
+.fx-main > .route-panel { width: 300px; }
+.fx-main > .route-panel .dp-top { padding: 12px 44px 0 16px; }
+.fx-main > .route-panel .dp-top .ctag { font-size: 11.5px; }
+.fx-main > .route-panel.nv .nv-head { margin: 6px 16px 0; font-size: 12px; gap: 6px; }
+.fx-main > .route-panel.nv .nv-time { font-size: 19px; }
+.fx-main > .route-panel.nv .nv-bar { margin: 8px 16px 2px; height: 14px; }
+.fx-main > .route-panel.nv .nv-badge { min-width: 14px; height: 14px; font-size: 9.5px; }
+.fx-main > .route-panel.nv .nv-span { font-size: 9.5px; }
+.fx-main > .route-panel.nv .nv-steps { margin: 10px 16px 0; padding-top: 10px; }
+.fx-main > .route-panel.nv .nv-step { grid-template-columns: 70px minmax(0, 1fr); gap: 6px; padding-bottom: 12px; }
+.fx-main > .route-panel.nv .nv-line-name { font-size: 11.5px; }
+.fx-main > .route-panel.nv .nv-stop-head { font-size: 12.5px; }
+.fx-main > .route-panel.nv .nv-said, .fx-main > .route-panel.nv .nv-branch, .fx-main > .route-panel.nv .cr-reason { font-size: 12px; }
+.fx-main > .route-panel.nv .nv-intent { font-size: 11.5px; }
+.fx-main > .route-panel.nv .crow.big .cr-name { font-size: 13.5px; }
+.fx-main > .route-panel.nv .crow.big .cr-target { font-size: 10.5px; }
+.fx-main > .route-panel .dp-foot { padding: 2px 16px 14px; font-size: 12px; }
+.fx-main > .route-panel .dh-close { top: 6px; right: 6px; width: 30px; height: 30px; }
+
+.fx-sum { margin-top: 6px; padding: 0 4px; border: 0; background: none; }
+.fx-sum .took { font-size: 16px; }
+.fx-sum .facts { font-size: 11.5px; }
+.fx-legs { gap: 3px; margin-top: 4px; }
+.fx-legs .leg { padding: 1px 5px; font-size: 10.5px; border-radius: 4px; max-width: 150px; }
+
+/* A turn's zone heading on the line: the turn and who asked, then the request in quotes, two
+   lines at most. */
+.fx-turnhead { cursor: pointer; font-size: 13px; line-height: 1.45; color: var(--z500); }
+.fx-turnhead .top { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; white-space: nowrap; }
+.fx-turnhead .no { padding: 0 6px; border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 1px var(--z300);
+  font-size: 12px; font-weight: 700; color: var(--z600); line-height: 19px; }
+.fx-turnhead .who { font-size: 11.5px; color: var(--z400); }
+.fx-turnhead .rq { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  color: var(--z600); word-break: keep-all; overflow-wrap: anywhere; }
+.fx-turnhead.on .no { background: #2f3542; box-shadow: none; color: #fff; }
+.fx-turnhead.on .rq { color: var(--z900); font-weight: 600; }
+
+/* A group in a turn's card names its tools; opened, it lists its Calls. */
+.fx-item.group .ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-item.group .tools { color: var(--z400); font-weight: 400; }
+.fx-item.call.inner { padding-left: 22px; }
+.fx-item.call .tool { flex: none; margin-left: 4px; font: 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--z400); }
+
+/* The request in the colour of a person asking (green), an agent's report in grey. */
+.fx-turnhead.ask .no { color: #15803d; box-shadow: inset 0 0 0 1px #86efac; }
+.fx-turnhead.ask .who { color: #16a34a; font-weight: 600; }
+.fx-turnhead.ask .rq { color: #166534; }
+.fx-turnhead.ask.on .no { background: #16a34a; color: #fff; box-shadow: none; }
+.fx-turnhead.ask.on .rq { color: #14532d; }
+.fx-turnhead.report.on .no { background: #6b7280; }
+
+/* The line's colours, at the foot of the map. */
+.fx-tones { position: absolute; left: 20px; bottom: 18px; display: flex; flex-wrap: wrap; gap: 6px 14px; max-width: calc(100% - 120px);
+  padding: 8px 12px; border-radius: 8px; background: rgb(255 255 255 / .92); box-shadow: 0 0 0 1px var(--z200);
+  font-size: 11.5px; color: var(--z600); pointer-events: auto; cursor: default; }
+.fx-tones .it { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.fx-tones .sw { display: inline-block; width: 16px; height: 5px; border-radius: 3px; }
+.fx-tones .it.red { color: #d8403a; font-weight: 600; }
+.fx-tones .it.amber { color: #b7860b; font-weight: 600; }
+
+/* A Call row's colour dot: what it did. */
+.fx-item.call .tone { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-right: 2px; }
+
+/* A heading's way to the person's own words. */
+.fx-turnhead .more { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--z400); }
+.fx-turnhead:hover .more { color: var(--z700); }
+
+/* The heading opened: the intent whole and the prompt as typed. */
+.fx-prompt { position: absolute; z-index: 5; width: 340px; max-height: 320px; overflow: auto; padding: 12px 14px 14px;
+  border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--z200), 0 12px 32px rgb(20 28 45 / .16); cursor: auto; }
+.fx-prompt .hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.fx-prompt .no { padding: 0 6px; border-radius: 4px; background: #16a34a; color: #fff; font-size: 12px; font-weight: 700; line-height: 19px; }
+.fx .fx-prompt .x { width: 26px; height: 26px; border: 0; border-radius: 13px; background: none; color: var(--z500); cursor: pointer; }
+.fx .fx-prompt .x:hover { background: var(--z100); }
+.fx-prompt .k { margin-top: 8px; font-size: 11px; font-weight: 600; color: var(--z400); }
+.fx-prompt .intent { margin-top: 2px; font-size: 13px; line-height: 1.5; color: #166534; }
+.fx-prompt .said { margin-top: 3px; padding: 8px 10px; border-radius: 6px; background: var(--z50); box-shadow: inset 0 0 0 1px var(--z100);
+  font-size: 12.5px; line-height: 1.55; color: var(--z800, #27272a); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+
+/* An answer opened: in the answer's violet. */
+.fx-prompt.say .no { background: #7c3aed; }
+.fx-prompt.say .tm { margin-left: 8px; margin-right: auto; font-size: 11.5px; color: var(--z400); }
+.fx-prompt.say .said { margin-top: 6px; }
+.fx-prompt .said.faint { color: var(--z500); font-size: 12px; }
+/* An answer row in a turn's card. */
+.fx-item.say { color: #6d28d9; }
+.fx-item.say .tone { flex: none; width: 7px; height: 7px; border-radius: 50%; margin: 0 2px 0 3px; background: #7c3aed; }
+.fx-item.say .ttl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Fewer words on the line: a turn not picked heads its zone with one faint line, and the way to
+   the prompt shows only on the heading under the pointer. */
+.fx-turnhead:not(.on) .rq { -webkit-line-clamp: 1; font-size: 12px; color: var(--z400); }
+.fx-turnhead.ask:not(.on) .rq { color: #6b9b7a; }
+.fx-turnhead:not(.on) .who { display: none; }
+.fx-turnhead .more { visibility: hidden; }
+.fx-turnhead:hover .more { visibility: visible; }
+
+/* A Call row's icon: the tool it ran, in its colour. */
+.fx-item.call .glyph { flex: none; display: inline-flex; width: 14px; height: 14px; margin-right: 2px; }
+.fx-tones .it svg { flex: none; }
+
+/* The line map moved and zoomed by the page (pan.js): the layer scales from its corner. */
+.fx-line { touch-action: none; user-select: none; -webkit-user-select: none; }
+.fx-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.fx-layer .fx-line-svg { position: static; transition: none; }
+.fx-line.dragging { cursor: grabbing; }
+
+/* On a row running left a turn starts at its zone's right: the heading stands there. */
+.fx-turnhead.rev { text-align: right; }
+.fx-turnhead.rev .top { flex-direction: row-reverse; }
+.fx-turnhead.rev .more { margin-left: 0; margin-right: auto; }
+
+/* How the turn ended, under what it was for. */
+.fx-turnhead .res { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: #6d28d9; }
+.fx-turnhead:not(.on) .res { font-size: 11.5px; color: #a78bda; }
+
+.fx-item.call .times { flex: none; margin-left: 4px; font-size: 11px; font-weight: 700; color: var(--z500); }
+
+/* A row's time keeps to one line when its name is long. */
+.fx-item .tm { flex: none; white-space: nowrap; }
+.fx-item.call .ttl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The heading's result wraps to a second line rather than being cut. */
+.fx-turnhead .res { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  word-break: keep-all; overflow-wrap: anywhere; line-height: 1.4; }
+.fx-turnhead:not(.on) .rq { -webkit-line-clamp: 2; }
+
+.fx-turnhead.on .rq { -webkit-line-clamp: 3; }
+
+/* What told a branch, quoted where it bends away from the line. */
+.fx-cause { display: flex; align-items: center; gap: 6px; height: 30px; margin-top: 4px; padding: 0 8px; border-radius: 7px; cursor: pointer;
+  background: #f6f3fc; box-shadow: inset 0 0 0 1px #ddd2f3; font-size: 11.5px; color: #5b4a8a; overflow: hidden; white-space: nowrap; opacity: .6; }
+.fx-cause.on { opacity: 1; }
+.fx-cause:hover { box-shadow: inset 0 0 0 1.5px #8e7cc3; }
+.fx-cause .k { flex: none; padding: 1px 5px; border-radius: 4px; background: #8e7cc3; color: #fff; font-weight: 700; font-size: 10.5px; }
+.fx-cause .q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.fx-cause .p { flex: none; font-weight: 700; color: #8e7cc3; }
+.fx-cause.err { background: #fdf1f0; box-shadow: inset 0 0 0 1px #f3c9c6; color: #9b2c26; }
+.fx-cause.err .k { background: #d8403a; }
+.fx-cause.err .p { color: #d8403a; }
+.fx-prompt.cause .no.err { background: #d8403a; }
+.fx-prompt.cause .no { background: #8e7cc3; }
+.fx-prompt .said.quote { margin: 6px 0 0; max-height: 220px; overflow: auto; font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* A quote too long for its room wraps to a second line rather than being cut short. */
+.fx-cause { height: auto; min-height: 30px; padding: 4px 8px; align-items: flex-start; white-space: normal; }
+.fx-cause .k, .fx-cause .p { margin-top: 2px; }
+.fx-cause .q { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; line-height: 1.45; }
+
+/* Stepping through the Calls in order, over the zoom buttons. */
+.fx-step { position: absolute; right: 16px; bottom: 268px; display: flex; align-items: center; border-radius: 8px; border: 1px solid var(--z200);
+  background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .05); overflow: hidden; z-index: 3; }
+.fx .fx-step button { width: 34px; height: 34px; border: 0; background: none; font-size: 20px; color: var(--z700); cursor: pointer; }
+.fx .fx-step button:hover:not(:disabled) { background: var(--z100); }
+.fx .fx-step button:disabled { color: var(--z300); cursor: default; }
+.fx-step .n { min-width: 64px; text-align: center; font-size: 12.5px; font-weight: 700; color: var(--z900); font-variant-numeric: tabular-nums; }
+.fx-step .of { font-weight: 400; color: var(--z400); }
+
+/* A quote: what was read on one line, and under it the station it came out of. */
+.fx-cause { display: block; padding: 5px 8px 6px; }
+.fx-cause .row { display: flex; align-items: center; gap: 6px; }
+.fx-cause .q { -webkit-line-clamp: 1; white-space: nowrap; display: block; overflow: hidden; text-overflow: ellipsis; }
+.fx-cause .from { margin-top: 3px; font-size: 11px; font-weight: 600; color: #6f5aa8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-cause.err .from { color: #b3362f; }
+
+/* The way back from the Call picked to what told it: off unless asked for. */
+.fx .fx-trace { position: absolute; right: 16px; bottom: 316px; z-index: 3; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+  border-radius: 8px; border: 1px solid var(--z200); background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .05); font-size: 12px; font-weight: 600; color: var(--z600); cursor: pointer; }
+.fx .fx-trace .dot { width: 18px; height: 0; border-top: 2.5px dashed #b8acd9; }
+.fx .fx-trace.on { border-color: #8e7cc3; background: #f6f3fc; color: #5b4a8a; }
+.fx .fx-trace.on .dot { border-top-color: #8e7cc3; }

@@ -43,6 +43,12 @@ pub struct Call {
     pub tool: String,
     /// The MCP server, for an MCP tool.
     pub server: Option<String>,
+    /// What in a tool result told it, when the engine traced it to one.
+    pub cause: Option<Cause>,
+    /// What kind of thing it did, for its colour.
+    pub tone: Tone,
+    /// Which kind of tool, for its icon.
+    pub glyph: Glyph,
     pub arg: String,
     pub at: Option<i64>,
     pub warn: bool,
@@ -65,6 +71,15 @@ impl Call {
             title: s.name(),
             tool: crate::metro::tool_label(&s.tool),
             server: crate::metro::mcp_parts(&s.tool).map(|(srv, _)| srv.to_owned()),
+            cause: s.source.as_ref().filter(|_| by.is_some()).map(|src| Cause {
+                result: src.result,
+                paragraph: src.paragraph,
+                p: src.probability,
+                error: src.error,
+                quote: src.quote.clone(),
+            }),
+            tone: Tone::of(&s.tool, s.action),
+            glyph: Glyph::of(&s.tool),
             arg: s.what.clone(),
             at: s.at,
             warn: s.decision.as_deref() == Some("REVIEW"),
@@ -78,11 +93,10 @@ impl Call {
         }
     }
 
-    /// Nothing to single out: let through, and traced to what told it. A Call that followed
-    /// words in a tool result, or that failed, is folded too: an agent acting on what it read,
-    /// and tools erring, are most of a real session, and the map is read for what was stopped.
+    /// Nothing to single out: let through, told by the request. One that followed words read
+    /// rides a branch of its own; one that failed is folded with the rest.
     fn plain(&self) -> bool {
-        !self.warn && !self.blocked && !self.loose
+        !self.warn && !self.blocked && !self.loose && self.by.is_none()
     }
 
     /// The line under its name: the tool, and the folder for a file; an MCP tool's server.
@@ -100,6 +114,17 @@ impl Call {
     }
 }
 
+/// Why a Call rode a branch: the result it read (by seq, and paragraph), how sure the engine
+/// was, whether that result was the tool failing, and the words in a line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cause {
+    pub result: i64,
+    pub paragraph: Option<i64>,
+    pub p: f64,
+    pub error: bool,
+    pub quote: Option<String>,
+}
+
 /// One entry of a turn: a Call, or plain Calls in a row folded together.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
@@ -114,28 +139,19 @@ pub enum Item {
 }
 
 impl Item {
-    /// A group's line under its name: its tools, and how many followed words read.
-    pub fn note(tools: &[(String, usize)], followed: usize) -> String {
-        let tools = Self::sub(tools);
-        if followed > 0 {
-            format!("{tools} · 글 따름 {followed}")
-        } else {
-            tools
-        }
-    }
-
-    /// The tools a group ran: "Read 24 · Grep 7 · 외 4".
-    pub fn sub(tools: &[(String, usize)]) -> String {
-        let mut parts: Vec<String> = tools
+    /// The tools a group ran, short enough to sit under its station: "Read 24 · Grep 7 외 4".
+    pub fn brief(tools: &[(String, usize)]) -> String {
+        let mut text = tools
             .iter()
-            .take(3)
+            .take(2)
             .map(|(t, n)| format!("{t} {n}"))
-            .collect();
-        let rest: usize = tools.iter().skip(3).map(|(_, n)| n).sum();
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let rest: usize = tools.iter().skip(2).map(|(_, n)| n).sum();
         if rest > 0 {
-            parts.push(format!("외 {rest}"));
+            text.push_str(&format!(" 외 {rest}"));
         }
-        parts.join(" · ")
+        text
     }
 }
 
@@ -146,10 +162,15 @@ pub struct Turn {
     pub req: String,
     /// The subagent whose report the engine recorded as this turn; none when a person wrote it.
     pub agent: Option<String>,
+    /// What the agent wrote it would do this turn: the request as the engine measured Calls
+    /// against it.
+    pub intent: Option<String>,
     /// When the engine saw the request, in milliseconds.
     pub asked: Option<i64>,
     pub calls: Vec<Call>,
     pub items: Vec<Item>,
+    /// What the agent said to the person in this turn, in order; the last is its answer.
+    pub said: Vec<crate::metro::Said>,
 }
 
 impl Turn {
@@ -165,6 +186,284 @@ impl Turn {
     /// When it began: the request, or its first Call when the request has no time.
     pub fn at(&self) -> Option<i64> {
         self.asked.or_else(|| self.calls.iter().find_map(|c| c.at))
+    }
+}
+
+/// How wide a name is drawn at `size` px: Latin, digits and marks about 0.6 of the size,
+/// Hangul and other wide letters the whole size.
+pub fn text_width(text: &str, size: f64) -> f64 {
+    text.chars()
+        .map(|c| if c.is_ascii() { 0.6 } else { 1.0 })
+        .sum::<f64>()
+        * size
+}
+
+/// A long text cut to its gist for a heading: its first sentence, without a trailing
+/// "(확신도: …)", at most `n` characters and cut between words.
+pub fn gist(text: &str, n: usize) -> String {
+    let text = text.trim();
+    let text = match text.rfind('(') {
+        Some(i) if text.ends_with(')') && text[i..].contains("확신도") => text[..i].trim_end(),
+        _ => text,
+    };
+    let first = text
+        .split_inclusive(['\n', '。'])
+        .next()
+        .unwrap_or(text)
+        .trim();
+    let first = match first.find(". ") {
+        Some(i) => &first[..=i],
+        None => first,
+    };
+    if first.chars().count() <= n {
+        return first.to_owned();
+    }
+    let cut: String = first.chars().take(n).collect();
+    let cut = match cut.rfind(' ') {
+        Some(i) if i > cut.len() / 2 => cut[..i].to_owned(),
+        _ => cut,
+    };
+    format!("{}…", cut.trim_end_matches([',', '.', ' ']))
+}
+
+/// What a message to the person says came of the turn, in a sentence: past code, tables, rules
+/// and lines that open a list ("…:"), a short label taken off ("현황: …"), the first sentence
+/// that tells an outcome (done, failed, blocked, the cause, "…했습니다"), else the first one.
+pub fn outcome(text: &str, n: usize) -> String {
+    const CUES: [&str; 18] = [
+        "완료", "성공", "실패", "차단", "막혔", "막았", "막혀", "오류", "에러", "원인", "결과",
+        "했습니다", "됐습니다", "되었습니다", "없습니다", "끝났", "확인했", "찾았",
+    ];
+    // Each line kept, and whether it was an item of a list.
+    let mut lines: Vec<(String, bool, bool)> = Vec::new();
+    let mut fenced = false;
+    for raw in text.lines() {
+        let l = raw.trim();
+        if l.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced || l.is_empty() || l.starts_with('|') || l.chars().all(|c| "-=_*~|: ".contains(c)) {
+            continue;
+        }
+        // A list's numbering, "1. " or "2) ", not a number the words begin with.
+        let digits = l.chars().take_while(char::is_ascii_digit).count();
+        let numbered = digits > 0
+            && l[digits..].starts_with(['.', ')'])
+            && l[digits + 1..].starts_with(' ');
+        // A heading ("## …", or a line all in bold) names a part rather than saying how it went;
+        // so does a question. They count as list items: taken only when nothing else is there.
+        // ("## 현황: Judge 진행 중" says how it stands, so it is no mere heading.)
+        let heading = (l.starts_with('#') && !l.contains(": "))
+            || (l.starts_with("**") && l.ends_with("**") && l.matches("**").count() == 2)
+            || l.trim_end_matches(['*', ' ']).ends_with(['?', '？']);
+        let item = l.starts_with(['-', '*', '•']) && !heading || numbered || heading;
+        let l = if numbered { &l[digits + 2..] } else { l };
+        // Marks at the start: headings, bullets, quotes, emoji.
+        let l = l
+            .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '"' && c != '\'' && c != '(' && c != '`')
+            .replace("**", "")
+            .replace("__", "")
+            .replace('`', "");
+        let l = l.trim();
+        // A line that opens a list ("…:") keeps a sentence it ends one before:
+        // "INFUSE — 흥미로운 프로젝트네요! 요약:" is "INFUSE — 흥미로운 프로젝트네요!".
+        let l = if l.ends_with(':') || l.ends_with('：') {
+            // The last sentence end followed by a space.
+            let chars: Vec<(usize, char)> = l.char_indices().collect();
+            let end = chars
+                .windows(2)
+                .rev()
+                .find(|w| ['!', '.', '다', '요'].contains(&w[0].1) && w[1].1.is_whitespace())
+                .map(|w| w[1].0);
+            match end {
+                Some(i) => &l[..i],
+                None => continue,
+            }
+        } else {
+            l
+        };
+        if l.is_empty() {
+            continue;
+        }
+        // A short label before the words: "현황: Judge 진행 중".
+        let l = match l.split_once(": ") {
+            Some((label, rest)) if label.chars().count() <= 10 && !rest.trim().is_empty() => rest.trim(),
+            _ => l,
+        };
+        lines.push((l.to_owned(), item, heading));
+        if lines.len() >= 40 {
+            break;
+        }
+    }
+    // An outcome said, else a whole sentence not in a list, else the first line.
+    let sentence = |l: &str| l.ends_with(['다', '요', '.', '!']) || l.ends_with("다.") || l.ends_with("요.");
+    // An outcome said, else a whole sentence not in a list, else any line that is not a
+    // heading, else the first.
+    let pick = lines
+        .iter()
+        .find(|(l, _, h)| !h && CUES.iter().any(|c| l.contains(c)))
+        .or_else(|| lines.iter().find(|(l, item, _)| !item && sentence(l)))
+        .or_else(|| lines.iter().find(|(_, _, h)| !h))
+        .or(lines.first())
+        .map(|(l, _, _)| l.clone())
+        .unwrap_or_default();
+    gist(&pick, n)
+}
+
+/// A turn's heading: what it was for (the intent, else the request) and how it ended.
+fn heading_of(t: &Turn) -> (String, Option<String>) {
+    let text = t.intent.as_deref().unwrap_or(&t.req);
+    // An aside after the gist ("… (구체적 목표는 모호함 — …)") is left for the full card.
+    let text = match text.find(" (") {
+        Some(i) if text[..i].chars().count() >= 12 => &text[..i],
+        _ => text,
+    };
+    let head = gist(text, 130);
+    let res = t
+        .said
+        .last()
+        .map(|m| outcome(&m.text, 60))
+        .filter(|g| !g.is_empty());
+    (head, res)
+}
+
+/// A message as plain words: without Markdown's bold, code and heading marks.
+pub fn plain_words(text: &str) -> String {
+    text.replace("**", "")
+        .replace("__", "")
+        .replace('`', "")
+        .lines()
+        .map(|l| l.trim_start_matches('#').trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// What a station's icon shows: the kind of tool, finer than its colour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Glyph {
+    Doc,
+    Search,
+    Edit,
+    Run,
+    Web,
+    Plug,
+    Agent,
+    Other,
+}
+
+impl Glyph {
+    pub const ALL: [Glyph; 8] = [
+        Glyph::Doc,
+        Glyph::Search,
+        Glyph::Edit,
+        Glyph::Run,
+        Glyph::Web,
+        Glyph::Plug,
+        Glyph::Agent,
+        Glyph::Other,
+    ];
+
+    fn of(tool: &str) -> Self {
+        if crate::metro::mcp_parts(tool).is_some() {
+            return Glyph::Plug;
+        }
+        match tool {
+            "Read" | "NotebookRead" => Glyph::Doc,
+            "Grep" | "Glob" | "LS" | "WebSearch" | "ToolSearch" => Glyph::Search,
+            "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => Glyph::Edit,
+            "Bash" | "BashOutput" | "KillShell" => Glyph::Run,
+            "WebFetch" => Glyph::Web,
+            "Agent" | "Task" | "SubagentHandback" => Glyph::Agent,
+            _ => Glyph::Other,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Glyph::Doc => "파일 읽기",
+            Glyph::Search => "찾기",
+            Glyph::Edit => "수정·작성",
+            Glyph::Run => "명령 실행",
+            Glyph::Web => "웹 페이지",
+            Glyph::Plug => "MCP 도구",
+            Glyph::Agent => "에이전트",
+            Glyph::Other => "그 밖의 도구",
+        }
+    }
+
+    /// Its colour: the colour of the kind of thing it does.
+    pub fn tone(self) -> Tone {
+        match self {
+            Glyph::Doc | Glyph::Search => Tone::Read,
+            Glyph::Edit => Tone::Change,
+            Glyph::Run => Tone::Run,
+            Glyph::Web | Glyph::Plug => Tone::Outside,
+            Glyph::Agent => Tone::Delegate,
+            Glyph::Other => Tone::Other,
+        }
+    }
+}
+
+/// What a station did, as a metro map colours its lines: the person's request, reading or
+/// searching, changing files, running a command, a tool outside (MCP, the web), handing to an
+/// agent. Red, amber and the words' lavender stay for the verdicts and the branch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Tone {
+    Ask,
+    Report,
+    Read,
+    Change,
+    Run,
+    Outside,
+    Delegate,
+    Other,
+    /// The agent saying something to the person.
+    Say,
+    /// A stretch to a Call that followed words read: not a kind of tool, the words' line.
+    Words,
+}
+
+impl Tone {
+    pub const ALL: [Tone; 8] = [
+        Tone::Ask,
+        Tone::Read,
+        Tone::Change,
+        Tone::Run,
+        Tone::Outside,
+        Tone::Delegate,
+        Tone::Other,
+        Tone::Say,
+    ];
+
+    fn of(tool: &str, action: crate::metro::Action) -> Self {
+        use crate::metro::Action;
+        if crate::metro::mcp_parts(tool).is_some() || matches!(tool, "WebFetch" | "WebSearch") {
+            return Tone::Outside;
+        }
+        match action {
+            Action::Read | Action::Search => Tone::Read,
+            Action::Change => Tone::Change,
+            Action::Run => Tone::Run,
+            Action::Delegate => Tone::Delegate,
+            Action::Other => Tone::Other,
+        }
+    }
+
+    pub fn color(self) -> &'static str {
+        match self {
+            Tone::Ask => "#16a34a",
+            Tone::Report => "#6b7280",
+            Tone::Read => "#2563eb",
+            Tone::Change => "#c026d3",
+            Tone::Run => "#334155",
+            Tone::Outside => "#0891b2",
+            Tone::Delegate => "#a16207",
+            Tone::Other => "#94a3b8",
+            Tone::Say => "#7c3aed",
+            Tone::Words => "#8e7cc3",
+        }
     }
 }
 
@@ -238,9 +537,11 @@ impl Flow {
                 n: i + 1,
                 req: a.text.clone(),
                 agent: a.agent.clone(),
+                intent: a.intent.clone().filter(|i| !i.trim().is_empty()),
                 asked: a.at,
                 calls: Vec::new(),
                 items: Vec::new(),
+                said: Vec::new(),
             })
             .collect();
         if turns.is_empty() {
@@ -248,19 +549,41 @@ impl Flow {
                 n: 1,
                 req: String::new(),
                 agent: None,
+                intent: None,
                 asked: None,
                 calls: Vec::new(),
                 items: Vec::new(),
+                said: Vec::new(),
             });
         }
-        let mut plain: Vec<Vec<bool>> = vec![Vec::new(); turns.len()];
         let mut at = HashMap::new();
         for s in order {
             let t = m.asks.iter().rposition(|a| a.x <= s.x).unwrap_or(0);
             let c = Call::of(m, s);
-            plain[t].push(c.plain());
             at.insert(c.seq, (t, turns[t].calls.len()));
             turns[t].calls.push(c);
+        }
+        // A Call stands alone when it is worth seeing: stopped, told by nothing, told by words
+        // it read (it rides a branch), or the one whose result told another (an interchange).
+        let parents: HashSet<i64> = turns
+            .iter()
+            .flat_map(|t| t.calls.iter().filter_map(|c| c.by))
+            .collect();
+        let plain: Vec<Vec<bool>> = turns
+            .iter()
+            .map(|t| {
+                t.calls
+                    .iter()
+                    .map(|c| c.plain() && !parents.contains(&c.seq))
+                    .collect()
+            })
+            .collect();
+        // Each message to the turn it was said in: the last request at or before its column.
+        for sd in &m.says {
+            let t = m.asks.iter().rposition(|a| a.x <= sd.x).unwrap_or(0);
+            if let Some(turn) = turns.get_mut(t) {
+                turn.said.push(sd.clone());
+            }
         }
         for (t, turn) in turns.iter_mut().enumerate() {
             let mut run: Vec<usize> = Vec::new();
@@ -690,7 +1013,7 @@ impl Flow {
                     legs.push(Leg::Text(short(via, 18)));
                     read = Some(via);
                 }
-                let name = short(&c.title, 16);
+                let name = short(&c.title, 24);
                 match legs.last_mut() {
                     Some(Leg::Stopped { blocked, name: n, times })
                         if *blocked == c.blocked && *n == name =>
@@ -833,12 +1156,24 @@ impl Flow {
 
 const LEFT: f64 = 120.0;
 const TOP: f64 = 200.0;
-const ROW_H: f64 = 220.0;
-const BRANCH_ROW_H: f64 = 340.0;
+/// The room added between turns, and how far a turn's zone begins before its start.
+const TURN_GAP: f64 = 60.0;
+/// From one row of the folded line to the next, and how far a zone reaches above its row.
+const ROW_SP: f64 = 370.0;
+/// The width to height the folded line aims at, about a screen's.
+const ASPECT: f64 = 1.6;
+const ZONE_UP: f64 = 206.0;
+const ZONE_LEAD: f64 = 70.0;
 const BR_DY: f64 = 120.0;
-const BR_STEP: f64 = 160.0;
+/// How far under the lower of its two ends a passage from a cause runs.
+const LINK_DY: f64 = 112.0;
 const MARK_STEP: f64 = 80.0;
 const TICK: f64 = 72.0;
+/// The step between a group's small stations, and the largest group always shown open.
+const MINI: f64 = 64.0;
+const OPEN_ALWAYS: usize = 6;
+/// Whether no group is ever shown folded: every Call its own small station.
+const FOLD_NONE: bool = true;
 const STOP: f64 = 100.0;
 const IMPORTANT: f64 = 150.0;
 const PRE: f64 = 40.0;
@@ -851,6 +1186,10 @@ pub enum Kind {
     Transfer,
     Warn,
     Blocked,
+    /// The agent's answer to the person: the turn's last message.
+    Say,
+    /// A Call let through, a small station in an opened group.
+    Mini,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -871,6 +1210,56 @@ pub struct Stop {
     /// The Call it is, or the group's index in its turn's items.
     pub seq: Option<i64>,
     pub group: Option<usize>,
+    /// What it did: a turn's start is the request, a group the tool it ran most.
+    pub tone: Tone,
+    /// Its result held words another Call followed: a branch leaves it.
+    pub xfer: bool,
+    /// The icon of the tool it ran, for a Call's station.
+    pub glyph: Option<Glyph>,
+    /// The Calls after `seq` folded into it: the same thing done again right after.
+    pub also: Vec<i64>,
+    /// How many names' height further from the line its name stands, to clear a neighbour's.
+    pub tier: u8,
+    /// Its Call followed words read in a tool result: the stretch to it is the words' violet.
+    pub follows: bool,
+}
+
+impl Stop {
+    /// Whether it stands for the Call.
+    pub fn is(&self, seq: i64) -> bool {
+        self.seq == Some(seq) || self.also.contains(&seq)
+    }
+}
+
+/// Folds a Call into the station just laid when it did the same thing there again: a
+/// plain station of the same turn and lane, the same name. Its name counts the times.
+fn fold_into_last(stops: &mut [Stop], turn: usize, y: f64, label: &str, seq: i64) -> bool {
+    let Some(last) = stops.last_mut() else {
+        return false;
+    };
+    let base = match last.also.len() {
+        0 => last.label.as_str(),
+        _ => last.label.rsplit_once(" ×").map_or(last.label.as_str(), |(b, _)| b),
+    };
+    if last.turn != turn
+        || (last.y - y).abs() > 0.5
+        || base != label
+        || last.xfer
+        || !matches!(last.kind, Kind::Mini | Kind::Stop)
+    {
+        return false;
+    }
+    last.also.push(seq);
+    last.label = format!("{label} ×{}", last.also.len() + 1);
+    true
+}
+
+/// A stretch of a turn's line coloured for the station it leads to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToneSeg {
+    pub turn: usize,
+    pub d: String,
+    pub tone: Tone,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -879,6 +1268,15 @@ pub struct Seg {
     pub d: String,
     pub branch: bool,
     pub end: Option<Pt>,
+    /// The way back from a row's end to the next row's start.
+    pub ret: bool,
+    /// A branch the engine was less than even sure of: drawn dashed.
+    pub unsure: bool,
+    /// A passage from a cause to the Call that followed its words, under the line.
+    pub link: bool,
+    /// For a passage: the Calls it is about (the cause and those that followed it), shown only
+    /// when one of them is picked.
+    pub about: Vec<i64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -886,9 +1284,18 @@ pub struct TurnMark {
     pub turn: usize,
     pub x: f64,
     pub y: f64,
-    /// The room to the next turn's mark.
-    pub avail: f64,
+    /// The turn's zone, a rectangle (x, y, width, height) on each row it runs along; its
+    /// heading sits at the top of the first.
+    pub zones: Vec<(f64, f64, f64, f64)>,
+    /// Its first zone is on a row running left: its heading stands at the zone's right, where
+    /// the turn starts.
+    pub rev: bool,
+    /// The request, whole: the zone's heading wraps it.
     pub text: String,
+    /// What the turn was for: the agent's intent, else the request, cut to its gist.
+    pub head: String,
+    /// How the turn ended: the gist of the agent's last word to the person.
+    pub result: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -896,7 +1303,25 @@ pub struct BranchLabel {
     pub turn: usize,
     pub x: f64,
     pub y: f64,
+    /// On a row running left: the label ends at `x`.
+    pub rev: bool,
     pub text: String,
+    /// Whether the label at the branch's end is drawn (not when the next branch comes down
+    /// into it).
+    pub end: bool,
+    /// What told the branch, quoted where it bends away: the box's corner and width.
+    pub cause: Option<Cause>,
+    pub qx: f64,
+    pub qy: f64,
+    pub qw: f64,
+    /// The Calls its passage is about: shown only when one of them is picked.
+    pub about: Vec<i64>,
+}
+
+/// The quote box of a branch: its width for the words.
+pub fn quote_width(c: &Cause) -> f64 {
+    let words = c.quote.as_deref().unwrap_or("결과 보기");
+    (text_width(words, 11.5) + 120.0).clamp(150.0, 320.0)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -905,40 +1330,42 @@ pub struct Line {
     pub segs: Vec<Seg>,
     pub marks: Vec<TurnMark>,
     pub branch_labels: Vec<BranchLabel>,
+    /// The main line in the colours of what was done along it.
+    pub tones: Vec<ToneSeg>,
+    /// Small arrows on the line, (x, y, degrees), saying which way it is read.
+    pub arrows: Vec<(f64, f64, f64)>,
     pub width: f64,
     pub height: f64,
 }
 
 impl Flow {
-    /// The turns given, by index, as one line running right.
+    /// The turns given, by index, as one line running right, its groups folded, unwrapped.
+    #[cfg(test)]
     pub fn line(&self, turns: &[usize]) -> Line {
+        self.line_open(turns, &HashSet::new(), f64::INFINITY)
+    }
+
+    /// The line with the groups given, by (turn, item), opened into their Calls. A group of
+    /// `OPEN_ALWAYS` Calls or fewer is always open.
+    ///
+    /// Rows are `wrap` wide: the line runs right, turns down at the edge and runs back, as a
+    /// metro map folds a long line; an infinite `wrap` keeps it one row.
+    pub fn line_open(&self, turns: &[usize], open: &HashSet<(usize, usize)>, wrap: f64) -> Line {
         let x = |o: f64| LEFT + o;
-        let by = TOP + BR_DY;
         let mut stops: Vec<Stop> = Vec::new();
         let mut marks: Vec<(usize, f64)> = Vec::new();
-        // Each interchange: its turn, where on the line, the place, how many branch stops.
-        let mut xfers: Vec<(usize, f64, String, i64, usize)> = Vec::new();
+        // Each Call told by words it read in another of its turn: (the cause's stop, its stop).
+        let mut links: Vec<(usize, usize)> = Vec::new();
         let mut off = 0.0_f64;
-        let mut branch_end = 0.0_f64;
-        let mut parity = 0usize;
         let route_to = |mark: f64, at: f64| format!("M{} {TOP} H{}", x(mark), x(at));
-        let branch_path = |tr: f64, upto: f64| {
-            let p = x(tr);
-            format!(
-                "L{} {} Q{} {} {} {} H{}",
-                p + 50.0,
-                by - 10.0,
-                p + 60.0,
-                by,
-                p + 75.0,
-                by,
-                upto
-            )
-        };
-        let branch_x = |tr: f64, bi: usize| x(tr) + 75.0 + 85.0 + bi as f64 * BR_STEP;
+        // Names all stand over the line (the links run under it), each clear of the next.
+        let step_after = |label: &str, size: f64, base: f64| base.max(text_width(label, size) + 26.0);
 
         for &t in turns {
             let turn = &self.turns[t];
+            if !marks.is_empty() {
+                off += TURN_GAP;
+            }
             let mark = off;
             marks.push((t, off));
             stops.push(Stop {
@@ -954,11 +1381,83 @@ impl Flow {
                 route: String::new(),
                 seq: None,
                 group: None,
+                tone: if turn.agent.is_some() { Tone::Report } else { Tone::Ask },
+                xfer: false,
+                glyph: None,
+                also: Vec::new(),
+                tier: 0,
+                follows: false,
             });
             off += MARK_STEP;
             for (gi, item) in turn.items.iter().enumerate() {
                 match item {
-                    Item::Group { label, tools, followed, .. } => {
+                    // Every group is laid open: a small station for each Call, the same thing done
+                    // again in a row counted on one (×n).
+                    Item::Group { label, calls, .. } if FOLD_NONE || calls.len() <= OPEN_ALWAYS || open.contains(&(t, gi)) => {
+                        if !FOLD_NONE && calls.len() > OPEN_ALWAYS {
+                            stops.push(Stop {
+                                id: format!("t{t}-{gi}"),
+                                turn: t,
+                                x: x(off),
+                                y: TOP,
+                                kind: Kind::Tick,
+                                label: label.clone(),
+                                sub: "접기".into(),
+                                branch: false,
+                                up: Some(true),
+                                route: route_to(mark, off),
+                                seq: None,
+                                group: Some(gi),
+                                tone: Tone::Other,
+                                xfer: false,
+                                glyph: None,
+                                also: Vec::new(),
+                                tier: 0,
+                                follows: false,
+                            });
+                            off += step_after(label, 14.0, MINI);
+                        }
+                        for &i in calls {
+                            let c = &turn.calls[i];
+                            if fold_into_last(&mut stops, t, TOP, &short(&c.title, 26), c.seq) {
+                                continue;
+                            }
+                            stops.push(Stop {
+                                id: format!("t{t}-{gi}-{i}"),
+                                turn: t,
+                                x: x(off),
+                                y: TOP,
+                                kind: Kind::Mini,
+                                // What it did; the tool is its icon and colour.
+                                label: short(&c.title, 26),
+                                sub: match &c.server {
+                                    Some(srv) => short(srv, 14),
+                                    None => c.tool.clone(),
+                                },
+                                branch: false,
+                                up: Some(true),
+                                route: route_to(mark, off),
+                                seq: Some(c.seq),
+                                group: None,
+                                tone: c.tone,
+                                xfer: false,
+                                glyph: Some(c.glyph),
+                                also: Vec::new(),
+                                tier: 0,
+                                follows: false,
+                            });
+                            off += step_after(&stops[stops.len() - 1].label, 12.0, MINI);
+                        }
+                    }
+                    Item::Group { label, tools, calls, .. } => {
+                        let mut counts: HashMap<Tone, usize> = HashMap::new();
+                        for &i in calls {
+                            *counts.entry(turn.calls[i].tone).or_default() += 1;
+                        }
+                        let tone = Tone::ALL
+                            .into_iter()
+                            .max_by_key(|t| counts.get(t).copied().unwrap_or(0))
+                            .unwrap_or(Tone::Other);
                         stops.push(Stop {
                             id: format!("t{t}-{gi}"),
                             turn: t,
@@ -966,17 +1465,20 @@ impl Flow {
                             y: TOP,
                             kind: Kind::Tick,
                             label: label.clone(),
-                            sub: Item::note(tools, *followed),
+                            sub: Item::brief(tools),
                             branch: false,
-                            up: {
-                                parity += 1;
-                                Some(parity % 2 == 1)
-                            },
+                            up: Some(true),
                             route: route_to(mark, off),
                             seq: None,
                             group: Some(gi),
+                            tone,
+                            xfer: false,
+                            glyph: None,
+                            also: Vec::new(),
+                            tier: 0,
+                            follows: false,
                         });
-                        off += TICK;
+                        off += step_after(label, 14.0, TICK);
                     }
                     Item::Call(i) => {
                         let c = &turn.calls[*i];
@@ -984,67 +1486,35 @@ impl Flow {
                             c.title.trim_end_matches(" 읽기").trim_end_matches(" 수정"),
                             28,
                         );
-                        if let (Some(via), Some(b)) = (&c.via, c.by) {
-                            // The words it followed: a branch off the place they were read at.
-                            let found = xfers.iter().position(|x| x.0 == t && x.3 == b);
-                            let xi = match found {
-                                Some(xi) => xi,
-                                None => {
-                                    if off > 0.0 {
-                                        off += PRE;
-                                    }
-                                    off = off.max(branch_end + PRE);
-                                    stops.push(Stop {
-                                        id: format!("t{t}-via{b}"),
-                                        turn: t,
-                                        x: x(off),
-                                        y: TOP,
-                                        kind: Kind::Transfer,
-                                        label: via.clone(),
-                                        sub: "결과 읽음 · 글 따라 환승".into(),
-                                        branch: false,
-                                        // Over the line: its branch leaves under it.
-                                        up: {
-                                            parity = 1;
-                                            Some(true)
-                                        },
-                                        route: route_to(mark, off),
-                                        seq: Some(b),
-                                        group: None,
-                                    });
-                                    xfers.push((t, off, via.clone(), b, 0));
-                                    off += IMPORTANT;
-                                    xfers.len() - 1
-                                }
-                            };
-                            let (_, tr, _, _, bi) = xfers[xi];
-                            xfers[xi].4 += 1;
-                            let bx = branch_x(tr, bi);
-                            branch_end = branch_end
-                                .max(bx + 90.0 + 60.0 + via.chars().count() as f64 * 13.0 - LEFT);
-                            stops.push(Stop {
-                                id: format!("t{t}-{gi}"),
-                                turn: t,
-                                x: bx,
-                                y: by,
-                                kind: if c.blocked {
-                                    Kind::Blocked
-                                } else if c.warn {
-                                    Kind::Warn
-                                } else {
-                                    Kind::Stop
-                                },
-                                label: name,
-                                sub: c.sub(),
-                                branch: true,
-                                up: None,
-                                route: format!("{} {}", route_to(mark, tr), branch_path(tr, bx)),
-                                seq: Some(c.seq),
-                                group: None,
-                            });
+                        let kind = if c.blocked {
+                            Kind::Blocked
+                        } else if c.warn {
+                            Kind::Warn
+                        } else {
+                            Kind::Stop
+                        };
+                        // Told by words it read in a Call of this turn: that Call becomes an
+                        // interchange, and a passage runs from it to this one under the line.
+                        let cause = c.by.and_then(|b| stops.iter().position(|st| st.turn == t && st.is(b)));
+                        let important = c.blocked || c.warn;
+                        if cause.is_none()
+                            && !important
+                            && !c.loose
+                            && c.via.is_none()
+                            && fold_into_last(&mut stops, t, TOP, &name, c.seq)
+                        {
                             continue;
                         }
-                        let important = c.blocked || c.warn;
+                        if let Some(ci) = cause {
+                            if !stops[ci].xfer {
+                                stops[ci].sub = "환승".into();
+                            }
+                            stops[ci].xfer = true;
+                            if matches!(stops[ci].kind, Kind::Stop | Kind::Mini) {
+                                stops[ci].kind = Kind::Transfer;
+                            }
+                            links.push((ci, stops.len()));
+                        }
                         if important && off > 0.0 {
                             off += PRE;
                         }
@@ -1053,13 +1523,7 @@ impl Flow {
                             turn: t,
                             x: x(off),
                             y: TOP,
-                            kind: if c.blocked {
-                                Kind::Blocked
-                            } else if c.warn {
-                                Kind::Warn
-                            } else {
-                                Kind::Stop
-                            },
+                            kind,
                             label: name,
                             sub: if c.blocked {
                                 format!("{} · 차단", c.sub())
@@ -1067,30 +1531,238 @@ impl Flow {
                                 format!("{} · 확인 요청", c.sub())
                             } else if c.loose {
                                 format!("{} · 시킨 것 없음", c.sub())
+                            } else if c.via.is_some() {
+                                format!("{} · 글을 따름", c.sub())
                             } else {
                                 c.sub()
                             },
                             branch: false,
-                            up: {
-                                parity += 1;
-                                Some(parity % 2 == 1)
-                            },
+                            up: Some(true),
                             route: route_to(mark, off),
                             seq: Some(c.seq),
                             group: None,
+                            tone: c.tone,
+                            xfer: false,
+                            glyph: Some(c.glyph),
+                            also: Vec::new(),
+                            tier: 0,
+                            follows: c.via.is_some(),
                         });
-                        off += if important { IMPORTANT } else { STOP };
+                        let base = if important { IMPORTANT } else { STOP };
+                        off += step_after(&stops[stops.len() - 1].label, 15.5, base);
                     }
                 }
             }
+            // The turn ends where the agent answered the person: its last message.
+            if !turn.said.is_empty() {
+                let earlier = turn.said.len() - 1;
+                stops.push(Stop {
+                    id: format!("t{t}-say"),
+                    turn: t,
+                    x: x(off),
+                    y: TOP,
+                    kind: Kind::Say,
+                    // The heading above says what it ended on, whole; all of it opens from here.
+                    label: "답변".into(),
+                    sub: if earlier > 0 {
+                        format!("중간 메시지 {earlier}개")
+                    } else {
+                        String::new()
+                    },
+                    branch: false,
+                    up: Some(true),
+                    route: route_to(mark, off),
+                    seq: None,
+                    group: None,
+                    tone: Tone::Say,
+                    xfer: false,
+                    glyph: None,
+                    also: Vec::new(),
+                    tier: 0,
+                    follows: false,
+                });
+                off += STOP;
+            }
+            // A turn's zone is wide enough for its heading, so what it was for and how it ended
+            // read whole: short turns get room rather than a cut heading.
+            let (head, res) = heading_of(turn);
+            let w = text_width(&head, 13.5).max(res.as_deref().map_or(0.0, |r| text_width(r, 12.5)));
+            let need = if w + 40.0 <= 420.0 {
+                w + 40.0
+            } else if w / 2.0 + 70.0 <= 620.0 {
+                (w / 2.0 + 70.0).max(420.0)
+            } else {
+                (w / 3.0 + 80.0).clamp(620.0, 760.0)
+            };
+            off = off.max(mark + need - TURN_GAP);
         }
 
-        let end = stops
-            .iter()
-            .filter(|s| !s.branch)
-            .map(|s| s.x - LEFT)
-            .fold(0.0, f64::max)
-            + 50.0;
+        // Names that would still meet (an interchange's name beside a long one) stand a step
+        // further up.
+        let span = |st: &Stop| {
+            let size = if st.kind == Kind::Mini { 12.0 } else { 15.5 };
+            let half = text_width(&st.label, size) / 2.0 + 6.0;
+            (st.x - half, st.x + half)
+        };
+        let named: Vec<usize> = (0..stops.len()).filter(|&i| !stops[i].label.is_empty()).collect();
+        for k in 1..named.len() {
+            let (p, c) = (named[k - 1], named[k]);
+            if span(&stops[p]).1 > span(&stops[c]).0 {
+                stops[c].tier = (stops[p].tier + 1) % 2;
+            }
+        }
+
+        // Where the line runs: on the main track, or down on the track of words followed, for
+        // the Calls that followed words read in a tool result. One train, one line: it goes down
+        // when the agent acts on what it read and comes back up when it acts on the request.
+        let o_of = |x: f64| x - LEFT;
+        let level: Vec<f64> = stops.iter().map(|s| if s.follows { 1.0 } else { 0.0 }).collect();
+        // Each passage from a cause to the Call that followed it, as one with the run of Calls
+        // after it that followed the same words: (cause, first follower, last follower).
+        let mut passages: Vec<(usize, usize, usize)> = Vec::new();
+        for &(ci, fi) in &links {
+            if let Some(p) = passages.iter().position(|&(c, _, l)| c == ci && (l + 1..fi).all(|k| !stops[k].follows || links.iter().any(|&(c2, f2)| c2 == ci && f2 == k))) {
+                passages[p].2 = fi;
+                continue;
+            }
+            passages.push((ci, fi, fi));
+        }
+
+        let end = stops.iter().map(|s| s.x - LEFT).fold(0.0, f64::max) + 50.0;
+
+        // The line folded into rows as a snake: row 0 runs right, row 1 back left under it, and
+        // so on, each row as long as the turns on it. Rows are cut between turns where one fits,
+        // else between two stations, and only where the line is on its main track.
+        let mut spans: Vec<(f64, f64)> = Vec::new();
+        for i in 0..stops.len() {
+            if level[i] > 0.0 && (i == 0 || level[i - 1] == 0.0) {
+                let a = if i > 0 { o_of(stops[i - 1].x) } else { o_of(stops[i].x) };
+                let j = (i..stops.len()).find(|&j| level[j] == 0.0).unwrap_or(stops.len() - 1);
+                spans.push((a, o_of(stops[j].x)));
+            }
+        }
+        let far = end + 60.0;
+        let start = -ZONE_LEAD - 10.0;
+        let wrap = if wrap.is_finite() {
+            wrap.max((ASPECT * (far - start) * ROW_SP).sqrt())
+        } else {
+            wrap
+        };
+        let mut main_os: Vec<f64> = stops.iter().map(|s| o_of(s.x)).collect();
+        main_os.sort_by(f64::total_cmp);
+        main_os.dedup();
+        let turn_cuts: Vec<f64> = marks.iter().skip(1).map(|m| m.1 - ZONE_LEAD - 5.0).collect();
+        let mut cuts = vec![start];
+        if wrap.is_finite() {
+            let mut row = start;
+            while far - row > wrap {
+                if let Some(c) = turn_cuts
+                    .iter()
+                    .copied()
+                    .filter(|&c| c > row + 1.0 && c - row <= wrap)
+                    .reduce(f64::max)
+                {
+                    cuts.push(c);
+                    row = c;
+                    continue;
+                }
+                let mut best = None;
+                let mut over = None;
+                for w in main_os.windows(2) {
+                    let c = (w[0] + w[1]) / 2.0;
+                    if c <= row + 1.0 || spans.iter().any(|&(a, b)| a < c && c < b) {
+                        continue;
+                    }
+                    if c - row <= wrap {
+                        best = Some(c);
+                    } else {
+                        over = Some(c);
+                        break;
+                    }
+                }
+                let best = best.filter(|&c| c - row >= wrap * 0.4);
+                match best.or(over) {
+                    Some(c) => {
+                        cuts.push(c);
+                        row = c;
+                    }
+                    None => break,
+                }
+            }
+        }
+        let rows = cuts.len();
+        let dir = |r: usize| if r.is_multiple_of(2) { 1.0 } else { -1.0 };
+        let len = |r: usize| cuts.get(r + 1).copied().unwrap_or(far) - cuts[r];
+        let mut anchor = vec![0.0_f64];
+        for r in 0..rows {
+            anchor.push(anchor[r] + dir(r) * len(r));
+        }
+        let lo = anchor.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = anchor.iter().copied().fold(f64::NEG_INFINITY, f64::max) - lo;
+        let x0 = 80.0 - lo;
+        let row_of = |o: f64| cuts.iter().rposition(|&c| c <= o).unwrap_or(0);
+        // Each row as deep as its lower track, when the line goes down on it.
+        let row_h: Vec<f64> = (0..rows)
+            .map(|r| {
+                let down = (0..stops.len()).any(|i| level[i] > 0.0 && row_of(o_of(stops[i].x)) == r);
+                let base = ROW_SP - BR_DY + 40.0;
+                if down { base + BR_DY + 100.0 } else { base }
+            })
+            .collect();
+        let mut tops = vec![TOP];
+        for r in 0..rows {
+            tops.push(tops[r] + row_h[r]);
+        }
+        let row_y = |r: usize| tops[r];
+        let map_x = |r: usize, o: f64| x0 + anchor[r] + dir(r) * (o - cuts[r]);
+        let edge = |r: usize| x0 + anchor[r + 1] + dir(r) * 30.0;
+        // Every point the line passes, in order: each station at its track, and the line's end.
+        let mut along: Vec<(f64, f64)> = stops.iter().zip(&level).map(|(s, &l)| (o_of(s.x), l)).collect();
+        along.push((end, 0.0));
+        along.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let at = |o: f64, l: f64| {
+            let r = row_of(o);
+            (map_x(r, o), row_y(r) + l * BR_DY)
+        };
+        // The line from one offset to another through the stations between: along a track,
+        // ramping down or up just before a station on the other track, and turning at the rows'
+        // ends.
+        let track = |a: f64, b: f64| {
+            let pts_in: Vec<(f64, f64)> = along.iter().copied().filter(|&(o, _)| o >= a - 0.5 && o <= b + 0.5).collect();
+            if pts_in.len() < 2 {
+                return String::new();
+            }
+            let mut pts = vec![at(pts_in[0].0, pts_in[0].1)];
+            for w in pts_in.windows(2) {
+                let ((oa, la), (ob, lb)) = (w[0], w[1]);
+                let (ra, rb) = (row_of(oa), row_of(ob));
+                if ra != rb {
+                    for r in ra..rb {
+                        pts.push((edge(r), row_y(r)));
+                        pts.push((edge(r), row_y(r + 1)));
+                    }
+                } else if (la - lb).abs() > 0.1 {
+                    let d = dir(ra);
+                    let (xb, yb) = at(ob, lb);
+                    let ya = row_y(ra) + la * BR_DY;
+                    let run = ((ob - oa) * 0.7).min(70.0);
+                    pts.push((xb - d * run, ya));
+                    pts.push((xb - d * 14.0, yb));
+                }
+                pts.push(at(ob, lb));
+            }
+            rounded(&pts, 22.0)
+        };
+        let mark_of: HashMap<usize, f64> = marks.iter().copied().collect();
+        let offsets: Vec<f64> = stops.iter().map(|s| o_of(s.x)).collect();
+        for (i, st) in stops.iter_mut().enumerate() {
+            let o = offsets[i];
+            if !st.route.is_empty() {
+                let m = mark_of.get(&st.turn).copied().unwrap_or(o);
+                st.route = track(m, o);
+            }
+            (st.x, st.y) = at(o, level[i]);
+        }
         let mut segs: Vec<Seg> = marks
             .iter()
             .enumerate()
@@ -1098,51 +1770,151 @@ impl Flow {
                 let next = marks.get(i + 1).map(|m| m.1);
                 Seg {
                     turn: t,
-                    d: route_to(o, next.unwrap_or(end)),
+                    d: track(o, next.unwrap_or(end)),
                     branch: false,
-                    end: next.is_none().then_some((x(end), TOP)),
+                    end: next.is_none().then(|| at(end, 0.0)),
+                    ret: false,
+                    unsure: false,
+                    link: false,
+                    about: Vec::new(),
                 }
             })
             .collect();
+        // A thin passage, for the Call picked, from the station whose words it followed (the
+        // interchange) under the line to it. And over each stretch on the lower track that
+        // followed the same words, a quote of them where the line goes down.
         let mut branch_labels = Vec::new();
-        for &(t, tr, ref via, _, count) in &xfers {
-            let end_x = branch_x(tr, count.saturating_sub(1)) + 90.0;
-            segs.push(Seg {
-                turn: t,
-                d: format!("M{} {TOP} {}", x(tr), branch_path(tr, end_x)),
-                branch: true,
-                end: Some((end_x, by)),
-            });
+        for &(ci, fi, li) in &passages {
+            let (c, f) = (&stops[ci], &stops[fi]);
+            let mut about: Vec<i64> = c.seq.into_iter().chain(c.also.iter().copied()).collect();
+            for &(c2, f2) in &links {
+                if c2 == ci && (fi..=li).contains(&f2) {
+                    about.extend(stops[f2].seq.into_iter().chain(stops[f2].also.iter().copied()));
+                }
+            }
+            let cause = self.call(f.seq.unwrap_or_default()).and_then(|call| call.cause.clone());
+            // (Shown only when the way back is asked for.) Within a row it runs under both ends;
+            // across rows, under the cause's row and then down into the follower from above.
+            {
+                let pts = if row_of(offsets[ci]) == row_of(offsets[fi]) {
+                    let floor = c.y.max(f.y) + LINK_DY;
+                    vec![(c.x, c.y + 14.0), (c.x, floor), (f.x, floor), (f.x, f.y + 14.0)]
+                } else {
+                    let below = row_y(row_of(offsets[ci])) + BR_DY + LINK_DY;
+                    vec![(c.x, c.y + 14.0), (c.x, below), (f.x, below), (f.x, f.y - 16.0)]
+                };
+                segs.push(Seg {
+                    turn: c.turn,
+                    d: rounded(&pts, 16.0),
+                    branch: true,
+                    end: None,
+                    ret: false,
+                    unsure: cause.as_ref().is_some_and(|k| k.p < 0.5),
+                    link: true,
+                    about: about.clone(),
+                });
+            }
+            // The quote hangs under the lower track from where the stretch starts (the names
+            // stand over it). Where the line goes down it always shows; further along the lower
+            // track, a change of words read shows only for the Call picked.
+            let dips_here = fi == 0 || level[fi - 1] == 0.0;
+            let last = &stops[li];
+            let d = dir(row_of(offsets[fi]));
+            let _ = last;
+            let qw = cause.as_ref().map_or(0.0, quote_width).max(200.0);
+            let qx = if d > 0.0 { f.x - 40.0 } else { f.x + 40.0 - qw };
             branch_labels.push(BranchLabel {
-                turn: t,
-                x: end_x + 18.0,
-                y: by,
-                text: format!("{via} 결과의 글을 따라감"),
+                turn: c.turn,
+                x: f.x,
+                y: f.y,
+                rev: d < 0.0,
+                // Where the words were read: the station they came out of.
+                text: c.label.clone(),
+                end: false,
+                cause,
+                qx,
+                // Under the end pin that stands under a picked station.
+                qy: f.y + 54.0,
+                qw,
+                about: if dips_here { Vec::new() } else { about },
             });
         }
+        // The arrows: between stations far enough apart on one track, and down each turn.
+        let mut arrows: Vec<(f64, f64, f64)> = Vec::new();
+        for w in along.windows(2) {
+            let ((oa, la), (ob, lb)) = (w[0], w[1]);
+            let (ra, rb) = (row_of(oa), row_of(ob));
+            if ra == rb {
+                if ob - oa > 70.0 && (la - lb).abs() < 0.1 {
+                    let (x, y) = at((oa + ob) / 2.0, la);
+                    arrows.push((x, y, if dir(ra) > 0.0 { 0.0 } else { 180.0 }));
+                }
+            } else {
+                for r in ra..rb {
+                    arrows.push((edge(r), (row_y(r) + row_y(r + 1)) / 2.0, 90.0));
+                }
+            }
+        }
+        // Each stretch of the line in the colour of the station it reaches: the tool's, or the
+        // words' violet on the lower track.
+        let mut tones = Vec::new();
+        for &(t, _) in &marks {
+            let mut run: Vec<(f64, Tone)> = Vec::new();
+            for (st, o) in stops.iter().zip(offsets.iter()) {
+                if st.turn == t {
+                    run.push((*o, if st.follows { Tone::Words } else { st.tone }));
+                }
+            }
+            run.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for w in run.windows(2) {
+                tones.push(ToneSeg {
+                    turn: t,
+                    d: track(w[0].0, w[1].0),
+                    tone: w[1].1,
+                });
+            }
+        }
+        let map = |o: f64| at(o, 0.0);
         let marks = marks
             .iter()
             .enumerate()
-            .map(|(i, &(t, o))| TurnMark {
-                turn: t,
-                x: x(o),
-                y: TOP,
-                avail: marks.get(i + 1).map_or(f64::INFINITY, |m| m.1 - o),
-                text: short(&self.turns[t].req, 80),
+            .map(|(i, &(t, o))| {
+                let z0 = o - ZONE_LEAD;
+                let z1 = marks.get(i + 1).map_or(far, |m| m.1 - ZONE_LEAD);
+                let mut zones = Vec::new();
+                for r in row_of(z0.max(start))..=row_of((z1 - 1.0).max(start)) {
+                    let lo = z0.max(cuts[r]);
+                    let hi = z1.min(cuts.get(r + 1).copied().unwrap_or(far));
+                    if hi <= lo {
+                        continue;
+                    }
+                    let (a, b) = (map_x(r, lo), map_x(r, hi));
+                    zones.push((a.min(b), row_y(r) - ZONE_UP, (a - b).abs(), row_h[r] - 30.0));
+                }
+                let (x, y) = map(o);
+                TurnMark {
+                    turn: t,
+                    x,
+                    y,
+                    zones,
+                    rev: dir(row_of(o)) < 0.0,
+                    head: heading_of(&self.turns[t]).0,
+                    result: heading_of(&self.turns[t]).1,
+                    text: self.turns[t].req.trim().to_owned(),
+                }
             })
             .collect();
-        let width = x(end.max(branch_end)) + 420.0;
-        let height = TOP
-            + if xfers.is_empty() {
-                ROW_H
-            } else {
-                BRANCH_ROW_H
-            };
+        let width = 80.0 + hi + 110.0;
+        // Tall enough for the quote boxes under the last row, a few stacked.
+        let boxes = branch_labels.iter().map(|b| b.qy + 150.0).fold(0.0, f64::max);
+        let height = (tops[rows] - ZONE_UP + 10.0).max(boxes);
         Line {
             stops,
             segs,
             marks,
             branch_labels,
+            tones,
+            arrows,
             width,
             height,
         }
@@ -1223,7 +1995,7 @@ mod tests {
     }
 
     #[test]
-    fn words_followed_branch_off_where_they_were_read() {
+    fn words_followed_run_on_the_line_with_a_passage_from_where_they_were_read() {
         let f = flow_of(
             &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mock/fixture.json"))
                 .unwrap(),
@@ -1231,16 +2003,92 @@ mod tests {
         );
         let turns: Vec<usize> = (0..f.turns.len()).collect();
         let line = f.line(&turns);
-        let branch: Vec<&Stop> = line.stops.iter().filter(|s| s.branch).collect();
-        assert!(
-            !branch.is_empty(),
-            "fa6576f7 has a Call told by a tool result"
-        );
-        assert!(line.stops.iter().any(|s| s.kind == Kind::Transfer));
-        assert!(line.segs.iter().any(|s| s.branch));
-        for s in branch {
-            assert!(s.y > TOP);
+        // One line in the order made: on the main track, and down on the lower one exactly for
+        // the Calls that followed words read.
+        assert!(line.stops.iter().all(|s| !s.branch));
+        let main_y = line.stops[0].y;
+        for s in &line.stops {
+            let want = if s.follows { main_y + BR_DY } else { main_y };
+            assert!((s.y - want).abs() < 0.5, "{} at {} not {}", s.label, s.y, want);
         }
+        // The Call told by a tool result follows words, and a passage leads to it from an
+        // interchange.
+        assert!(line.stops.iter().any(|s| s.follows), "fa6576f7 has a Call told by a tool result");
+        assert!(line.stops.iter().any(|s| s.kind == Kind::Transfer || s.xfer));
+        assert!(line.segs.iter().any(|s| s.link));
+    }
+
+    #[test]
+    fn every_group_is_laid_open_into_its_calls() {
+        let f = long("c0001a7e");
+        let turns: Vec<usize> = (0..f.turns.len()).collect();
+        let line = f.line_open(&turns, &HashSet::new(), f64::INFINITY);
+        assert!(!line.stops.iter().any(|s| s.kind == Kind::Tick), "no group head is drawn");
+        for (t, turn) in f.turns.iter().enumerate() {
+            for item in &turn.items {
+                if let Item::Group { calls, .. } = item {
+                    for &i in calls {
+                        assert!(
+                            line.stops.iter().any(|s| s.turn == t && s.is(turn.calls[i].seq)),
+                            "turn {} call {} has a station",
+                            t + 1,
+                            turn.calls[i].seq
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_long_line_folds_into_rows() {
+        let f = long("c4000a1b");
+        let turns: Vec<usize> = (0..f.turns.len()).collect();
+        let line = f.line_open(&turns, &HashSet::new(), 900.0);
+        let mut rows: Vec<f64> = line.stops.iter().map(|s| s.y).collect();
+        rows.sort_by(f64::total_cmp);
+        rows.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+        assert!(rows.len() > 1, "forty turns fold into more than one row");
+        for m in &line.marks {
+            assert!(!m.zones.is_empty(), "turn {} has a zone", m.turn + 1);
+        }
+        assert!(line.width / line.height > 0.8, "{} x {}", line.width, line.height);
+    }
+
+    #[test]
+    fn an_answer_is_summed_up_by_what_came_of_it() {
+        assert_eq!(
+            outcome("**기억하기 (메모리 저장):**\n- 키 파일 위치\n- 실행 명령\n\n메모리에 저장해 두었습니다.", 40),
+            "메모리에 저장해 두었습니다."
+        );
+        assert_eq!(outcome("## 현황: Judge 진행 중 ⏳\n남은 공격 12개", 40), "Judge 진행 중 ⏳");
+        assert_eq!(
+            outcome("좋은 질문입니다!\n\n| a | b |\n|---|---|\n\n훅이 rm -rf를 차단했습니다.", 40),
+            "훅이 rm -rf를 차단했습니다."
+        );
+        assert_eq!(outcome("```\ncode\n```\n네, 알겠습니다", 40), "네, 알겠습니다");
+        assert_eq!(outcome("13개 공격 trajectory 완료", 40), "13개 공격 trajectory 완료");
+        assert_eq!(outcome("1. 첫째 할 일\n2. 둘째 할 일", 40), "첫째 할 일");
+        assert_eq!(
+            outcome("**INFUSE** — 흥미로운 프로젝트네요! 요약:\n\n### 🎯 이게 뭐하는 프로젝트\n- **목적**: 공격 벤치마크\n\n**더 도와드릴 수 있습니다!**", 60),
+            "INFUSE — 흥미로운 프로젝트네요!"
+        );
+        assert_eq!(
+            outcome("## 이게 뭐하는 프로젝트?\n\nINFUSE는 에이전트 공격을 재현하는 벤치마크입니다.", 60),
+            "INFUSE는 에이전트 공격을 재현하는 벤치마크입니다."
+        );
+    }
+
+    #[test]
+    fn a_heading_takes_the_gist_of_a_long_intent() {
+        assert_eq!(gist("타입 힌트 추가해줘", 40), "타입 힌트 추가해줘");
+        assert_eq!(
+            gist("강사 레포로 STEP 1~5 리허설을 돌려 ref 문제를 실제로 확인하고 싶음 (확신도: 높음)", 60),
+            "강사 레포로 STEP 1~5 리허설을 돌려 ref 문제를 실제로 확인하고 싶음"
+        );
+        assert_eq!(gist("Open it. Then handle the rest.", 40), "Open it.");
+        let long = gist("파트너로부터의 구금형 판례 연구 과제를 받고 그 과제를 완료하여 법원 법정 시스템에 저장하기", 24);
+        assert!(long.ends_with('…') && long.chars().count() <= 25, "{long}");
     }
 
     #[test]

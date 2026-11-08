@@ -9,9 +9,6 @@ use dioxus::prelude::*;
 use super::{AppState, Load};
 use crate::metro::{Board, LineKind, Metro, Station};
 
-/// A press that moves less than this is a click, not a drag.
-pub(super) const CLICK_SLOP: f64 = 4.0;
-
 /// The colour of a leg that followed words read in a tool result rather than the request.
 const TOLD: &str = "#8a909a";
 /// How long a way took, as a route finder writes it.

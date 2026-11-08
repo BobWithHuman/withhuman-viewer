@@ -1,7 +1,7 @@
 //! The route map after the Figma Make design (see `crate::flow`): two levels, the session's
 //! network of tasks and one task's line, with the list beside it sliding between the two.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use dioxus::prelude::*;
@@ -9,13 +9,18 @@ use dioxus::prelude::*;
 use super::{AppState, Load, Selection};
 use crate::flow::{
     AMBER, Flow, GREEN, Item, Kind, LINE_COLOR, LINE_MUTED, Leg, Overview, RED, Stop, Summary,
-    TEXT_COLOR, TEXT_MUTED, Turn,
+    TEXT_COLOR, TEXT_MUTED, Glyph, Tone, Turn,
 };
 use crate::layout::clip;
 use crate::metro::Metro;
 
 /// The width of the card over the map, with its margin: kept in step with `.fx-main > .route-panel`.
-const CARD_W: f64 = 392.0;
+const CARD_W: f64 = 328.0;
+/// Whether picking a Call opens who told the agent as a card over the line. Off for now: it hid
+/// too much of the line.
+const SHOW_ROUTE_CARD: bool = false;
+/// Moving and zooming the line map in the page (see the file).
+const PAN_JS: &str = include_str!("pan.js");
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Level {
@@ -80,7 +85,10 @@ pub fn FlowMap() -> Element {
         }
         _ => None,
     });
-    let flow = use_memo(move || metro().map(|m| Arc::new(Flow::build(&m))));
+    let flow = use_memo(move || {
+        let m = metro()?;
+        Some(Arc::new(Flow::build(&m)))
+    });
     let mut level = use_signal(|| Level::Overview);
     let mut turn = use_signal(|| 0usize);
     let hover = use_signal(|| None::<usize>);
@@ -104,6 +112,15 @@ pub fn FlowMap() -> Element {
         if picking() {
             document::eval("requestAnimationFrame(() => document.getElementById('session-search')?.focus())");
         }
+    });
+    use_effect(|| {
+        document::eval(
+            "if (!window.__fxKeys) { window.__fxKeys = true; window.addEventListener('keydown', (e) => {\
+               const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;\
+               if (e.metaKey || e.ctrlKey || e.altKey) return;\
+               const id = e.key === 'ArrowRight' ? 'fx-next' : e.key === 'ArrowLeft' ? 'fx-prev' : null;\
+               if (!id) return; const b = document.getElementById(id); if (b && !b.disabled) { e.preventDefault(); b.click(); } }); }",
+        );
     });
     let pick_list = rsx! {
         if picking() {
@@ -187,7 +204,9 @@ pub fn FlowMap() -> Element {
     };
     let t = turn().min(f.turns.len() - 1);
     let task = f.task_of(t);
-    let scope: Vec<usize> = f.task_turns(task).collect();
+    let task_turns: Vec<usize> = f.task_turns(task).collect();
+    // The line runs through the whole session; a task picked is where it is brought to.
+    let scope: Vec<usize> = (0..f.turns.len()).collect();
     let visible: Vec<usize> = scope
         .iter()
         .copied()
@@ -223,19 +242,43 @@ pub fn FlowMap() -> Element {
                 level.set(Level::Detail);
                 zoom.set(1.0);
             } else {
-                zoom.set((zoom() + 0.15).min(2.0))
+                document::eval(&format!("{PAN_JS}\nfxMap.zoomBy(1.25)"));
             }
         }
     };
     let zoom_out = move |_| {
-        if level() == Level::Detail && zoom() <= 0.71 {
-            level.set(Level::Overview)
-        } else if level() == Level::Detail {
-            zoom.set((zoom() - 0.15).max(0.7))
+        if level() == Level::Detail {
+            document::eval(&format!("{PAN_JS}\nfxMap.zoomBy(0.8)"));
         }
     };
     // Only over the line: the network is read whole, and picking there opens the line.
-    let card = is_detail && detail() && picked.is_some();
+    let card = SHOW_ROUTE_CARD && is_detail && detail() && picked.is_some();
+    // Every Call of the session in the order made, to step through with ← and →.
+    let order: Vec<i64> = f.turns.iter().flat_map(|t| t.calls.iter().map(|c| c.seq)).collect();
+    let at = picked.and_then(|p| order.iter().position(|&q| q == p));
+    let total = order.len();
+    let step = {
+        let order = order.clone();
+        move |by: isize| {
+            if order.is_empty() {
+                return;
+            }
+            // From the Call picked now, not when this was drawn, so keys pressed fast still step.
+            let now = match *state.selected.peek() {
+                Selection::Node(q) => order.iter().position(|&o| o == q),
+                Selection::None => None,
+            };
+            let next = match now {
+                Some(i) => i.saturating_add_signed(by).min(order.len() - 1),
+                None if by < 0 => order.len() - 1,
+                None => 0,
+            };
+            let mut state = state;
+            state.selected.set(Selection::Node(order[next]));
+            level.set(Level::Detail);
+        }
+    };
+    let (mut step_prev, mut step_next) = (step.clone(), step);
     let task_name = f.tasks[task].name.clone();
     let (a, b) = (f.tasks[task].from + 1, f.tasks[task].to + 1);
     let anim = if is_detail {
@@ -271,7 +314,7 @@ pub fn FlowMap() -> Element {
                                     span { class: "fx-swatch", style: "background: {LINE_COLOR}" }
                                     div { class: "fx-where-text",
                                         div { class: "fx-where-name", "{task_name}" }
-                                        div { class: "fx-where-sub", "턴 {a}–{b} · {scope.len()}턴" }
+                                        div { class: "fx-where-sub", "턴 {a}–{b} · {task_turns.len()}턴" }
                                     }
                                 }
                                 {route_summary(&f.summary(task))}
@@ -286,19 +329,38 @@ pub fn FlowMap() -> Element {
                     if !is_detail {
                         OverviewMap { flow: f.clone(), turn, hover, level, zoom }
                     } else if !visible.is_empty() {
-                        LineMap { flow: f.clone(), turns: visible.clone(), turn, zoom: zoom(), zoom_to: zoom, detail, covered: if card { CARD_W } else { 0.0 } }
+                        LineMap { flow: f.clone(), turns: visible.clone(), turn, detail, covered: if card { CARD_W } else { 0.0 } }
                     } else {
                         div { class: "fx-empty", "이 조건에 맞는 턴이 없습니다" }
+                    }
+                }
+                // Stepping through the Calls in the order made: buttons, and ← → anywhere but
+                // in a text field (the page clicks these for the keys).
+                if total > 0 {
+                    div { class: "fx-step",
+                        button { id: "fx-prev", title: "이전 호출 (←)", disabled: at == Some(0), onclick: move |_| step_prev(-1), "‹" }
+                        span { class: "n",
+                            if let Some(i) = at { "{i + 1}" } else { "–" }
+                            span { class: "of", " / {total}" }
+                        }
+                        button { id: "fx-next", title: "다음 호출 (→)", disabled: at == Some(total - 1), onclick: move |_| step_next(1), "›" }
                     }
                 }
                 div { class: "fx-zoom",
                     button { title: "확대", onclick: zoom_in, "+" }
                     button { title: "축소", disabled: !is_detail, onclick: zoom_out, "−" }
                     button {
+                        class: "fit",
+                        title: "노선 전체를 한 화면에",
+                        disabled: !is_detail,
+                        onclick: move |_| { document::eval(&format!("{PAN_JS}\nfxMap.fit()")); },
+                        "맞춤"
+                    }
+                    button {
                         class: if !is_detail { "fit on" } else { "fit" },
                         title: "전체 노선망",
                         onclick: move |_| level.set(Level::Overview),
-                        "전체"
+                        "노선망"
                     }
                 }
                 div { class: "fx-brand", "WITHHUMAN" }
@@ -735,8 +797,7 @@ fn TurnCard(
     onselect: EventHandler<()>,
     ontoggle: EventHandler<()>,
 ) -> Element {
-    let mut state = use_context::<AppState>();
-    let mut groups = use_signal(HashSet::<usize>::new);
+    let state = use_context::<AppState>();
     let t = &flow.turns[turn_index];
     let (blocked, warn, ok) = (t.blocked(), t.warn(), t.ok());
     let picked = match (state.selected)() {
@@ -772,51 +833,125 @@ fn TurnCard(
             }
             if open {
                 div { class: "fx-items",
-                    for (gi, item) in t.items.iter().enumerate() {
+                    for (gi, item, n) in item_runs(t) {
                         match item {
-                            Item::Group { label, tools, followed, .. } => {
-                                let shown = groups().contains(&gi);
-                                rsx! {
-                                    div { key: "{gi}",
-                                        div { class: "fx-item group",
-                                            {check_icon()}
-                                            "{label}"
-                                            button {
-                                                class: "fx-more",
-                                                onclick: move |_| { let mut g = groups.write(); if !g.remove(&gi) { g.insert(gi); } },
-                                                if shown { "접기" } else { "펼치기" }
-                                            }
-                                        }
-                                        if shown { div { class: "fx-item-sub", "{Item::note(tools, *followed)}" } }
-                                    }
+                            // A group is listed open, as the line draws it: its Calls one by one,
+                            // the same in a row on one row (×n).
+                            Item::Group { calls, .. } => rsx! {
+                                for (ci, n) in runs(&t.calls, calls.iter().copied()) {
+                                    {call_row(&t.calls[ci], format!("{gi}-{ci}"), picked, state, false, n)}
                                 }
-                            }
-                            Item::Call(ci) => {
-                                let c = &t.calls[*ci];
-                                let seq = c.seq;
-                                let cls = format!(
-                                    "fx-item call{}{}",
-                                    if c.blocked { " red" } else { "" },
-                                    if picked == Some(seq) { " picked" } else { "" }
-                                );
-                                let icon = if c.blocked { blocked_icon(13.0) } else if c.warn { warn_icon(13.0) } else { check_icon() };
-                                rsx! {
-                                    div {
-                                        key: "{gi}",
-                                        class: "{cls}",
-                                        title: "{c.arg}",
-                                        onclick: move |_| state.selected.set(Selection::Node(seq)),
-                                        {icon}
-                                        span { class: "ttl", "{c.title}" }
-                                        if c.via.is_some() { span { class: "fx-text-chip", "글" } }
-                                        span { class: "tm", "{hm(c.at)}" }
-                                    }
+                            },
+                            Item::Call(ci) => call_row(&t.calls[*ci], gi.to_string(), picked, state, false, n),
+                        }
+                    }
+                    // What the agent answered, last, in its violet.
+                    if let Some(last) = t.said.last() {
+                        {
+                            let words = crate::flow::plain_words(&last.text);
+                            let head = crate::flow::outcome(&last.text, 40);
+                            rsx! {
+                                div { class: "fx-item say", title: "{words}",
+                                    span { class: "tone" }
+                                    span { class: "ttl", "답변 · {head}" }
+                                    span { class: "tm", "{hm(last.at)}" }
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/// A tool's icon, `size` px square, centred at (x, y), drawn in strokes of `color`.
+fn glyph(g: Glyph, x: f64, y: f64, size: f64, color: &str) -> Element {
+    let k = size / 16.0;
+    let t = format!("translate({} {}) scale({k})", x - size / 2.0, y - size / 2.0);
+    let w = (1.9 / k).min(2.6);
+    rsx! {
+        g { transform: "{t}", fill: "none", stroke: "{color}", stroke_width: "{w}", stroke_linecap: "round", stroke_linejoin: "round", class: "fx-nohit",
+            match g {
+                // A page with its corner folded and two lines.
+                Glyph::Doc => rsx! { path { d: "M4 1.5h5.5L13 5v9.5H4z M9.5 1.5V5H13 M6.5 8.5h4 M6.5 11.5h4" } },
+                // A magnifier.
+                Glyph::Search => rsx! { circle { cx: "7", cy: "7", r: "4.5" } path { d: "M10.5 10.5L14.5 14.5" } },
+                // A pencil.
+                Glyph::Edit => rsx! { path { d: "M2.5 13.5l1-3.8 7.8-7.8 2.8 2.8-7.8 7.8z M9.6 3.6l2.8 2.8" } },
+                // A prompt: > and _.
+                Glyph::Run => rsx! { path { d: "M2.5 4l4 4-4 4 M8.5 12.5h5" } },
+                // A globe.
+                Glyph::Web => rsx! { circle { cx: "8", cy: "8", r: "6.2" } path { d: "M1.8 8h12.4 M8 1.8c-2.2 2.4-2.2 10 0 12.4 M8 1.8c2.2 2.4 2.2 10 0 12.4" } },
+                // A plug.
+                Glyph::Plug => rsx! { path { d: "M5.5 1.5v3.5 M10.5 1.5v3.5 M3.5 5h9v3a4.5 4.5 0 0 1-9 0z M8 12.5v2.5" } },
+                // A person.
+                Glyph::Agent => rsx! { circle { cx: "8", cy: "5", r: "2.8" } path { d: "M2.5 14.5c.6-3 2.8-4.6 5.5-4.6s4.9 1.6 5.5 4.6" } },
+                // Three dots.
+                Glyph::Other => rsx! { path { d: "M4 8h.1 M8 8h.1 M12 8h.1" } },
+            }
+        }
+    }
+}
+
+/// Whether two Calls in a row read as the same: the same name, verdict, and words followed.
+fn same_call(a: &crate::flow::Call, b: &crate::flow::Call) -> bool {
+    a.title == b.title && a.blocked == b.blocked && a.warn == b.warn && a.via.is_some() == b.via.is_some()
+}
+
+/// Calls in a row that read the same, as one: each first one and how many it stands for.
+fn runs(calls: &[crate::flow::Call], idx: impl Iterator<Item = usize>) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for i in idx {
+        match out.last_mut() {
+            Some((f, n)) if same_call(&calls[*f], &calls[i]) => *n += 1,
+            _ => out.push((i, 1)),
+        }
+    }
+    out
+}
+
+/// A turn's items with the same Call in a row as one: index, item, and how many it stands for.
+fn item_runs(t: &Turn) -> Vec<(usize, &Item, usize)> {
+    let mut out: Vec<(usize, &Item, usize)> = Vec::new();
+    for (gi, item) in t.items.iter().enumerate() {
+        if let (Item::Call(ci), Some((_, Item::Call(prev), n))) = (item, out.last_mut())
+            && same_call(&t.calls[*prev], &t.calls[*ci])
+        {
+            *n += 1;
+            continue;
+        }
+        out.push((gi, item, 1));
+    }
+    out
+}
+
+/// A Call's row in a turn's card: its verdict, name (with the tool for one folded in a
+/// group), a "글" chip when it followed words read, and its time. Picking it picks the Call.
+fn call_row(c: &crate::flow::Call, key: String, picked: Option<i64>, mut state: AppState, inner: bool, times: usize) -> Element {
+    let seq = c.seq;
+    let cls = format!(
+        "fx-item call{}{}{}",
+        if c.blocked { " red" } else { "" },
+        if picked == Some(seq) { " picked" } else { "" },
+        if inner { " inner" } else { "" }
+    );
+    let icon = if c.blocked { blocked_icon(13.0) } else if c.warn { warn_icon(13.0) } else { check_icon() };
+    rsx! {
+        div {
+            key: "{key}",
+            class: "{cls}",
+            title: "{c.arg}",
+            onclick: move |_| state.selected.set(Selection::Node(seq)),
+            {icon}
+            span { class: "glyph", title: "{c.glyph.name()}",
+                svg { width: "14", height: "14", view_box: "0 0 14 14", {glyph(c.glyph, 7.0, 7.0, 13.0, c.tone.color())} }
+            }
+            span { class: "ttl", "{c.title}" }
+            if times > 1 { span { class: "times", "×{times}" } }
+            if inner { span { class: "tool", "{c.tool}" } }
+            if c.via.is_some() { span { class: "fx-text-chip", "글" } }
+            span { class: "tm", "{hm(c.at)}" }
         }
     }
 }
@@ -1130,9 +1265,6 @@ fn LineMap(
     flow: Arc<Flow>,
     turns: Vec<usize>,
     turn: Signal<usize>,
-    zoom: f64,
-    /// Where the line asks for less zoom, once, when a turn and its Call do not fit the view.
-    zoom_to: Signal<f64>,
     detail: Signal<bool>,
     /// How much of the view's right side a card covers.
     covered: f64,
@@ -1140,33 +1272,28 @@ fn LineMap(
     let mut state = use_context::<AppState>();
     let mut detail = detail;
     let f = &flow;
-    let line = f.line(&turns);
-    let t = turn().min(f.turns.len() - 1);
-    let mut open_id = use_signal(|| None::<String>);
+    // The groups opened by hand into their Calls, by (turn, item).
+    let mut opened = use_signal(HashSet::<(usize, usize)>::new);
     let mut size = use_signal(|| (0.0_f64, 0.0_f64));
-    let mut scroll = use_signal(|| 0.0_f64);
-    let mut drag = use_signal(|| None::<(f64, f64, bool)>);
-    let mut dragged = use_signal(|| false);
+    // The line folds into rows as wide as the view, so it is read down rather than across.
+    let wrap = (size().0 - covered - 180.0).max(520.0);
+    let line = f.line_open(&turns, &opened(), wrap);
+    let t = turn().min(f.turns.len() - 1);
+    // The turn whose heading is opened to its whole intent and the person's own words.
+    let mut head_open = use_signal(|| None::<usize>);
+    // The turn whose answer is opened to what the agent said, whole.
+    let mut say_open = use_signal(|| None::<usize>);
+    // The branch whose cause is opened to the words read, whole.
+    let mut cause_open = use_signal(|| None::<usize>);
+    // Whether the way back from the Call picked to what told it is drawn: the passages from it to
+    // the station whose output it followed, from that one to its own, and so on up.
+    let mut trace_on = use_signal(|| false);
     let picked = match (state.selected)() {
         Selection::Node(seq) => Some(seq),
         Selection::None => None,
     };
     let (w_all, h) = size();
-    // Framing keeps to the part of the view no card covers; panning still reaches all of it.
-    let w = (w_all - covered).max(w_all * 0.4);
-    let (lw, lh) = (line.width * zoom, line.height * zoom);
-    let max_scroll = (lw - w).max(0.0);
-    let clamp = move |v: f64| v.clamp(0.0, max_scroll);
-
-    // A turn picked is brought to the left fifth of the view.
-    let mark_x = line.marks.iter().find(|m| m.turn == t).map(|m| m.x);
-    let framed = use_signal(|| None::<(usize, u64, Option<i64>)>);
-    // The turn last framed whole, and whether a Call was picked in it then.
-    let fitted = use_signal(|| None::<(usize, bool)>);
-    // A move the map makes itself glides; one the hand makes follows at once.
-    let mut glide = use_signal(|| false);
-    let zkey = (zoom * 1000.0) as u64;
-    // A Call picked further on than the view reaches is brought into it.
+    let framed = use_signal(|| None::<(usize, Option<i64>, u64)>);
     // A Call folded into a group is found at the group.
     let in_group = |s: &Stop, seq: i64| {
         matches!(
@@ -1180,79 +1307,85 @@ fn LineMap(
             .find(|s| s.turn == t && in_group(s, seq))
             .cloned()
     });
-    let target_x = picked
+    let target_at = picked
         .and_then(|seq| {
             line.stops
                 .iter()
-                .find(|s| s.seq == Some(seq) && s.turn == t)
+                .find(|s| s.is(seq) && s.turn == t)
         })
         .or(grouped.as_ref())
-        .map(|s| s.x);
-    if let Some(mx) = mark_x
-        && w > 0.0
-        && *framed.peek() != Some((t, zkey, picked))
-    {
-        // Room kept left of the turn's start (its pin) and right of the Call (its name).
-        const LM: f64 = 60.0;
-        const RM: f64 = 200.0;
-        // The first time a turn and its Call are framed, zoom out so both its start and the
-        // Call show, as far as the zoom goes down. A Call picked after that in the same turn is
-        // a step looked into, as a route finder zooms to a leg: it comes to the middle, at
-        // full size.
-        let mut fitted = fitted;
-        let first = match *fitted.peek() {
-            Some((ft, had)) => ft != t || (!had && picked.is_some()),
-            None => true,
-        };
-        let step = !first && target_x.is_some();
-        let mut zoom_to = zoom_to;
-        if first {
-            fitted.set(Some((t, picked.is_some())));
-            if let Some(tx) = target_x.filter(|&tx| tx > mx) {
-                let fit = ((w - LM - RM) / (tx - mx)).clamp(0.7, 1.0);
-                if fit < zoom - 0.01 {
-                    zoom_to.set(fit);
-                }
-            }
-        } else if step && (*framed.peek()).map(|f| f.2) != Some(picked) && zoom < 0.99 {
-            zoom_to.set(1.0);
-        }
-        let mut framed = framed;
-        framed.set(Some((t, zkey, picked)));
-        // A line that fits the view is shown whole, from its start.
-        let mut to = if lw <= w { 0.0 } else { mx * zoom - w * 0.2 };
-        if let Some(tx) = target_x
-            && tx * zoom - to > w - RM
-        {
-            // The turn's start at the left when the Call still shows; else only as far as the
-            // Call takes, so as much of the start stays in view.
-            to = if (tx - mx) * zoom <= w - LM - RM {
-                mx * zoom - LM
-            } else {
-                tx * zoom - (w - RM)
-            };
-        }
-        if let Some(tx) = target_x.filter(|_| step) {
-            to = tx * zoom - w * 0.5;
-        }
-        glide.set(true);
-        scroll.set(to.clamp(0.0, max_scroll));
-    }
-
-    let open_stop = open_id().and_then(|id| {
-        line.stops
-            .iter()
-            .find(|s| s.id == id && s.turn == t)
-            .cloned()
+        .map(|s| (s.x, s.y));
+    // A turn or a Call picked is brought into view by the page's own mover (pan.js).
+    let mark_at = line.marks.iter().find(|m| m.turn == t).map(|m| {
+        let (x, y, w) = m.zones.first().map_or((m.x, m.y - 206.0, 0.0), |z| (z.0, z.1, z.2));
+        (x, y, w, m.rev)
     });
+    let lkey = (line.width as u64) << 20 ^ line.height as u64;
+    if let Some((mx, my, mw, rev)) = mark_at
+        && h > 0.0
+        && *framed.peek() != Some((t, picked, lkey))
+    {
+        let mut framed = framed;
+        framed.set(Some((t, picked, lkey)));
+        let (tx, ty) = target_at.map_or(("null".to_owned(), "null".to_owned()), |(x, y)| (x.to_string(), y.to_string()));
+        document::eval(&format!(
+            "{PAN_JS}\nrequestAnimationFrame(() => fxMap.frame({mx}, {my}, {tx}, {ty}, {rev}, {mw}));"
+        ));
+    }
+    let _ = w_all;
+
+    // The icons this line uses, for its legend; the request, answers, the words' branch and
+    // the verdicts around them.
+    let mut glyphs: Vec<Glyph> = Vec::new();
+    for s in &line.stops {
+        if let Some(g) = s.glyph
+            && !glyphs.contains(&g)
+        {
+            glyphs.push(g);
+        }
+    }
+    glyphs.sort_by_key(|g| Glyph::ALL.iter().position(|a| a == g).unwrap_or(9));
+    let has_ask = line.stops.iter().any(|s| s.tone == Tone::Ask);
+    let has_say = line.stops.iter().any(|s| s.kind == Kind::Say);
+    let has_branch = !line.branch_labels.is_empty();
+    // The way back, when it is on: (cause, follower) pairs from the Call picked up its causes.
+    let mut trace: Vec<(i64, i64)> = Vec::new();
+    if trace_on() {
+        let mut cur = picked;
+        let mut seen = HashSet::new();
+        while let Some(q) = cur.filter(|q| seen.insert(*q)) {
+            let by = f.call(q).and_then(|c| c.by);
+            if let Some(b) = by {
+                trace.push((b, q));
+            }
+            cur = by;
+        }
+    }
+    // The quotes shown (each over its stretch of the lower track; one tied to Calls only when
+    // one of them is picked), each moved down under any shown before it that it would cover.
+    let mut quote_y: HashMap<usize, f64> = HashMap::new();
+    let mut placed: Vec<(f64, f64, f64)> = Vec::new();
+    for (bi, b) in line.branch_labels.iter().enumerate() {
+        if !(b.about.is_empty() || picked.is_some_and(|p| b.about.contains(&p))) {
+            continue;
+        }
+        let mut y = b.qy;
+        while placed.iter().any(|&(x0, x1, py)| (py - y).abs() < 58.0 && x0 < b.qx + b.qw && x1 > b.qx) {
+            y += 62.0;
+        }
+        placed.push((b.qx, b.qx + b.qw, y));
+        quote_y.insert(bi, y);
+    }
+    let has_block = line.stops.iter().any(|s| s.kind == Kind::Blocked);
+    let has_warn = line.stops.iter().any(|s| s.kind == Kind::Warn);
     let target = picked.and_then(|seq| {
         line.stops
             .iter()
-            .find(|s| s.seq == Some(seq) && s.turn == t && s.kind != Kind::Transfer)
+            .find(|s| s.is(seq) && s.turn == t && s.kind != Kind::Transfer)
             .or_else(|| {
                 line.stops
                     .iter()
-                    .find(|s| s.seq == Some(seq) && s.turn == t)
+                    .find(|s| s.is(seq) && s.turn == t)
             })
             .cloned()
             .or(grouped.clone())
@@ -1260,64 +1393,58 @@ fn LineMap(
     let col = move |n: usize| if n == t { LINE_COLOR } else { LINE_MUTED };
     let mut segs = line.segs.clone();
     segs.sort_by_key(|s| s.turn == t);
-    let top = ((h - lh) / 2.0).max(0.0);
-    let x0 = scroll().min(max_scroll);
-    let moving = if drag().is_some_and(|d| d.2) {
-        "fx-line dragging"
-    } else if glide() {
-        "fx-line glide"
-    } else {
-        "fx-line"
-    };
 
     rsx! {
         div {
-            class: "{moving}",
+            id: "fx-line",
+            class: "fx-line",
             onresize: move |e| {
                 if let Ok(b) = e.get_border_box_size() {
                     size.set((b.width, b.height));
                 }
             },
-            onwheel: move |e| {
-                e.prevent_default();
-                glide.set(false);
-                let d = e.delta().strip_units();
-                let cur = *scroll.peek();
-                scroll.set(clamp(cur + d.x + d.y));
+            onmounted: move |_| {
+                document::eval(&format!("{PAN_JS}\nfxMap.attach();"));
             },
-            onmousedown: move |e| {
-                let p = e.client_coordinates();
-                glide.set(false);
-                drag.set(Some((p.x, *scroll.peek(), false)));
-                dragged.set(false);
-            },
-            onmousemove: move |e| {
-                let Some((x, s0, moved)) = *drag.peek() else { return };
-                let dx = e.client_coordinates().x - x;
-                if moved || dx.abs() > super::metro::CLICK_SLOP {
-                    drag.set(Some((x, s0, true)));
-                    dragged.set(true);
-                    scroll.set(clamp(s0 - dx));
-                }
-            },
-            onmouseup: move |_| drag.set(None),
-            onmouseleave: move |_| drag.set(None),
+            // The map and what opens over it, moved and scaled together by the page (pan.js);
+            // nothing here sets its transform, so drawing it again does not undo a move.
+            div { id: "fx-layer", class: "fx-layer",
             svg {
                 class: "fx-line-svg",
-                width: "{lw}",
-                height: "{lh}",
+                width: "{line.width}",
+                height: "{line.height}",
                 view_box: "0 0 {line.width} {line.height}",
-                style: "transform: translate({-x0}px, {top}px)",
-                // The turn picked: a pale band under its stretch.
-                for (i, s) in line.segs.iter().enumerate().filter(|(_, s)| s.turn == t) {
-                    path {
-                        key: "band{i}",
-                        d: "{s.d}",
-                        fill: "none",
-                        stroke: "#eceef2",
-                        stroke_width: if s.branch { "44" } else { "64" },
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
+                // Each turn a zone of its own: the picked one tinted under a bar in the line's
+                // colour, the others alternately faint, a dashed line between them.
+                for (i, m) in line.marks.iter().enumerate() {
+                    {
+                        let on = m.turn == t;
+                        // Only the turn picked is tinted; the others are outlines.
+                        let fill = if on { "#f3f4f6" } else { "#ffffff" };
+                        let _ = i;
+                        let n = m.turn;
+                        rsx! {
+                            g { key: "zone{n}",
+                                for (zi, &(zx, zy, zw, zh)) in m.zones.iter().enumerate() {
+                                    {
+                                        let fl = flow.clone();
+                                        rsx! {
+                                            rect {
+                                                key: "{zi}",
+                                                x: "{zx}", y: "{zy}", width: "{zw}", height: "{zh}", rx: "14",
+                                                fill: "{fill}",
+                                                stroke: if on { "#e4e4e7" } else { "#f0f0f2" },
+                                                class: "fx-hit",
+                                                onclick: move |_| select_turn(turn, state, &fl, n),
+                                            }
+                                        }
+                                    }
+                                }
+                                if on && let Some(&(zx, zy, zw, _)) = m.zones.first() {
+                                    rect { x: "{zx}", y: "{zy}", width: "{zw}", height: "4", rx: "2", fill: LINE_COLOR, class: "fx-nohit" }
+                                }
+                            }
+                        }
                     }
                 }
                 if let Some(tg) = target.as_ref().filter(|s| !s.route.is_empty()) {
@@ -1339,21 +1466,37 @@ fn LineMap(
                                 stroke_width: "60",
                                 style: "pointer-events: stroke",
                                 class: "fx-hit",
-                                onclick: move |_| if !dragged() { select_turn(turn, state, &fl, n) },
+                                onclick: move |_| select_turn(turn, state, &fl, n),
                             }
                         }
                     }
                 }
-                for (i, s) in segs.iter().enumerate() {
+                // A passage shows only for the Call picked: the one into it, or those out of it.
+                for (i, s) in segs.iter().enumerate().filter(|(_, s)| !s.link || trace.iter().any(|&(c, f)| s.about.contains(&c) && s.about.contains(&f))) {
                     {
+                        // Under the coloured stretches the line is grey: where it runs on past a
+                        // turn's last station nothing was done.
                         let c = if s.branch {
                             if s.turn == t { TEXT_COLOR } else { TEXT_MUTED }
                         } else {
-                            col(s.turn)
+                            LINE_MUTED
                         };
                         rsx! {
                             g { key: "seg{i}", class: "fx-nohit",
-                                path { d: "{s.d}", fill: "none", stroke: "{c}", stroke_width: "6", stroke_linecap: "round", stroke_linejoin: "round" }
+                                if s.link {
+                                    // A passage from the station whose output was read to the
+                                    // Call that followed it: thin, under the line, not ridden.
+                                    path { d: "{s.d}", fill: "none", stroke: "{c}", stroke_width: "2.5", stroke_dasharray: if s.unsure { "5 5" } else { "none" }, stroke_linecap: "round", stroke_linejoin: "round", opacity: "0.9" }
+                                    path { d: "{arrow_head(&s.d)}", fill: "{c}" }
+                                } else if s.ret {
+                                    // The way back to the next row: faint and dashed, not a stretch ridden.
+                                    path { d: "{s.d}", fill: "none", stroke: "#c9ccd2", stroke_width: "3", stroke_dasharray: "2 9", stroke_linecap: "round", stroke_linejoin: "round" }
+                                } else if s.unsure {
+                                    // A branch the engine was less than even sure of.
+                                    path { d: "{s.d}", fill: "none", stroke: "{c}", stroke_width: "6", stroke_dasharray: "10 7", stroke_linecap: "butt", stroke_linejoin: "round" }
+                                } else {
+                                    path { d: "{s.d}", fill: "none", stroke: "{c}", stroke_width: "6", stroke_linecap: "round", stroke_linejoin: "round" }
+                                }
                                 if let Some((ex, ey)) = s.end {
                                     line { x1: "{ex}", x2: "{ex}", y1: "{ey - 12.0}", y2: "{ey + 12.0}", stroke: "{c}", stroke_width: "4" }
                                 }
@@ -1361,15 +1504,43 @@ fn LineMap(
                         }
                     }
                 }
+                // The main line in the colours of what was done along it: each stretch the
+                // colour of the station it reaches. Other turns keep them, faint.
+                for (i, ts) in line.tones.iter().enumerate() {
+                    {
+                        let op = if ts.turn == t { "1" } else { "0.28" };
+                        let d = ts.d.clone();
+                        rsx! {
+                            path { key: "tone{i}", class: "fx-nohit", d: "{d}", fill: "none", stroke: ts.tone.color(), stroke_width: "7", stroke_linecap: "round", opacity: "{op}" }
+                        }
+                    }
+                }
+                // Which way the line is read: small arrows on it.
+                for (i, &(ax, ay, deg)) in line.arrows.iter().enumerate() {
+                    path {
+                        key: "arrow{i}",
+                        class: "fx-nohit",
+                        d: "M-1.8 -2.8 L1.6 0 L-1.8 2.8",
+                        transform: "translate({ax} {ay}) rotate({deg})",
+                        fill: "none",
+                        stroke: "#fff",
+                        stroke_width: "1.5",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        opacity: "0.95",
+                    }
+                }
                 for s in line.stops.iter().cloned() {
                     {
                         let color = if s.branch {
                             if s.turn == t { TEXT_COLOR } else { "#c9c2dd" }
+                        } else if s.turn == t {
+                            s.tone.color()
                         } else {
                             col(s.turn)
                         };
                         let sel = target.as_ref().is_some_and(|tg| tg.id == s.id);
-                        let open = open_stop.as_ref().is_some_and(|o| o.id == s.id);
+                        let open = s.group.is_some_and(|gi| opened().contains(&(s.turn, gi)));
                         let fl = flow.clone();
                         let st = s.clone();
                         rsx! {
@@ -1381,71 +1552,119 @@ fn LineMap(
                                 detail: s.turn == t,
                                 open,
                                 onsel: move |_| {
-                                    if dragged() { return; }
                                     select_turn(turn, state, &fl, st.turn);
-                                    if st.group.is_some() {
-                                        open_id.set(if open { None } else { Some(st.id.clone()) });
+                                    if st.kind == Kind::Say {
+                                        say_open.set(if say_open() == Some(st.turn) { None } else { Some(st.turn) });
+                                    } else if let Some(gi) = st.group {
+                                        // A group opens into its Calls on the line itself, and
+                                        // closes again from its head.
+                                        let mut o = opened.write();
+                                        if !o.remove(&(st.turn, gi)) {
+                                            o.insert((st.turn, gi));
+                                        }
                                     } else if let Some(seq) = st.seq {
                                         state.selected.set(Selection::Node(seq));
                                         detail.set(true);
-                                        open_id.set(None);
                                     }
                                 },
                             }
                         }
                     }
                 }
+                // A zone's heading: the turn and what it was for, the intent the agent wrote (else
+                // the request) cut to its gist; the stations under it are what the agent did.
+                // Clicked, it opens to the intent whole and the person's own words.
                 for m in line.marks.iter() {
                     {
-                        let chars = ((m.avail - 70.0) / 14.0).floor().max(0.0) as usize;
-                        let text = if chars < 3 {
-                            String::new()
-                        } else if m.text.chars().count() > chars {
-                            format!("{}…", m.text.chars().take(chars - 1).collect::<String>())
-                        } else {
-                            m.text.clone()
-                        };
                         let on = m.turn == t;
                         let n = m.turn;
                         let fl = flow.clone();
-                        let (bg, edge, ink, ink2, fw) = if on {
-                            (LINE_COLOR, LINE_COLOR, "#fff", "#1f2125", "600")
-                        } else {
-                            ("#fff", "#c9ccd2", "#6b7079", "#9a9ea6", "400")
+                        let (hx, hy, hw, _) = m.zones.first().copied().unwrap_or((m.x - 70.0, m.y - 206.0, 200.0, 0.0));
+                        let w = (hw - 28.0).max(60.0);
+                        let tt = &f.turns[n];
+                        let who = match (tt.agent.is_some(), tt.intent.is_some()) {
+                            (true, _) => "에이전트 보고",
+                            (false, true) => "요청 의도",
+                            (false, false) => "요청",
                         };
+                        let heading = m.head.clone();
+                        let opened = head_open() == Some(n);
+                        let ask = if f.turns[n].agent.is_some() { "report" } else { "ask" };
+                        let side = if m.rev { " rev" } else { "" };
+                        let cls = if on { format!("fx-turnhead {ask}{side} on") } else { format!("fx-turnhead {ask}{side}") };
                         rsx! {
-                            g {
-                                key: "mark{n}",
-                                class: "fx-hit",
-                                transform: "translate({m.x - 12.0} {m.y - 92.0})",
-                                onclick: move |_| if !dragged() { select_turn(turn, state, &fl, n) },
-                                rect { width: "46", height: "24", rx: "5", fill: "{bg}", stroke: "{edge}" }
-                                text { x: "23", y: "16.5", text_anchor: "middle", font_size: "13", font_weight: "700", fill: "{ink}", "턴 {n + 1}" }
-                                if !text.is_empty() {
-                                    text { x: "54", y: "17", font_size: "14", font_weight: "{fw}", fill: "{ink2}", "{text}" }
+                            foreignObject {
+                                key: "head{n}",
+                                x: "{hx + 14.0}", y: "{hy + 14.0}", width: "{w}", height: "128",
+                                div {
+                                    class: "{cls}",
+                                    title: "눌러서 사용자 프롬프트 보기",
+                                    onclick: move |_| {
+                                        select_turn(turn, state, &fl, n);
+                                        head_open.set(if opened { None } else { Some(n) });
+                                    },
+                                    div { class: "top",
+                                        span { class: "no", "턴 {n + 1}" }
+                                        span { class: "who", "{who}" }
+                                        span { class: "more", if opened { "닫기 ▴" } else { "원문 ▾" } }
+                                    }
+                                    div { class: "rq", "{heading}" }
+                                    if let Some(res) = m.result.as_ref() {
+                                        div { class: "res", "→ {res}" }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                for b in line.branch_labels.iter() {
+                // A quote over each stretch on the lower track; one tied to Calls only when picked.
+                for (bi, b) in line.branch_labels.iter().enumerate().filter(|(i, _)| quote_y.contains_key(i)) {
                     {
+                        let qy = quote_y[&bi];
                         let on = b.turn == t;
                         let (op, fill) = if on { ("1", TEXT_COLOR) } else { ("0.55", "#c9c2dd") };
+                        let opened = cause_open() == Some(bi);
                         rsx! {
-                            g { key: "bl{b.turn}-{b.x}", transform: "translate({b.x} {b.y - 12.0})", opacity: "{op}",
-                                rect { width: "26", height: "24", rx: "5", fill: "{fill}" }
-                                text { x: "13", y: "16.5", text_anchor: "middle", font_size: "13", font_weight: "700", fill: "#fff", "글" }
-                                text { x: "33", y: "17", font_size: "13.5", fill: TEXT_COLOR, "{b.text}" }
+                            if b.end {
+                                g { key: "bl{b.turn}-{b.x}", transform: "translate({b.x} {b.y - 12.0})", opacity: "{op}",
+                                    // On a row running left the badge and words read leftwards.
+                                    rect { x: if b.rev { "-26" } else { "0" }, width: "26", height: "24", rx: "5", fill: "{fill}" }
+                                    text { x: if b.rev { "-13" } else { "13" }, y: "16.5", text_anchor: "middle", font_size: "13", font_weight: "700", fill: "#fff", "글" }
+                                    text { x: if b.rev { "-33" } else { "33" }, y: "17", text_anchor: if b.rev { "end" } else { "start" }, font_size: "13.5", fill: TEXT_COLOR, "{b.text}" }
+                                }
+                            }
+                            // What told the branch, where it bends away: the error or output read,
+                            // and how sure the engine was. Clicked, it opens the words whole.
+                            if let Some(c) = b.cause.as_ref() {
+                                {
+                                    let kind = if c.error { "오류" } else { "출력" };
+                                    let cls = format!("fx-cause{}{}", if c.error { " err" } else { "" }, if on { " on" } else { "" });
+                                    let quote = c.quote.clone().unwrap_or_else(|| "결과 보기".into());
+                                    let p = (c.p * 100.0).round();
+                                    rsx! {
+                                        foreignObject { key: "cq{bi}", x: "{b.qx}", y: "{qy}", width: "{b.qw}", height: "60",
+                                            div {
+                                                class: "{cls}",
+                                                title: "눌러서 원인 글 전체 보기",
+                                                onclick: move |_| cause_open.set(if opened { None } else { Some(bi) }),
+                                                div { class: "row",
+                                                    span { class: "k", "{kind}" }
+                                                    span { class: "q", "“{quote}”" }
+                                                    span { class: "p", "{p}%" }
+                                                }
+                                                // The station whose output it was.
+                                                div { class: "from", "← {b.text}의 {kind}" }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-                if let Some(os) = open_stop.as_ref() {
-                    {group_card(f, os, line.width, open_id)}
-                }
+                // Before the first station, pointing at it, clear of the names over the line.
                 if let Some(first) = line.stops.first() {
-                    {pin(first.x, first.y - 14.0, "출발", GREEN)}
+                    {pin_left(first.x - 14.0, first.y, "출발", GREEN)}
                 }
                 if let Some(tg) = target.as_ref().filter(|s| s.kind != Kind::Start) {
                     {
@@ -1459,69 +1678,178 @@ fn LineMap(
                     }
                 }
             }
+            // A heading opened: the intent whole and the person's prompt as they typed it.
+            if let Some(m) = head_open().and_then(|n| line.marks.iter().find(|m| m.turn == n)) {
+                {
+                    let tt = &f.turns[m.turn];
+                    // Kept in the part of the view no card covers.
+                    let (hx, hy) = m.zones.first().map_or((m.x, m.y), |z| (z.0, z.1));
+                    // In the map's own coordinates: it moves and scales with the map; on a row
+                    // running left it opens from the heading's right edge.
+                    let left = if m.rev {
+                        m.zones.first().map_or(hx, |z| z.0 + z.2) - 354.0
+                    } else {
+                        hx + 14.0
+                    };
+                    let y = hy + 144.0;
+                    let n = m.turn;
+                    let asker = if tt.agent.is_some() { "에이전트 보고" } else { "사용자 프롬프트" };
+                    rsx! {
+                        div {
+                            class: "fx-prompt",
+                            style: "left: {left.max(8.0)}px; top: {y}px",
+                            onmousedown: move |e| e.stop_propagation(),
+                            onwheel: move |e| e.stop_propagation(),
+                            div { class: "hd",
+                                span { class: "no", "턴 {n + 1}" }
+                                button { class: "x", title: "닫기", onclick: move |_| head_open.set(None), "✕" }
+                            }
+                            if let Some(intent) = tt.intent.clone() {
+                                div { class: "k", "에이전트가 적은 의도" }
+                                div { class: "intent", "{intent}" }
+                            }
+                            div { class: "k", "{asker}" }
+                            div { class: "said", "{tt.req}" }
+                        }
+                    }
+                }
+            }
+            // An answer opened: the agent's last message whole, and before it what else it said.
+            if let Some(st) = say_open().and_then(|n| line.stops.iter().find(|s| s.turn == n && s.kind == Kind::Say)) {
+                {
+                    let tt = &f.turns[st.turn];
+                    let left = st.x - 40.0;
+                    let y = st.y + 44.0;
+                    let n = st.turn;
+                    let last = tt.said.last().map(|m| crate::flow::plain_words(&m.text)).unwrap_or_default();
+                    let earlier: Vec<String> = tt.said.iter().rev().skip(1).rev().map(|m| crate::flow::plain_words(&m.text)).collect();
+                    let when = hm(tt.said.last().and_then(|m| m.at));
+                    rsx! {
+                        div {
+                            class: "fx-prompt say",
+                            style: "left: {left.max(8.0)}px; top: {y}px",
+                            onmousedown: move |e| e.stop_propagation(),
+                            onwheel: move |e| e.stop_propagation(),
+                            div { class: "hd",
+                                span { class: "no", "턴 {n + 1} · 답변" }
+                                span { class: "tm", "{when}" }
+                                button { class: "x", title: "닫기", onclick: move |_| say_open.set(None), "✕" }
+                            }
+                            div { class: "said", "{last}" }
+                            if !earlier.is_empty() {
+                                div { class: "k", "그 전에 한 말 {earlier.len()}개" }
+                                for (i, e) in earlier.iter().enumerate() {
+                                    div { key: "{i}", class: "said faint", "{e}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // A cause opened: the result read, whole, with the paragraph that told the Call.
+            if let Some(b) = cause_open().and_then(|i| line.branch_labels.get(i)) {
+                if let Some(c) = b.cause.clone() {
+                    {
+                        let kind = if c.error { "오류 출력" } else { "도구 출력" };
+                        let p = (c.p * 100.0).round();
+                        let reading = format!("{} · 원인일 확률 {p}%", b.text);
+                        rsx! {
+                            div {
+                                class: "fx-prompt cause",
+                                style: "left: {b.qx}px; top: {quote_y.get(&cause_open().unwrap_or(usize::MAX)).copied().unwrap_or(b.qy) + 58.0}px",
+                                onmousedown: move |e| e.stop_propagation(),
+                                onwheel: move |e| e.stop_propagation(),
+                                div { class: "hd",
+                                    span { class: if c.error { "no err" } else { "no" }, "{kind}" }
+                                    span { class: "tm", "{reading}" }
+                                    button { class: "x", title: "닫기", onclick: move |_| cause_open.set(None), "✕" }
+                                }
+                                blockquote { class: "said quote",
+                                    super::trace::Preview { seq: c.result, paragraph: c.paragraph, lines: true }
+                                }
+                                if c.p < 0.5 {
+                                    div { class: "k", "엔진이 반 넘게 확신하지 못한 원인이에요. 사용자 요청 때문이었을 수도 있어요." }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            }
+            // Showing the way back from the Call picked to what told it.
+            button {
+                class: if trace_on() { "fx-trace on" } else { "fx-trace" },
+                title: "고른 호출이 어떤 출력을 보고 한 일인지 거슬러 올라가는 길을 점선으로 보여 줍니다",
+                onmousedown: move |e| e.stop_propagation(),
+                onclick: move |_| trace_on.toggle(),
+                span { class: "dot" }
+                if trace_on() { "원인 경로 켜짐" } else { "원인 경로" }
+            }
+            // What the colours mean.
+            div { class: "fx-tones", onmousedown: move |e| e.stop_propagation(),
+                if has_ask { span { class: "it", i { class: "sw", style: "background: {Tone::Ask.color()}" } "사용자 요청" } }
+                for g in glyphs.iter().copied() {
+                    span { key: "{g:?}", class: "it",
+                        svg { width: "16", height: "16", view_box: "0 0 16 16", {glyph(g, 8.0, 8.0, 14.0, g.tone().color())} }
+                        "{g.name()}"
+                    }
+                }
+                if has_say { span { class: "it", i { class: "sw", style: "background: {Tone::Say.color()}" } "에이전트 답변" } }
+                if has_branch { span { class: "it", i { class: "sw", style: "background: {TEXT_COLOR}" } "글을 따라감" } }
+                if has_block { span { class: "it red", "✕ 차단" } }
+                if has_warn { span { class: "it amber", "▲ 확인 요청" } }
+            }
         }
     }
 }
 
 fn pin(x: f64, y: f64, label: &str, color: &str) -> Element {
-    let (w, h) = (62.0, 36.0);
-    let tip = format!("M{} {}l7 8 7-8z", x - 7.0, y - 8.0);
+    let (w, h) = (44.0, 23.0);
+    let tip = format!("M{} {}l5 6 5-6z", x - 5.0, y - 6.0);
     rsx! {
         g { class: "fx-nohit",
-            rect { x: "{x - w / 2.0}", y: "{y - h - 8.0}", width: "{w}", height: "{h}", rx: "7", fill: "{color}" }
+            rect { x: "{x - w / 2.0}", y: "{y - h - 6.0}", width: "{w}", height: "{h}", rx: "5", fill: "{color}" }
             path { d: "{tip}", fill: "{color}" }
-            text { x: "{x}", y: "{y - 8.0 - h / 2.0 + 7.0}", text_anchor: "middle", font_size: "19", font_weight: "700", fill: "#fff", "{label}" }
+            text { x: "{x}", y: "{y - 6.0 - h / 2.0 + 4.8}", text_anchor: "middle", font_size: "13", font_weight: "700", fill: "#fff", "{label}" }
+        }
+    }
+}
+
+/// A small head at the end of a passage, pointing up into the Call it leads to: from the path's
+/// last point.
+fn arrow_head(d: &str) -> String {
+    let nums: Vec<f64> = d
+        .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .filter_map(|t| t.parse().ok())
+        .collect();
+    let (Some(&y), Some(&x)) = (nums.last(), nums.get(nums.len().saturating_sub(2))) else {
+        return String::new();
+    };
+    format!("M{} {} L{} {} L{} {}z", x - 5.0, y + 7.0, x + 5.0, y + 7.0, x, y - 1.0)
+}
+
+/// A pin left of its point, its tip pointing right at it.
+fn pin_left(x: f64, y: f64, label: &str, color: &str) -> Element {
+    let (w, h) = (44.0, 23.0);
+    let tip = format!("M{} {}l6 5-6 5z", x - 6.0, y - 5.0);
+    rsx! {
+        g { class: "fx-nohit",
+            rect { x: "{x - 6.0 - w}", y: "{y - h / 2.0}", width: "{w}", height: "{h}", rx: "5", fill: "{color}" }
+            path { d: "{tip}", fill: "{color}" }
+            text { x: "{x - 6.0 - w / 2.0}", y: "{y + 4.8}", text_anchor: "middle", font_size: "13", font_weight: "700", fill: "#fff", "{label}" }
         }
     }
 }
 
 /// A pin under its point, its tip up.
 fn pin_below(x: f64, y: f64, label: &str, color: &str) -> Element {
-    let (w, h) = (62.0, 36.0);
-    let tip = format!("M{} {}l7 -8 7 8z", x - 7.0, y + 8.0);
+    let (w, h) = (44.0, 23.0);
+    let tip = format!("M{} {}l5 -6 5 6z", x - 5.0, y + 6.0);
     rsx! {
         g { class: "fx-nohit",
-            rect { x: "{x - w / 2.0}", y: "{y + 8.0}", width: "{w}", height: "{h}", rx: "7", fill: "{color}" }
+            rect { x: "{x - w / 2.0}", y: "{y + 6.0}", width: "{w}", height: "{h}", rx: "5", fill: "{color}" }
             path { d: "{tip}", fill: "{color}" }
-            text { x: "{x}", y: "{y + 8.0 + h / 2.0 + 7.0}", text_anchor: "middle", font_size: "19", font_weight: "700", fill: "#fff", "{label}" }
-        }
-    }
-}
-
-/// An opened group: the tools it ran, each with a bar of how often.
-fn group_card(f: &Flow, s: &Stop, width: f64, mut open_id: Signal<Option<String>>) -> Element {
-    let Some(Item::Group { tools, .. }) = s.group.and_then(|g| f.turns[s.turn].items.get(g)) else {
-        return rsx! {};
-    };
-    let mut rows: Vec<(String, usize)> = tools.iter().take(4).cloned().collect();
-    let rest: usize = tools.iter().skip(4).map(|t| t.1).sum();
-    if rest > 0 {
-        rows.push(("기타".into(), rest));
-    }
-    let max = rows.iter().map(|r| r.1).max().unwrap_or(1) as f64;
-    let (w, h) = (240.0, 46.0 + rows.len() as f64 * 26.0);
-    let below = s.up == Some(true);
-    let x = (s.x - w / 2.0).max(20.0).min(width - w - 20.0);
-    let y = if below { s.y + 22.0 } else { s.y - 22.0 - h };
-    let tip = if below {
-        format!("M{} {}l8 -10 8 10z", s.x - 8.0, y)
-    } else {
-        format!("M{} {}l8 10 8 -10z", s.x - 8.0, y + h)
-    };
-    rsx! {
-        g { class: "fx-hit", onclick: move |_| open_id.set(None),
-            path { d: "{tip}", fill: "#fff", stroke: "#d4d4d8" }
-            rect { x: "{x}", y: "{y}", width: "{w}", height: "{h}", rx: "10", fill: "#fff", stroke: "#d4d4d8" }
-            text { x: "{x + 14.0}", y: "{y + 24.0}", font_size: "13", font_weight: "700", fill: "#1f2125", "{s.label}" }
-            text { x: "{x + w - 14.0}", y: "{y + 24.0}", text_anchor: "end", font_size: "11", fill: "#9a9ea6", "접기 −" }
-            for (i, (name, n)) in rows.iter().enumerate() {
-                g { key: "{name}", transform: "translate({x + 14.0} {y + 44.0 + i as f64 * 26.0})",
-                    text { y: "4", font_size: "12.5", fill: "#3f434b", "{name}" }
-                    rect { x: "70", y: "-6", width: "120", height: "10", rx: "3", fill: "#f1f2f4" }
-                    rect { x: "70", y: "-6", width: "{120.0 * *n as f64 / max}", height: "10", rx: "3", fill: LINE_COLOR, opacity: "0.75" }
-                    text { x: "{w - 28.0}", y: "4", text_anchor: "end", font_size: "12", font_weight: "600", fill: "#3f434b", "{n}" }
-                }
-            }
+            text { x: "{x}", y: "{y + 6.0 + h / 2.0 + 4.8}", text_anchor: "middle", font_size: "13", font_weight: "700", fill: "#fff", "{label}" }
         }
     }
 }
@@ -1539,42 +1867,48 @@ fn LineStop(
 ) -> Element {
     let s = &stop;
     let important = matches!(s.kind, Kind::Warn | Kind::Blocked | Kind::Transfer);
-    let show = !s.label.is_empty() && (detail || important);
-    let minor = s.kind == Kind::Tick;
+    // On a turn not picked only the stations that tell its story keep their names, faint:
+    // what was stopped, interchanges, files changed, and how it ended.
+    let key = important || s.xfer || s.tone == Tone::Change || s.kind == Kind::Say;
+    let show = !s.label.is_empty() && (detail || key);
+    let faint = if detail { "1" } else { "0.55" };
+    let mini = s.kind == Kind::Mini;
+    let minor = s.kind == Kind::Tick || mini;
     let up = s.up == Some(true);
-    let gap = if s.kind == Kind::Transfer { 32.0 } else { 26.0 };
+    let gap = if s.kind == Kind::Transfer { 32.0 } else if mini { 14.0 } else { 26.0 };
+    // A small station's two lines sit closer: its tool, then what it did.
+    let step = if mini { 14.0 } else { 16.0 };
+    // A name moved a tier out stands that much further from the line.
+    let lift = s.tier as f64 * 36.0;
     let ly = if up {
-        s.y - gap - 16.0
+        s.y - gap - step - lift
     } else {
-        s.y + gap + 8.0
+        s.y + gap + 8.0 + lift
     };
-    let sy = if up { s.y - gap } else { s.y + gap + 24.0 };
+    let sy = if up { s.y - gap - lift } else { s.y + gap + 8.0 + step + lift };
     let (x, y) = (s.x, s.y);
     let fill = match s.kind {
+        Kind::Mini => color.as_str(),
         Kind::Blocked => RED,
         Kind::Warn => "#a8790c",
+        Kind::Say => "#6d28d9",
         _ if minor => "#6b7079",
         _ => "#1f2125",
     };
-    let (fs, fw) = if minor {
+    let (fs, fw) = if mini {
+        ("12", "600")
+    } else if minor {
         ("14", "500")
     } else {
         ("15.5", "700")
     };
-    let sub_text = if s.group.is_some() {
-        if open {
-            "접기 −".to_owned()
-        } else {
-            "펼치기 +".to_owned()
-        }
+    // A group says which tools it ran; the sign after them opens it.
+    let (sub_text, sign) = if s.group.is_some() {
+        (s.sub.clone(), if open { " −" } else { " +" })
     } else {
-        s.sub.clone()
+        (s.sub.clone(), "")
     };
-    let sub_fill = if s.group.is_some() {
-        "#3b82f6"
-    } else {
-        "#9a9ea6"
-    };
+    let sub_fill = "#8a8f98";
     let tip = [s.label.as_str(), s.sub.as_str()]
         .iter()
         .filter(|t| !t.is_empty())
@@ -1588,6 +1922,10 @@ fn LineStop(
             onclick: move |e| { e.stop_propagation(); onsel.call(()); },
             title { "{tip}" }
             circle { cx: "{x}", cy: "{y}", r: "20", fill: "transparent" }
+            // A stopped Call whose result also told another: the interchange's ring around it.
+            if s.xfer && s.kind != Kind::Transfer {
+                circle { cx: "{x}", cy: "{y}", r: "16", fill: "none", stroke: TEXT_COLOR, stroke_width: "2.5" }
+            }
             if sel {
                 circle { cx: "{x}", cy: "{y}", r: "19", fill: "{color}", opacity: "0.14" }
                 // A ring that spreads once from the station just picked, to say where it is.
@@ -1597,7 +1935,12 @@ fn LineStop(
                 Kind::Start => rsx! { circle { cx: "{x}", cy: "{y}", r: "10", fill: "#fff", stroke: "{color}", stroke_width: "4" } },
                 Kind::Tick if open => rsx! { circle { cx: "{x}", cy: "{y}", r: "8", fill: "#fff", stroke: "{color}", stroke_width: "3.5" } },
                 Kind::Tick => rsx! { circle { cx: "{x}", cy: "{y}", r: "3", fill: "#fff" } },
-                Kind::Stop => rsx! { circle { cx: "{x}", cy: "{y}", r: "8", fill: "#fff", stroke: "{color}", stroke_width: "3.5" } },
+                Kind::Stop => rsx! {
+                    g {
+                        circle { cx: "{x}", cy: "{y}", r: "12", fill: "#fff", stroke: "{color}", stroke_width: "3" }
+                        if let Some(g) = s.glyph { {glyph(g, x, y, 13.0, &color)} }
+                    }
+                },
                 Kind::Transfer => rsx! {
                     g {
                         rect { x: "{x - 9.0}", y: "{y - 15.0}", width: "18", height: "30", rx: "9", fill: "#fff", stroke: "#1f2125", stroke_width: "3" }
@@ -1618,11 +1961,34 @@ fn LineStop(
                         path { d: "{x_d}", stroke: "#fff", stroke_width: "2.4", stroke_linecap: "round" }
                     }
                 },
+                // A Call let through in an opened group: a small ring in its tool's colour.
+                // A small station: its tool's icon in a ring of its colour.
+                Kind::Mini => rsx! {
+                    g {
+                        circle { cx: "{x}", cy: "{y}", r: "9", fill: "#fff", stroke: "{color}", stroke_width: "2.2" }
+                        if let Some(g) = s.glyph { {glyph(g, x, y, 10.0, &color)} }
+                    }
+                },
+                // A speech bubble in the answer's violet, three dots in it.
+                Kind::Say => rsx! {
+                    g {
+                        rect { x: "{x - 12.0}", y: "{y - 10.0}", width: "24", height: "18", rx: "6", fill: "{color}", stroke: "#fff", stroke_width: "2" }
+                        path { d: "M{x - 4.0} {y + 7.0}l-3 6 8-5z", fill: "{color}" }
+                        circle { cx: "{x - 5.5}", cy: "{y - 1.0}", r: "1.6", fill: "#fff" }
+                        circle { cx: "{x}", cy: "{y - 1.0}", r: "1.6", fill: "#fff" }
+                        circle { cx: "{x + 5.5}", cy: "{y - 1.0}", r: "1.6", fill: "#fff" }
+                    }
+                },
             }
             if show {
-                text { x: "{x}", y: "{ly}", text_anchor: "middle", font_size: "{fs}", font_weight: "{fw}", fill: "{fill}", "{s.label}" }
-                if detail && !s.sub.is_empty() {
-                    text { x: "{x}", y: "{sy}", text_anchor: "middle", font_size: "11.5", fill: "{sub_fill}", "{sub_text}" }
+                text { x: "{x}", y: "{ly}", text_anchor: "middle", font_size: "{fs}", font_weight: "{fw}", fill: "{fill}", opacity: "{faint}", "{s.label}" }
+                // The line under a name only where it says what the name cannot: a verdict, an
+                // interchange, a group's tools. The rest is in the station's tooltip.
+                if detail && !s.sub.is_empty() && (important || s.xfer || s.group.is_some()) {
+                    text { x: "{x}", y: "{sy}", text_anchor: "middle", font_size: if mini { "10.5" } else { "11.5" }, fill: "{sub_fill}",
+                        "{sub_text}"
+                        if !sign.is_empty() { tspan { fill: "#3b82f6", font_weight: "700", "{sign}" } }
+                    }
                 }
             }
         }
