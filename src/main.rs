@@ -22,10 +22,27 @@ use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 
 fn main() {
     let backend = Arc::new(api::Backend::load());
+    // The first launch opens small, on the setup; the app grows to its full size after it.
+    let setup = backend.needs_setup();
+    let (size, min) = if setup {
+        (ui::SETUP_SIZE, ui::SETUP_SIZE)
+    } else {
+        (ui::WORK_SIZE, ui::WORK_MIN)
+    };
     let window = WindowBuilder::new()
         .with_title("WithHuman Viewer")
-        .with_inner_size(LogicalSize::new(1440.0, 900.0))
-        .with_min_inner_size(LogicalSize::new(1000.0, 620.0));
+        .with_inner_size(LogicalSize::new(size.0, size.1))
+        .with_min_inner_size(LogicalSize::new(min.0, min.1))
+        .with_resizable(!setup);
+    // No title bar: the content runs to the top, the traffic lights over it as in a Mac app.
+    #[cfg(target_os = "macos")]
+    let window = {
+        use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
+        window
+            .with_titlebar_transparent(true)
+            .with_title_hidden(true)
+            .with_fullsize_content_view(true)
+    };
     let head = format!("<meta charset=\"utf-8\"><style>{}</style>", ui::CSS);
     let config = Config::new()
         .with_window(window)

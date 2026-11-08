@@ -106,7 +106,7 @@ pub fn FlowMap() -> Element {
     let mut detail = use_signal(|| true);
     let hovered = use_signal(|| None::<i64>);
     // The session list, opened from the session's name in either level.
-    let mut picking = use_context_provider(|| Picking(Signal::new(false))).0;
+    let mut picking = use_context::<Picking>().0;
     // The turn whose prompt ← and → stopped at: its heading marked, nothing opened over the map.
     let mut head_open = use_context_provider(|| PromptPick(Signal::new(None))).0;
     let opened = use_signal(|| None::<Option<String>>);
@@ -649,7 +649,7 @@ fn route_summary(s: &Summary) -> Element {
 
 /// Whether the session list is open over the map.
 #[derive(Clone, Copy)]
-struct Picking(Signal<bool>);
+pub struct Picking(pub Signal<bool>);
 
 /// The turn whose prompt is the step ← and → are at, if any.
 #[derive(Clone, Copy)]
@@ -664,7 +664,7 @@ enum Step {
 
 /// The session's name, opening the session list to switch to another.
 #[component]
-fn SessionPick(class: &'static str) -> Element {
+pub fn SessionPick(class: &'static str) -> Element {
     let state = use_context::<AppState>();
     let mut picking = use_context::<Picking>().0;
     let current = state.current.read().clone().unwrap_or_default();
