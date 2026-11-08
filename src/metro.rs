@@ -81,6 +81,10 @@ pub struct Source {
     pub result: i64,
     pub paragraph: Option<i64>,
     pub probability: f64,
+    /// The result was the tool failing: its error message told the Call.
+    pub error: bool,
+    /// The words that told it, in a line: the error, else the output's first telling line.
+    pub quote: Option<String>,
     /// The Call whose result it is: the interchange the cause link leaves from.
     pub by: i64,
 }
@@ -131,22 +135,39 @@ impl Station {
                 t.to_owned()
             }
         };
-        let file = clip_file(&place_name(&self.what), 26);
+        // The working folder itself ("."), not a file: say so.
+        let file = match place_name(&self.what).as_str() {
+            "." | "./" | "" => "작업 폴더".to_owned(),
+            name => clip_file(name, 26),
+        };
         match (self.tool.as_str(), self.action) {
             ("Write", _) => format!("{file} 작성"),
             (_, Action::Change) => format!("{file} 수정"),
             (_, Action::Read) => format!("{file} 읽기"),
             ("SubagentHandback", _) => "보고 받음".into(),
             (_, Action::Delegate) => "에이전트에 맡김".into(),
+            // Claude Code loading a tool before it uses it: `select:WebFetch,Read`.
+            ("ToolSearch", _) => match self.what.strip_prefix("select:") {
+                Some(names) => {
+                    let names: Vec<&str> = names.split(',').map(str::trim).filter(|n| !n.is_empty()).collect();
+                    let first = names.first().map_or("", |n| mcp_parts(n).map_or(*n, |(_, op)| op));
+                    match names.len() {
+                        0 => "도구 불러오기".into(),
+                        1 => format!("{} 도구 불러오기", short(first, 16)),
+                        k => format!("{} 외 {} 도구 불러오기", short(first, 14), k - 1),
+                    }
+                }
+                None => format!("‘{}’ 도구 찾기", short(&self.what, 12)),
+            },
             (_, Action::Search) => format!("‘{}’ 찾기", short(&self.what, 12)),
             (_, Action::Run) => {
-                let name = command_name(&self.what);
+                let name = command_label(&self.what);
                 if let Some((_, op)) = mcp_parts(&self.tool) {
                     op.to_owned()
                 } else if name.is_empty() {
                     self.tool.clone()
                 } else {
-                    clip_file(&name, 22)
+                    name
                 }
             }
             _ if self.what.is_empty() => self.tool.clone(),
@@ -216,6 +237,15 @@ pub struct Section {
     pub to: f64,
 }
 
+/// A message the agent showed the person: at the column of the Call after it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Said {
+    pub seq: i64,
+    pub x: f64,
+    pub text: String,
+    pub at: Option<i64>,
+}
+
 /// A turn's request: the first opens the main line, a later one is a turn boundary on it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ask {
@@ -257,6 +287,8 @@ pub struct Metro {
     pub capsules: Vec<Capsule>,
     /// The agent's last message.
     pub last_word: Option<(i64, String)>,
+    /// What the agent said to the person, where it said it.
+    pub says: Vec<Said>,
     pub width: f64,
     pub height: f64,
     /// Each Call's station, folded ones included.
@@ -390,6 +422,135 @@ pub fn section_name(text: &str) -> String {
 /// -n refund.py`, `rm -rf backups`, `make test`), or just the script an interpreter runs
 /// (`migrate.py`). It stops at the first quoted word, redirection or chained command.
 pub fn command_name(command: &str) -> String {
+    let main = main_part(command);
+    match inline_script(main) {
+        Some((lang, code)) => script_name(lang, code),
+        None => command_name_of(main),
+    }
+}
+
+/// A script given inline to its interpreter: `python3 -c "..."`, `node -e '...'`,
+/// `python3 - <<EOF ... EOF`. Its language and its code.
+fn inline_script(command: &str) -> Option<(&'static str, &str)> {
+    let first = command.split_whitespace().next()?;
+    let lang = match file_name(first) {
+        p if p.starts_with("python") => "python",
+        "node" | "deno" | "bun" => "node",
+        "ruby" => "ruby",
+        "perl" => "perl",
+        "bash" | "sh" | "zsh" => "sh",
+        _ => return None,
+    };
+    if let Some(i) = command.find("<<") {
+        let code = command[i..].split_once('\n').map(|(_, c)| c)?;
+        return Some((lang, code));
+    }
+    // `-c` gives python and the shells code; `-e` gives it to node, ruby and perl (python's
+    // `-e` is pip's "editable", not code).
+    let flag = if matches!(lang, "python" | "sh") { " -c " } else { " -e " };
+    let i = command.find(flag)?;
+    let rest = command[i + 4..].trim_start();
+    let q = rest.chars().next()?;
+    let code = if q == '"' || q == '\'' {
+        let body = &rest[1..];
+        body.rfind(q).map_or(body, |j| &body[..j])
+    } else {
+        rest
+    };
+    Some((lang, code))
+}
+
+/// An inline script named by what it works on: the file it names (`python · traj.json`), else
+/// its first call that is not an import (`python · json.load`), else its length.
+fn script_name(lang: &str, code: &str) -> String {
+    // A quoted path or file name, the last one being the most particular.
+    let mut found: Option<&str> = None;
+    for q in ['\'', '"'] {
+        for part in code.split(q).skip(1).step_by(2) {
+            let p = part.trim();
+            let looks = !p.contains(char::is_whitespace)
+                && !p.contains(['{', '}', '%', '\\'])
+                && (p.contains('/') || p.rsplit_once('.').is_some_and(|(a, e)| {
+                    !a.is_empty() && (1..=5).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric())
+                }));
+            if looks && found.is_none_or(|f| p.len() > f.len()) {
+                found = Some(p);
+            }
+        }
+    }
+    if let Some(p) = found {
+        let name = file_name(p.trim_end_matches('/'));
+        return format!("{lang} · {}", clip_file(if name.is_empty() { p } else { name }, 22));
+    }
+    // Else its first call that says something: not an import, not a builtin every script
+    // makes.
+    let skip = ["import ", "from ", "require(", "#", "//", "use "];
+    const PLAIN: [&str; 14] = [
+        "print", "range", "len", "open", "str", "int", "float", "list", "dict", "set", "sorted",
+        "enumerate", "zip", "require",
+    ];
+    let call = code
+        .lines()
+        .map(str::trim)
+        .filter(|l| !skip.iter().any(|k| l.starts_with(k)))
+        .flat_map(|l| {
+            let mut calls = Vec::new();
+            let mut word = String::new();
+            for c in l.chars() {
+                if c.is_alphanumeric() || c == '_' || c == '.' {
+                    word.push(c);
+                } else {
+                    if c == '(' && word.chars().next().is_some_and(char::is_alphabetic) {
+                        calls.push(word.clone());
+                    }
+                    word.clear();
+                }
+            }
+            calls
+        })
+        .find(|w| !PLAIN.contains(&w.as_str()));
+    match call {
+        Some(c) => format!("{lang} · {}", clip_file(&c, 22)),
+        None => format!("{lang} 스크립트 {}줄", code.lines().count().max(1)),
+    }
+}
+
+/// The part of a command that does the work: past comments, and past setting up (`cd`,
+/// `export`, `source`, `set`) joined to it by `&&`, `;` or a new line.
+/// `cd /tmp/x && export K=v && python3 run.py` is `python3 run.py`.
+fn main_part(command: &str) -> &str {
+    const SETUP: [&str; 7] = ["cd", "pushd", "export", "source", ".", "set", "unset"];
+    let mut rest = command.trim_start();
+    loop {
+        // Comment lines first.
+        while rest.starts_with('#') {
+            match rest.split_once('\n') {
+                Some((_, after)) => rest = after.trim_start(),
+                None => return command,
+            }
+        }
+        let first = rest.split_whitespace().next().unwrap_or("");
+        // A heading printed before the work (`echo "=== 결과 ===" && wc -l x`) is passed over
+        // too, but not a line written into a file.
+        let cut_at = ["&&", ";", "\n"].iter().filter_map(|sep| rest.find(sep)).min();
+        let heading = ["echo", "printf"].contains(&first)
+            && cut_at.is_some_and(|i| !rest[..i].contains('>'));
+        if !SETUP.contains(&first) && !heading {
+            return if rest.is_empty() { command } else { rest };
+        }
+        // Past this part, to what follows its `&&`, `;` or line end.
+        let cut = ["&&", ";", "\n"]
+            .iter()
+            .filter_map(|sep| rest.find(sep).map(|i| (i, sep.len())))
+            .min();
+        match cut {
+            Some((i, n)) => rest = rest[i + n..].trim_start(),
+            None => return command,
+        }
+    }
+}
+
+fn command_name_of(command: &str) -> String {
     let plain = |w: &str| {
         !w.is_empty()
             && w.chars()
@@ -457,8 +618,199 @@ pub fn clip_file(name: &str, n: usize) -> String {
         .rfind('.')
         .filter(|&i| i > 0 && name.len() - i <= 6)
         .map_or("", |i| &name[i..]);
-    let keep = n.saturating_sub(ext.chars().count() + 1).max(1);
-    format!("{}…{ext}", name.chars().take(keep).collect::<String>())
+    let mut keep = n.saturating_sub(ext.chars().count() + 1).max(1);
+    // Cut before a run of digits (a date, a number) rather than inside it, so files told
+    // apart only by their numbers read alike and one file always reads the same:
+    // `batch_20261103_1506.jsonl` is `batch_….jsonl`.
+    let chars: Vec<char> = name.chars().collect();
+    if let Some(i) = (3..keep.min(chars.len())).find(|&i| {
+        chars[i].is_ascii_digit() && chars[i..].iter().take_while(|c| c.is_ascii_digit()).count() >= 3
+    }) {
+        keep = i;
+    }
+    format!("{}…{ext}", chars[..keep].iter().collect::<String>())
+}
+
+/// A command as what it does, in plain words: `tail -5 log.jsonl` is "log.jsonl 내용 보기",
+/// `wc -l x` "x 줄 세기", `ps aux` "실행 중인 작업 확인". Setting up before it is passed over,
+/// a script given inline is named by what it works on, and a command not known keeps its
+/// short name (`command_name`).
+pub fn command_label(command: &str) -> String {
+    let main = main_part(command);
+    // A loop is what it does each time, done again: `for i in 1 2 3; do cat $i.json; done`.
+    if let Some(head) = ["for ", "while "].iter().find(|h| main.starts_with(**h)) {
+        let body = main
+            .split_once("; do ")
+            .or_else(|| main.split_once("\ndo "))
+            .or_else(|| main.split_once(" do "))
+            .map(|(_, b)| b)
+            .unwrap_or("");
+        let body = body.rsplit_once("done").map_or(body, |(b, _)| b).trim_end_matches([';', ' ', '\n']);
+        if !body.trim().is_empty() {
+            return format!("{} 반복", command_label(body));
+        }
+        return if *head == "for " { "반복 실행".into() } else { "반복 대기".into() };
+    }
+    if let Some((lang, code)) = inline_script(main) {
+        return script_name(lang, code);
+    }
+    // The first part of a pipe or a chain is the one that does the work.
+    let part = main
+        .split("&&")
+        .next()
+        .unwrap_or(main)
+        .split(['|', ';', '\n'])
+        .next()
+        .unwrap_or(main);
+    let words = shell_words(part);
+    let mut words = words
+        .iter()
+        .map(String::as_str)
+        .skip_while(|w| w.contains('=') && !w.starts_with('-'));
+    let Some(program) = words.next().map(file_name) else {
+        return command_name(command);
+    };
+    // Redirections (`2>/dev/null`, `> out.txt`, `< in`) are not what the command works on.
+    let mut rest: Vec<&str> = Vec::new();
+    let mut skip_next = false;
+    for w in words {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if w.contains(['>', '<']) {
+            skip_next = w.trim_start_matches(|c: char| c.is_ascii_digit()).trim_matches(['>', '<', '&']).is_empty()
+                && !w.ends_with('1');
+            continue;
+        }
+        rest.push(w);
+    }
+    let args: Vec<&str> = rest.iter().copied().filter(|w| !w.starts_with('-')).collect();
+    // A word as an object: a path by its file name, cut alike everywhere.
+    let obj = |w: &str| {
+        let w = w.trim_end_matches('/');
+        let name = if w.contains('/') { file_name(w) } else { w };
+        clip_file(if name.is_empty() { w } else { name }, 18)
+    };
+    let last = args.last().map(|w| obj(w));
+    let first = args.first().map(|w| obj(w));
+    let on = |verb: &str, what: Option<String>| match what {
+        Some(w) => format!("{w} {verb}"),
+        None => verb.to_owned(),
+    };
+    match program {
+        "tail" | "head" | "cat" | "less" | "more" | "bat" | "nl" => on("내용 보기", last),
+        "wc" => on("줄 세기", last),
+        "find" | "fd" => match first {
+            Some(w) if w != "." => format!("{w}에서 파일 찾기"),
+            _ => "파일 찾기".into(),
+        },
+        "ls" | "tree" => on("목록 보기", first.filter(|w| w != ".")),
+        "grep" | "rg" | "egrep" => {
+            let pat = args.first().map(|p| short_word(p.trim_matches(['"', '\'']), 14));
+            match (pat, args.get(1).map(|w| obj(w))) {
+                (Some(p), Some(f)) => format!("{f}에서 ‘{p}’ 찾기"),
+                (Some(p), None) => format!("‘{p}’ 찾기"),
+                _ => "찾기".into(),
+            }
+        }
+        "ps" | "pgrep" | "top" => "실행 중인 작업 확인".into(),
+        "kill" | "pkill" | "killall" => "작업 멈추기".into(),
+        "pip" | "pip3" | "npm" | "yarn" | "pnpm" | "brew" | "apt" | "apt-get" | "cargo" | "uv"
+            if rest.first().is_some_and(|w| ["install", "add", "i"].contains(w)) =>
+        {
+            on("설치", args.get(1).filter(|w| !w.starts_with('.')).map(|w| short_word(w, 16)))
+        }
+        "python" | "python3" if rest.first() == Some(&"-m") => {
+            // A module run as a program: pip installing, pytest testing, else the module.
+            let module = args.first().copied().unwrap_or("");
+            match module {
+                "pip" | "pip3" | "uv" if args.get(1) == Some(&"install") => {
+                    on("설치", args.get(2).filter(|w| !w.starts_with('.')).map(|w| short_word(w, 16)))
+                }
+                "pip" | "pip3" => format!("pip {}", args.get(1).copied().unwrap_or("")).trim_end().to_owned(),
+                "pytest" | "unittest" => "테스트 실행".into(),
+                "" => "python 실행".into(),
+                m => format!("{} 실행", short_word(m, 16)),
+            }
+        }
+        "which" | "type" | "command" => on("있는지 확인", args.iter().rev().find(|w| **w != "-v").map(|w| short_word(w, 16))),
+        "pytest" => "테스트 실행".into(),
+        "python" | "python3" | "node" | "ruby" | "bash" | "sh" | "zsh" | "deno" | "bun" => {
+            match args.first() {
+                Some(w) if w.contains('.') || w.contains('/') => format!("{} 실행", obj(w)),
+                Some(w) if *w == "-m" || rest.first() == Some(&"-m") => on("실행", args.first().map(|w| short_word(w, 16))),
+                _ => format!("{program} 실행"),
+            }
+        }
+        "rm" | "rmdir" => on("삭제", last),
+        "mkdir" => on("폴더 만들기", last),
+        "touch" => on("만들기", last),
+        "cp" => on("복사", first),
+        "mv" => on("옮기기", first),
+        "chmod" | "chown" => on("권한 바꾸기", last),
+        "cd" | "pushd" => on("로 이동", first).replace(" 로", "로"),
+        "sleep" => "기다리기".into(),
+        "curl" | "wget" => match args.iter().find(|w| w.contains("://")) {
+            Some(u) => format!("{} 요청", u.split("://").nth(1).unwrap_or(u).split('/').next().unwrap_or(u)),
+            None => "웹 요청".into(),
+        },
+        "echo" | "printf" => match part.split_once('>') {
+            Some((_, to)) => on("에 쓰기", shell_words(to).first().map(|w| obj(w))).replace(" 에", "에"),
+            None => "출력".into(),
+        },
+        "git" | "gh" | "docker" | "kubectl" | "make" | "npm" | "cargo" | "go" => {
+            let sub: Vec<&str> = rest.iter().copied().filter(|w| !w.starts_with('-')).take(2).collect();
+            [program].into_iter().chain(sub).collect::<Vec<_>>().join(" ")
+        }
+        _ => command_name(command),
+    }
+}
+
+/// A command's words as the shell splits them, quotes taken off.
+fn shell_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote: Option<char> = None;
+    let mut any = false;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        // A backslash takes the next character as it is, except inside single quotes.
+        if c == '\\' && quote != Some('\'') {
+            if let Some(n) = chars.next() {
+                word.push(n);
+            }
+            continue;
+        }
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => word.push(c),
+            None if c == '\'' || c == '"' => {
+                quote = Some(c);
+                any = true;
+            }
+            None if c.is_whitespace() => {
+                if !word.is_empty() || any {
+                    words.push(std::mem::take(&mut word));
+                }
+                any = false;
+            }
+            None => word.push(c),
+        }
+    }
+    if !word.is_empty() || any {
+        words.push(word);
+    }
+    words
+}
+
+/// A word cut to `n` characters.
+fn short_word(w: &str, n: usize) -> String {
+    if w.chars().count() > n {
+        format!("{}…", w.chars().take(n - 1).collect::<String>())
+    } else {
+        w.to_owned()
+    }
 }
 
 pub fn place_name(what: &str) -> String {
@@ -502,22 +854,76 @@ fn traced(model: &Model, trace: &Value) -> Option<(Source, bool)> {
     })?;
     let result = best["seq"].as_i64()?;
     let by = model.call_of.get(&result).copied();
+    let node = model.nodes.iter().find(|n| n.seq() == result);
+    let telling = node
+        .and_then(|n| n.summary.error.as_deref().or(n.summary.output.as_deref()))
+        .and_then(telling_line);
+    // A tool that failed, or output that says something went wrong (a command echoing itself
+    // and then failing still exits cleanly).
+    let error = node.is_some_and(|n| n.kind == "Error") || telling.as_ref().is_some_and(|(_, bad)| *bad);
+    let quote = telling.map(|(l, _)| {
+        if l.chars().count() > 70 {
+            format!("{}…", l.chars().take(69).collect::<String>())
+        } else {
+            l
+        }
+    });
     Some((
         Source {
             result,
             paragraph: best["paragraph"].as_i64(),
             probability: best["probability"].as_f64().unwrap_or(0.0),
+            error,
+            quote,
             by: by.unwrap_or(-1),
         },
         by.is_some(),
     ))
 }
 
+/// The line of a result most likely to have told the agent what to do next: the first that
+/// reports something wrong (an error, a thing not found or missing), else the first that says
+/// anything; and whether it reports something wrong.
+pub fn telling_line(text: &str) -> Option<(String, bool)> {
+    const BAD: [&str; 18] = [
+        "error", "not found", "no such", "no module", "failed", "failure", "denied", "cannot",
+        "can't", "unknown", "invalid", "fatal", "traceback", "exception", "없", "실패", "오류",
+        "찾을 수",
+    ];
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| {
+            !l.is_empty()
+                && !l.starts_with("Exit code")
+                && !l.starts_with("Shell cwd was reset")
+                && !l.chars().all(|c| "-=_*~#. ".contains(c))
+                // A line of brackets and marks (`{`, `],`) says nothing.
+                && l.chars().filter(|c| c.is_alphanumeric()).count() >= 3
+        })
+        .collect();
+    let bad = lines.iter().find(|l| {
+        let low = l.to_lowercase();
+        BAD.iter().any(|b| low.contains(b)) && !low.contains("0 error")
+    });
+    // A path the line begins with is its program's name: "/usr/…/python3: No module named x"
+    // is "python3: No module named x".
+    let tidy = |l: &str| match l.split_once(": ") {
+        Some((head, rest)) if head.contains('/') && !head.contains(' ') => format!("{}: {rest}", file_name(head)),
+        _ => l.to_owned(),
+    };
+    match bad {
+        Some(l) => Some((tidy(l), true)),
+        None => lines.first().map(|l| (tidy(l), false)),
+    }
+}
+
 /// One event in time order: a turn opening, the agent speaking, a Call, or a subagent run
-/// starting or ending.
+/// starting or ending. (A Call is the large one and the common one; boxing it buys nothing.)
+#[allow(clippy::large_enum_variant)]
 enum Item {
     Ask(Ask),
-    Say(i64, String),
+    Say(i64, String, Option<i64>),
     Call(Station),
     Start(String),
     Stop(String),
@@ -639,7 +1045,11 @@ impl Metro {
                 "Message" => {
                     let said = text(&node.summary.text);
                     last_word = Some((node.seq(), said.clone()));
-                    items.push(Item::Say(node.seq(), said));
+                    items.push(Item::Say(
+                        node.seq(),
+                        said,
+                        node.props.get("observed_at").and_then(Value::as_i64),
+                    ));
                 }
                 "SubagentStart" => {
                     if let Some(id) = run_of(node) {
@@ -809,6 +1219,7 @@ impl Metro {
         // Columns: one per station, in order, with room where a turn or a run changes.
         let mut stations: Vec<Station> = Vec::new();
         let mut asks: Vec<Ask> = Vec::new();
+        let mut says: Vec<Said> = Vec::new();
         let mut sections: Vec<Section> = Vec::new();
         let mut x = LEFT + FIRST;
         let mut open_section: Option<usize> = None;
@@ -825,7 +1236,13 @@ impl Metro {
                     open_section = None;
                     asks.push(a);
                 }
-                Item::Say(seq, said) => {
+                Item::Say(seq, said, at) => {
+                    says.push(Said {
+                        seq,
+                        x,
+                        text: said.clone(),
+                        at,
+                    });
                     let name = section_name(&said);
                     if !name.is_empty() {
                         sections.push(Section {
@@ -956,6 +1373,7 @@ impl Metro {
             sections,
             capsules,
             last_word,
+            says,
             width: right + 240.0,
             height: bottom + 110.0,
             at,
@@ -1378,6 +1796,24 @@ mod tests {
 
     // A command is named by its program and a plain first word; quoted text never leaks in.
     #[test]
+    fn the_telling_line_is_the_one_that_says_what_went_wrong() {
+        assert_eq!(
+            telling_line("python -m compileall -q infuse\nmake: python: No such file or directory\nmake: *** [test] Error 1"),
+            Some(("make: python: No such file or directory".to_owned(), true))
+        );
+        assert_eq!(
+            telling_line("Exit code 1\nUnknown JSON field: \"stars\"\nAvailable fields:"),
+            Some(("Unknown JSON field: \"stars\"".to_owned(), true))
+        );
+        assert_eq!(telling_line("---\n'infuse'에 복제합니다..."), Some(("'infuse'에 복제합니다...".to_owned(), false)));
+        assert_eq!(telling_line("{\n  \"name\": \"linear\","), Some(("\"name\": \"linear\",".to_owned(), false)));
+        assert_eq!(
+            telling_line("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3: No module named pytest"),
+            Some(("python3: No module named pytest".to_owned(), true))
+        );
+    }
+
+    #[test]
     fn commands_are_named_by_their_program() {
         assert_eq!(command_name("make test"), "make test");
         assert_eq!(command_name("rm -rf data/backups"), "rm -rf backups");
@@ -1398,6 +1834,58 @@ mod tests {
             "cat -n refund.py"
         );
         assert_eq!(command_name("git ls-files"), "git ls-files");
+        // Setting up is passed over for the work it leads to.
+        assert_eq!(command_label("tail -5 /r/batch_20261103_1506.jsonl"), "batch_….jsonl 내용 보기");
+        assert_eq!(command_label("wc -l /r/batch_20261103_1506.jsonl"), "batch_….jsonl 줄 세기");
+        assert_eq!(command_label("ps aux | grep infuse"), "실행 중인 작업 확인");
+        assert_eq!(command_label("find results -name '*.json'"), "results에서 파일 찾기");
+        assert_eq!(command_label("grep -n \"overwrite\" /tmp/infuse/cli.py | head"), "cli.py에서 ‘overwrite’ 찾기");
+        assert_eq!(command_label("cd /tmp/infuse && python3 run_all.py --n 20"), "run_all.py 실행");
+        assert_eq!(command_label("pip install -e ."), "설치");
+        assert_eq!(command_label("rm -rf data/backups"), "backups 삭제");
+        assert_eq!(command_label("git status"), "git status");
+        assert_eq!(command_label("make test"), "make test");
+        assert_eq!(command_label("cd /tmp/x && python3 -m pip install -e \".[dev]\" -q 2>&1 | tail"), "설치");
+        assert_eq!(command_label("python3 -m pip install -e . -q"), "설치");
+        assert_eq!(command_label("python3 -m pip install requests"), "requests 설치");
+        assert_eq!(command_label("cd /tmp/x && python3 -m pytest tests -q --co 2>&1 | head"), "테스트 실행");
+        assert_eq!(command_label("which pip3 && python3 -m pip install --upgrade pip -q"), "pip3 있는지 확인");
+        assert_eq!(command_label("cat results/run.log 2>/dev/null"), "run.log 내용 보기");
+        assert_eq!(command_label("ls -la out > list.txt"), "out 목록 보기");
+        // A heading printed first is passed over; a loop is what it does, again.
+        assert_eq!(
+            command_label("echo \"=== 요약 ===\" && wc -l /r/batch_20261103_1518.jsonl && echo \"\""),
+            "batch_….jsonl 줄 세기"
+        );
+        assert_eq!(command_label("echo hi > note.txt && cat note.txt"), "note.txt에 쓰기");
+        assert_eq!(
+            command_label("for i in 2 7; do echo \"== $i ==\" && cat /r/$i/a.manifest.json | grep -o x; done"),
+            "a.manifest.json 내용 보기 반복"
+        );
+        assert_eq!(
+            command_label("grep -h \"\\\"attack_name\\\"\" /r/*/x.manifest.json | sort"),
+            "x.manifest.json에서 ‘attack_name’ 찾기"
+        );
+        assert_eq!(
+            command_name("cd /tmp/infuse && export KEY=\"x\" && python3 /a/infuse_claude.py --condition y"),
+            "infuse_claude.py"
+        );
+        assert_eq!(command_name("# check the token\ncd ~/t\nls -la"), "ls -la");
+        assert_eq!(command_name("cd infuse"), "cd infuse");
+        // A script given inline is named by what it works on.
+        assert_eq!(
+            command_name("python3 -c \"\nimport json\nt=json.load(open('/tmp/r/task_1_attack1.traj.json'))\nprint(t)\""),
+            "python · task_1_attack1.t….json"
+        );
+        assert_eq!(
+            command_name("python3 -c \"import json,sys\nfor a in range(3):\n    print(a)\""),
+            "python 스크립트 3줄"
+        );
+        assert_eq!(command_name("node -e 'console.log(process.version)'"), "node · console.log");
+        assert_eq!(
+            command_name("python3 - <<'EOF'\nfrom pathlib import Path\nPath('out/report.md').write_text('x')\nEOF"),
+            "python · report.md"
+        );
     }
 
     /// The synthetic long sessions `mock/make_long.py` writes, alongside the recorded ones.

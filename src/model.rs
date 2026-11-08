@@ -73,6 +73,8 @@ pub struct Summary {
     pub intent: Option<String>,
     pub text: Option<String>,
     pub error: Option<String>,
+    /// What the tool gave back, its start.
+    pub output: Option<String>,
     pub file_path: Option<String>,
 }
 

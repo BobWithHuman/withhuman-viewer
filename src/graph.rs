@@ -446,6 +446,14 @@ fn summary(props: &Map<String, Value>) -> Map<String, Value> {
         ("intent", text(payload.get("intent"))),
         ("text", text(payload.get("text"))),
         ("error", text(payload.get("error"))),
+        // What a tool gave back, for quoting what a Call read: the output, else a file's text.
+        (
+            "output",
+            text(payload.get("tool_response"))
+                .or_else(|| text(payload["tool_response"].get("stdout")))
+                .or_else(|| text(payload["tool_response"].get("content")))
+                .or_else(|| text(payload["tool_response"]["file"].get("content"))),
+        ),
         (
             "file_path",
             text(payload.get("file_path")).or_else(|| text(props.get("file_path"))),
