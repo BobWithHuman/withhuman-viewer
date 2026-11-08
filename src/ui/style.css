@@ -1947,3 +1947,6 @@ details.section { border: 1px solid var(--line); border-radius: 10px; padding: 6
 .fx-cause.val .k { background: #c2410c; }
 .fx-cause.val .from { color: #c2410c; }
 .fx-text-chip.cross { background: #fff7ed; color: #c2410c; box-shadow: inset 0 0 0 1px #fdba74; }
+
+/* The turn whose prompt ← and → stopped at: its heading marked, nothing opened over the map. */
+.fx-turnhead.pick { box-shadow: inset 3px 0 0 #2f3542; padding-left: 10px; }

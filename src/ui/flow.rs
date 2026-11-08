@@ -103,8 +103,8 @@ pub fn FlowMap() -> Element {
     let hovered = use_signal(|| None::<i64>);
     // The session list, opened from the session's name in either level.
     let mut picking = use_context_provider(|| Picking(Signal::new(false))).0;
-    // The turn whose heading is opened to the prompt, shared with the line and the stepping.
-    let mut head_open = use_context_provider(|| HeadOpen(Signal::new(None))).0;
+    // The turn whose prompt ← and → stopped at: its heading marked, nothing opened over the map.
+    let mut head_open = use_context_provider(|| PromptPick(Signal::new(None))).0;
     let opened = use_signal(|| None::<Option<String>>);
     use_effect(move || {
         // Another session opened from the list closes it.
@@ -176,11 +176,14 @@ pub fn FlowMap() -> Element {
         };
         turn.set(t);
     });
-    // A Call picked anywhere picks its turn.
+    // A Call picked anywhere picks its turn, and the prompt stepped to is let go.
     use_effect(move || {
         let Selection::Node(seq) = (state.selected)() else {
             return;
         };
+        if head_open.peek().is_some() {
+            head_open.set(None);
+        }
         let Some(f) = flow.peek().clone() else { return };
         if let Some(t) = f.turn_of(seq)
             && *turn.peek() != t
@@ -644,9 +647,9 @@ fn route_summary(s: &Summary) -> Element {
 #[derive(Clone, Copy)]
 struct Picking(Signal<bool>);
 
-/// The turn whose heading is opened to the person's prompt, if any.
+/// The turn whose prompt is the step ← and → are at, if any.
 #[derive(Clone, Copy)]
-struct HeadOpen(Signal<Option<usize>>);
+struct PromptPick(Signal<Option<usize>>);
 
 /// A stop on the way ← and → step along: a turn's prompt, then each of its Calls.
 #[derive(Clone, Copy, PartialEq)]
@@ -1324,7 +1327,9 @@ fn LineMap(
     let line = f.line_open(&turns, &opened(), wrap);
     let t = turn().min(f.turns.len() - 1);
     // The turn whose heading is opened to its whole intent and the person's own words.
-    let mut head_open = use_context::<HeadOpen>().0;
+    let mut head_open = use_signal(|| None::<usize>);
+    // The turn whose prompt ← and → are at: its heading marked.
+    let prompt_pick = use_context::<PromptPick>().0;
     // The turn whose answer is opened to what the agent said, whole.
     let mut say_open = use_signal(|| None::<usize>);
     // The branch whose cause is opened to the words read, whole.
@@ -1641,7 +1646,8 @@ fn LineMap(
                         let opened = head_open() == Some(n);
                         let ask = if f.turns[n].agent.is_some() { "report" } else { "ask" };
                         let side = if m.rev { " rev" } else { "" };
-                        let cls = if on { format!("fx-turnhead {ask}{side} on") } else { format!("fx-turnhead {ask}{side}") };
+                        let stepped = if prompt_pick() == Some(n) { " pick" } else { "" };
+                        let cls = if on { format!("fx-turnhead {ask}{side} on{stepped}") } else { format!("fx-turnhead {ask}{side}{stepped}") };
                         rsx! {
                             foreignObject {
                                 key: "head{n}",
@@ -1759,7 +1765,7 @@ fn LineMap(
                                 span { class: "no", "턴 {n + 1}" }
                                 button { class: "x", title: "닫기", onclick: move |_| head_open.set(None), "✕" }
                             }
-                            if let Some(intent) = tt.intent.clone() {
+                            if let Some(intent) = tt.intent.as_deref().map(crate::flow::without_confidence) {
                                 div { class: "k", "에이전트가 적은 의도" }
                                 div { class: "intent", "{intent}" }
                             }

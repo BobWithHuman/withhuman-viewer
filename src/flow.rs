@@ -213,14 +213,19 @@ pub fn text_width(text: &str, size: f64) -> f64 {
         * size
 }
 
+/// An intent without the "(확신도: …)" the engine appends to it.
+pub fn without_confidence(text: &str) -> &str {
+    let text = text.trim();
+    match text.rfind('(') {
+        Some(i) if text.ends_with(')') && (text[i..].contains("확신도") || text[i..].contains("confidence")) => text[..i].trim_end(),
+        _ => text,
+    }
+}
+
 /// A long text cut to its gist for a heading: its first sentence, without a trailing
 /// "(확신도: …)", at most `n` characters and cut between words.
 pub fn gist(text: &str, n: usize) -> String {
-    let text = text.trim();
-    let text = match text.rfind('(') {
-        Some(i) if text.ends_with(')') && text[i..].contains("확신도") => text[..i].trim_end(),
-        _ => text,
-    };
+    let text = without_confidence(text);
     let first = text
         .split_inclusive(['\n', '。'])
         .next()
