@@ -103,6 +103,8 @@ pub fn FlowMap() -> Element {
     let hovered = use_signal(|| None::<i64>);
     // The session list, opened from the session's name in either level.
     let mut picking = use_context_provider(|| Picking(Signal::new(false))).0;
+    // The turn whose heading is opened to the prompt, shared with the line and the stepping.
+    let mut head_open = use_context_provider(|| HeadOpen(Signal::new(None))).0;
     let opened = use_signal(|| None::<Option<String>>);
     use_effect(move || {
         // Another session opened from the list closes it.
@@ -110,6 +112,7 @@ pub fn FlowMap() -> Element {
         let mut opened = opened;
         if opened.peek().as_ref().is_some_and(|was| was.is_some() && *was != now) {
             picking.set(false);
+            head_open.set(None);
         }
         opened.set(Some(now));
     });
@@ -258,28 +261,49 @@ pub fn FlowMap() -> Element {
     };
     // Only over the line: the network is read whole, and picking there opens the line.
     let card = SHOW_ROUTE_CARD && is_detail && detail() && picked.is_some();
-    // Every Call of the session in the order made, to step through with ← and →.
-    let order: Vec<i64> = f.turns.iter().flat_map(|t| t.calls.iter().map(|c| c.seq)).collect();
-    let at = picked.and_then(|p| order.iter().position(|&q| q == p));
+    // Each turn's prompt and then its Calls, in the order made, to step through with ← and →.
+    let order: Vec<Step> = f
+        .turns
+        .iter()
+        .enumerate()
+        .flat_map(|(n, t)| std::iter::once(Step::Prompt(n)).chain(t.calls.iter().map(|c| Step::Call(c.seq))))
+        .collect();
+    let now_at = move |order: &[Step], picked: Option<i64>, head: Option<usize>| match (picked, head) {
+        (Some(p), _) => order.iter().position(|&s| s == Step::Call(p)),
+        (None, Some(n)) => order.iter().position(|&s| s == Step::Prompt(n)),
+        (None, None) => None,
+    };
+    let at = now_at(&order, picked, head_open());
     let total = order.len();
     let step = {
         let order = order.clone();
+        let f = f.clone();
         move |by: isize| {
             if order.is_empty() {
                 return;
             }
-            // From the Call picked now, not when this was drawn, so keys pressed fast still step.
-            let now = match *state.selected.peek() {
-                Selection::Node(q) => order.iter().position(|&o| o == q),
+            // From what is picked now, not when this was drawn, so keys pressed fast still step.
+            let picked = match *state.selected.peek() {
+                Selection::Node(q) => Some(q),
                 Selection::None => None,
             };
-            let next = match now {
+            let next = match now_at(&order, picked, *head_open.peek()) {
                 Some(i) => i.saturating_add_signed(by).min(order.len() - 1),
                 None if by < 0 => order.len() - 1,
                 None => 0,
             };
             let mut state = state;
-            state.selected.set(Selection::Node(order[next]));
+            match order[next] {
+                Step::Prompt(n) => {
+                    state.selected.set(Selection::None);
+                    select_turn(turn, state, &f, n);
+                    head_open.set(Some(n));
+                }
+                Step::Call(seq) => {
+                    head_open.set(None);
+                    state.selected.set(Selection::Node(seq));
+                }
+            }
             level.set(Level::Detail);
         }
     };
@@ -343,12 +367,12 @@ pub fn FlowMap() -> Element {
                 // in a text field (the page clicks these for the keys).
                 if total > 0 {
                     div { class: "fx-step",
-                        button { id: "fx-prev", title: "이전 호출 (←)", disabled: at == Some(0), onclick: move |_| step_prev(-1), "‹" }
+                        button { id: "fx-prev", title: "이전 (←)", disabled: at == Some(0), onclick: move |_| step_prev(-1), "‹" }
                         span { class: "n",
                             if let Some(i) = at { "{i + 1}" } else { "–" }
                             span { class: "of", " / {total}" }
                         }
-                        button { id: "fx-next", title: "다음 호출 (→)", disabled: at == Some(total - 1), onclick: move |_| step_next(1), "›" }
+                        button { id: "fx-next", title: "다음 (→)", disabled: at == Some(total - 1), onclick: move |_| step_next(1), "›" }
                     }
                 }
                 div { class: "fx-zoom",
@@ -619,6 +643,17 @@ fn route_summary(s: &Summary) -> Element {
 /// Whether the session list is open over the map.
 #[derive(Clone, Copy)]
 struct Picking(Signal<bool>);
+
+/// The turn whose heading is opened to the person's prompt, if any.
+#[derive(Clone, Copy)]
+struct HeadOpen(Signal<Option<usize>>);
+
+/// A stop on the way ← and → step along: a turn's prompt, then each of its Calls.
+#[derive(Clone, Copy, PartialEq)]
+enum Step {
+    Prompt(usize),
+    Call(i64),
+}
 
 /// The session's name, opening the session list to switch to another.
 #[component]
@@ -1289,7 +1324,7 @@ fn LineMap(
     let line = f.line_open(&turns, &opened(), wrap);
     let t = turn().min(f.turns.len() - 1);
     // The turn whose heading is opened to its whole intent and the person's own words.
-    let mut head_open = use_signal(|| None::<usize>);
+    let mut head_open = use_context::<HeadOpen>().0;
     // The turn whose answer is opened to what the agent said, whole.
     let mut say_open = use_signal(|| None::<usize>);
     // The branch whose cause is opened to the words read, whole.
