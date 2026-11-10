@@ -14,6 +14,14 @@ repository = "https://github.com/BobWithHuman/withhuman-viewer"
 name = "withhuman-viewer"
 path = "src/main.rs"
 
+# Two apps from one source: `dev`, the developer's app on the machine the agent runs on, and
+# `admin`, the security team's app over every machine's sessions. A build is exactly one of
+# them: `cargo run` makes the developer's, `cargo admin` (.cargo/config.toml) the security team's.
+[features]
+default = ["dev"]
+dev = []
+admin = []
+
 [dependencies]
 dioxus = { version = "0.7.10", features = ["desktop"] }
 tokio = { version = "1", features = ["time", "rt"] }

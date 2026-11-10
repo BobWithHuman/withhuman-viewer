@@ -21,6 +21,57 @@ pub struct Session {
     pub cwd: Option<String>,
     /// The client ID the hooks sent (`x-withhuman-client`).
     pub client: Option<String>,
+    /// Calls allowed though hard to undo: what the user asked for can still need an audit.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub risky: i64,
+    /// Calls with no decision: the engine only watched, its decision failed, or the hook was
+    /// gone around.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub undecided: i64,
+    /// Calls a tool result made the agent take, rather than the user's request.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub from_result: i64,
+    /// How the engine enforced the session's last decision: `record`, `shadow` or `enforce`.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub mode: Option<String>,
+}
+
+/// One Call as the security team's charts count it (`graph::CALL_FACTS`).
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct CallFact {
+    pub session: String,
+    /// The Call's node number in its session, to open it on the route map.
+    pub seq: i64,
+    /// What it acted on: the command, file, URL or pattern, cut short.
+    pub target: Option<String>,
+    /// Why the engine decided as it did.
+    pub reason: Option<String>,
+    /// The person's prompt the Call's turn answered, cut short.
+    pub prompt: Option<String>,
+    /// The tool ran: a result came back. A Call held for review ran only if the person allowed it.
+    pub ran: bool,
+    /// When its first result came back (ms).
+    pub ran_at: Option<i64>,
+    /// The machine: the client ID the hooks sent.
+    pub client: Option<String>,
+    pub cwd: Option<String>,
+    /// When it was decided, else when it was seen (ms).
+    pub at: Option<i64>,
+    /// `ALLOW`, `REVIEW`, `DENY`, or none when nothing decided it.
+    pub decision: Option<String>,
+    /// `record`, `shadow` or `enforce`.
+    pub mode: Option<String>,
+    /// The rule that decided it, such as `intent::mismatch`.
+    pub rule: Option<String>,
+    pub tool: Option<String>,
+    /// What made the agent take it: `request` (the user), `segment` (a tool result), `none`.
+    pub link: Option<String>,
+    /// The worst thing it broke, such as `exfiltration`; `none` for nothing.
+    pub worst: Option<String>,
+    /// Hard to undo ([`crate::metro::IRREVERSIBLE`] or more).
+    pub irreversible: bool,
 }
 
 impl Session {
@@ -191,6 +242,36 @@ pub struct Token {
     pub category: Option<String>,
     pub slot: Option<String>,
     pub decoded: Value,
+}
+
+/// One mention of a sensitive value (a credential, personal, financial or device identifier)
+/// in a node: who wrote it there (`user` a prompt, `external` a tool result, `agent` a Call's
+/// input or the agent's words), the value masked, and for a Call how it was decided.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct SecretMention {
+    pub session: String,
+    pub seq: i64,
+    /// The node's kind: `Call`, `Request`, `Segment`, ...
+    pub node: Option<String>,
+    pub slot: Option<String>,
+    /// The value's key: the SHA-256 of it, so equal values share one.
+    pub key: String,
+    /// `api_key`, `jwt`, `kr_rrn`, `card_pan`, ...
+    pub kind: Option<String>,
+    /// `credential`, `pii`, `financial` or `device`.
+    pub category: Option<String>,
+    /// The value, masked.
+    pub text: Option<String>,
+    pub decision: Option<String>,
+    pub client: Option<String>,
+    pub at: Option<i64>,
+    pub tool: Option<String>,
+    /// What the Call acted on (masked as stored).
+    pub target: Option<String>,
+    /// A result came back.
+    pub ran: bool,
 }
 
 /// A JSON document stored as a string property; anything unreadable reads as nothing.

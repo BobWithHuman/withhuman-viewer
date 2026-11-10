@@ -105,6 +105,40 @@ impl Backend {
         typed(value)
     }
 
+    /// Every Call, cut down to what the security team's charts count.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn call_facts(&self) -> Result<Vec<crate::model::CallFact>, String> {
+        let settings = self.current();
+        let value = if settings.demo {
+            Ok(self.demo.lock().expect("demo lock").call_facts())
+        } else {
+            Neo4j {
+                client: &self.client,
+                settings: &settings,
+            }
+            .call_facts()
+            .await
+        };
+        typed(value)
+    }
+
+    /// Every mention of a sensitive value, for the security team's 민감 정보.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn secrets(&self) -> Result<Vec<crate::model::SecretMention>, String> {
+        let settings = self.current();
+        let value = if settings.demo {
+            Ok(self.demo.lock().expect("demo lock").secrets())
+        } else {
+            Neo4j {
+                client: &self.client,
+                settings: &settings,
+            }
+            .secrets()
+            .await
+        };
+        typed(value)
+    }
+
     /// Each session's Calls, for the comparison.
     pub async fn calls(
         &self,
