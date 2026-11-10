@@ -10,7 +10,7 @@ use crate::model::Session;
 use crate::settings::Engine;
 
 /// A number as the page writes it large: 1,234 → "1.2k".
-fn big(n: i64) -> String {
+pub(crate) fn big(n: i64) -> String {
     match n {
         n if n >= 10_000 => format!("{}k", n / 1000),
         n if n >= 1000 => format!("{:.1}k", n as f64 / 1000.0),
@@ -19,7 +19,7 @@ fn big(n: i64) -> String {
 }
 
 /// When a session was last active, as a list writes it: today's time, else the date.
-fn when(ms: Option<i64>) -> String {
+pub(crate) fn when(ms: Option<i64>) -> String {
     use chrono::{Local, TimeZone};
     let Some(t) = ms.and_then(|ms| Local.timestamp_millis_opt(ms).single()) else {
         return String::new();
@@ -32,8 +32,10 @@ fn when(ms: Option<i64>) -> String {
 }
 
 /// How many sessions of each kind the page lists before "더 보기".
+#[cfg_attr(feature = "admin", allow(dead_code))]
 const SHOWN: usize = 8;
 
+#[cfg_attr(feature = "admin", allow(dead_code))]
 #[component]
 pub fn Home() -> Element {
     let mut state = use_context::<AppState>();
@@ -126,6 +128,7 @@ pub fn Home() -> Element {
 }
 
 /// A kind of session worth a look, as a list on a white card: the first few, then all.
+#[cfg_attr(feature = "admin", allow(dead_code))]
 #[component]
 fn SessionGroup(title: &'static str, empty: &'static str, sessions: Vec<Session>, all: bool, onmore: EventHandler<MouseEvent>) -> Element {
     let mut state = use_context::<AppState>();

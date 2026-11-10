@@ -2,6 +2,13 @@
 //! bundled demo) in a desktop app built with Dioxus.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(all(feature = "dev", feature = "admin"))]
+compile_error!("build one app: the developer's (`dev`) or the security team's (`admin`), not both");
+#[cfg(not(any(feature = "dev", feature = "admin")))]
+compile_error!("build one app: `--features dev` or `--no-default-features --features admin`");
+
+#[cfg(feature = "admin")]
+mod admin;
 mod api;
 mod demo;
 mod engine;
@@ -30,7 +37,7 @@ fn main() {
         (ui::WORK_SIZE, ui::WORK_MIN)
     };
     let window = WindowBuilder::new()
-        .with_title("WithHuman Viewer")
+        .with_title(ui::APP_NAME)
         .with_inner_size(LogicalSize::new(size.0, size.1))
         .with_min_inner_size(LogicalSize::new(min.0, min.1))
         .with_resizable(!setup);

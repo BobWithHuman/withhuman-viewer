@@ -1,3 +1,7 @@
+# `cargo admin` runs the security team's app; `cargo run` stays the developer's (Cargo.toml).
+[alias]
+admin = "run --no-default-features --features admin"
+
 # `cargo run` on macOS signs the app with a fixed identity first (scripts/dev-run.sh), so the
 # keychain asks for the saved Neo4j password once rather than after every build.
 [target.'cfg(target_os = "macos")']
