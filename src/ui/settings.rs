@@ -1,4 +1,5 @@
-//! The connection sheet: where Neo4j is, tried before it is saved, or the demo instead.
+//! The connection sheet: where the engine's data is (its PostgreSQL, or Neo4j before
+//! withhuman-core #118), tried before it is saved, or the demo instead.
 
 use std::sync::Arc;
 
@@ -62,10 +63,11 @@ pub fn SettingsSheet() -> Element {
         Err(e) => status.set(Status::Err(e)),
     };
     let busy = status() == Status::Busy;
-    let hint = if current.has_password {
-        "비워 두면 저장된 비밀번호 유지"
-    } else {
-        "엔진 .env의 NEO4J_PASSWORD"
+    let postgres = url().trim().starts_with("postgres");
+    let hint = match (current.has_password, postgres) {
+        (true, _) => "비워 두면 저장된 비밀번호 유지",
+        (false, true) => "엔진의 뷰어 계정 비밀번호",
+        (false, false) => "엔진 .env의 NEO4J_PASSWORD",
     };
 
     rsx! {
@@ -85,18 +87,19 @@ pub fn SettingsSheet() -> Element {
                 h2 { "데이터 연결" }
                 div { class: "choice",
                     button { class: if !demo() { "on" } else { "" }, onclick: move |_| demo.set(false),
-                        strong { "Neo4j" }
+                        strong { "엔진 데이터" }
                         span { "WithHuman 엔진이 기록한 실제 세션" }
                     }
                     button { class: if demo() { "on" } else { "" }, onclick: move |_| demo.set(true),
                         strong { "데모로 둘러보기" }
-                        span { "Neo4j 없이 예시 세션으로" }
+                        span { "엔진 없이 예시 세션으로" }
                     }
                 }
                 fieldset { disabled: demo(),
                     label { "주소"
-                        input { r#type: "text", value: "{url}", oninput: move |e| url.set(e.value()) }
+                        input { r#type: "text", value: "{url}", placeholder: "postgres://127.0.0.1:5432/withhuman", oninput: move |e| url.set(e.value()) }
                     }
+                    p { class: "muted", "지금 엔진은 PostgreSQL입니다: postgres://호스트:포트/DB. 예전 엔진(Neo4j)은 http://호스트:7474로 적습니다." }
                     div { class: "row",
                         label { "데이터베이스"
                             input { r#type: "text", value: "{database}", oninput: move |e| database.set(e.value()) }

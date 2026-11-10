@@ -297,7 +297,7 @@ pub fn Audit() -> Element {
         Some(d) => format!("최근 {d}일"),
         None => "전체 기간".to_owned(),
     };
-    let source = if p.demo { "데모 데이터".to_owned() } else { format!("Neo4j · {}", p.neo4j_url) };
+    let source = p.store();
     let current = tab();
 
     rsx! {

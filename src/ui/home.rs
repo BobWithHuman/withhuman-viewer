@@ -53,8 +53,8 @@ pub fn Home() -> Element {
     } else {
         match p.engine {
             Engine::Local => format!("이 맥의 엔진 · {}", p.engine_dir.clone().unwrap_or_default()),
-            Engine::Server => format!("서버 · {}", p.neo4j_url),
-            Engine::Unset => format!("Neo4j · {}", p.neo4j_url),
+            Engine::Server => format!("서버 · {}", p.host()),
+            Engine::Unset => p.store(),
         }
     };
     let numbers = [

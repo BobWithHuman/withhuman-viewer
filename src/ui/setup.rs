@@ -247,7 +247,7 @@ pub fn Setup() -> Element {
                         disabled: !key_ok || busy,
                         onclick: move |_| engine.set(Engine::Server),
                         strong { "서버에 접속" }
-                        span { "이미 떠 있는 엔진의 Neo4j를 읽습니다" }
+                        span { "이미 떠 있는 엔진의 데이터베이스를 읽습니다" }
                     }
                 }
                 fieldset { class: "setup-form", disabled: !key_ok || busy,
@@ -256,7 +256,7 @@ pub fn Setup() -> Element {
                             input { r#type: "text", value: "{dir}", placeholder: "~/withhuman-core", oninput: move |e| dir.set(e.value()) }
                         }
                     } else {
-                        label { "Neo4j 주소"
+                        label { "데이터베이스 주소 (PostgreSQL은 postgres://, 예전 엔진의 Neo4j는 http://)"
                             input { r#type: "text", value: "{url}", oninput: move |e| url.set(e.value()) }
                         }
                         div { class: "row",
@@ -268,7 +268,7 @@ pub fn Setup() -> Element {
                             }
                         }
                         label { "비밀번호"
-                            input { r#type: "password", value: "{password}", placeholder: "엔진 .env의 NEO4J_PASSWORD", oninput: move |e| password.set(e.value()) }
+                            input { r#type: "password", value: "{password}", placeholder: "엔진의 뷰어 계정 비밀번호", oninput: move |e| password.set(e.value()) }
                         }
                     }
                 }

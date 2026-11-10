@@ -359,7 +359,7 @@ pub fn Policy() -> Element {
         })
         .collect();
     let mut changed = move || saved.set(None);
-    let source = if p.demo { "데모 데이터".to_owned() } else { format!("Neo4j · {}", p.neo4j_url) };
+    let source = p.store();
 
     rsx! {
         div { class: "home admin",

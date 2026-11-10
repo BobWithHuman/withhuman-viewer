@@ -18,6 +18,7 @@ mod layout;
 mod menu;
 mod metro;
 mod model;
+mod pg;
 mod prefs;
 mod settings;
 mod ui;

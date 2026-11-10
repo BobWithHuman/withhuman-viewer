@@ -145,7 +145,7 @@ pub fn Mcp() -> Element {
     let period = period_label(days());
     let at = clock(refreshed());
     let none = if loading { "불러오는 중…" } else { "데이터 없음" };
-    let source = if p.demo { "데모 데이터".to_owned() } else { format!("Neo4j · {}", p.neo4j_url) };
+    let source = p.store();
     // The server looked at: the one picked while it is still in view, else the first.
     let current: Option<Use> = picked()
         .and_then(|n| servers.iter().find(|u| u.name == n).cloned())

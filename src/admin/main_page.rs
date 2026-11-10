@@ -596,7 +596,7 @@ pub fn Main() -> Element {
     let source = if p.demo {
         "데모 데이터".to_owned()
     } else {
-        format!("Neo4j · {}", p.neo4j_url)
+        p.store()
     };
     let lede = match &f.machine {
         Some(m) => format!("{m} 단말의 에이전트가 한 도구 호출과 엔진의 판정입니다."),
@@ -1331,7 +1331,7 @@ fn Engine(base: Vec<CallFact>, loading: bool) -> Element {
                 div { class: "home-list admin-later",
                     p { strong { "판정 실패 시 동작" } span { "판정에 실패하거나 늦을 때 막는지 통과시키는지" } }
                     p { strong { "강등 모드" } span { "Jev 장애로 규칙만으로 판정 중인지" } }
-                    p { strong { "구성요소 상태" } span { "Neo4j, Valkey, Jev가 응답하는지" } }
+                    p { strong { "구성요소 상태" } span { "PostgreSQL, Valkey, Jev가 응답하는지" } }
                     p { strong { "보안 점검" } span { "게이트웨이가 모든 네트워크에 열려 있는지, 훅 요청에 인증이 있는지" } }
                 }
             }

@@ -417,7 +417,7 @@ pub fn check_idle(last_at: Option<i64>) -> Result<(), ApiError> {
 }
 
 #[allow(dead_code)]
-fn call_row(props: &Map<String, Value>, ran: Value) -> Value {
+pub(crate) fn call_row(props: &Map<String, Value>, ran: Value) -> Value {
     let trace = props
         .get("trace_json")
         .map(parse_json)
@@ -481,7 +481,7 @@ fn is_attack(tool: &str, input: &Value) -> bool {
     }
 }
 
-fn preview(props: Map<String, Value>) -> Map<String, Value> {
+pub(crate) fn preview(props: Map<String, Value>) -> Map<String, Value> {
     props
         .into_iter()
         .map(|(key, value)| {
@@ -499,7 +499,7 @@ fn preview(props: Map<String, Value>) -> Map<String, Value> {
 }
 
 /// The fields a node's caption needs, read before its payload is cut short.
-fn summary(props: &Map<String, Value>) -> Map<String, Value> {
+pub(crate) fn summary(props: &Map<String, Value>) -> Map<String, Value> {
     let payload = props
         .get("payload_json")
         .map(parse_json)
@@ -564,7 +564,7 @@ fn summary(props: &Map<String, Value>) -> Map<String, Value> {
 }
 
 /// A JSON document stored as a string property; anything unreadable reads as nothing.
-fn parse_json(value: &Value) -> Value {
+pub(crate) fn parse_json(value: &Value) -> Value {
     value
         .as_str()
         .and_then(|s| serde_json::from_str(s).ok())
@@ -579,7 +579,7 @@ fn into_object(value: Value) -> Option<Map<String, Value>> {
 }
 
 /// The first `limit` characters, counted the way Python slices strings.
-fn clip(text: &str, limit: usize) -> String {
+pub(crate) fn clip(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }
 

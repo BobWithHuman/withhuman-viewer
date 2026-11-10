@@ -67,6 +67,7 @@ cargo run
 | `JEV_URL=<주소>` | 키를 확인할 Jev 주소입니다(기본 `https://api.typesafe.ai`). |
 | `NEO4J_URL`, `NEO4J_DATABASE`, `NEO4J_USER`, `NEO4J_PASSWORD` | 설정 파일이 없을 때 쓰는 Neo4j 접속 기본값입니다. |
 | `VIEWER_FIXTURE=<파일>` | 데모 데이터로 다른 파일을 씁니다. |
+| `VIEWER_DB=<주소>` | 이번 실행만 그 데이터베이스를 읽습니다(저장하지 않음). 엔진의 PostgreSQL은 `postgres://사용자:비밀번호@호스트:포트/DB`, 예전 엔진의 Neo4j는 `http://…`. |
 | `VIEWER_SIGN_IDENTITY=<인증서 이름>` | `cargo run`이 앱을 서명할 인증서입니다(아래 참고). |
 
 설정은 `~/Library/Application Support/dev.withhuman.viewer/`(`settings.json`, `prefs.json`)에 저장됩니다. 지우면 처음 상태로 돌아갑니다.

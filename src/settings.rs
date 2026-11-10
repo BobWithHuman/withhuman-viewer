@@ -1,5 +1,6 @@
-//! Where the viewer finds Neo4j, kept in the app's config folder between launches. The
-//! password is kept in the system keychain, never in the file.
+//! Where the viewer finds the engine's data (its PostgreSQL, or Neo4j before withhuman-core #118),
+//! kept in the app's config folder between launches. The password is kept in the system keychain,
+//! never in the file.
 
 use std::fs;
 use std::path::Path;
@@ -82,6 +83,30 @@ pub struct Public {
     pub engine: Engine,
     pub engine_dir: Option<String>,
     pub jev_saved: bool,
+}
+
+impl Public {
+    /// Where the data comes from, without the credentials an address may carry: the engine's
+    /// PostgreSQL, Neo4j (engines before withhuman-core #118), or the demo.
+    pub fn store(&self) -> String {
+        if self.demo {
+            return "데모 데이터".into();
+        }
+        let url = self.neo4j_url.trim();
+        match url.split_once("://") {
+            Some(("postgres" | "postgresql", rest)) => {
+                format!("PostgreSQL · {}", rest.rsplit('@').next().unwrap_or(rest))
+            }
+            _ => format!("Neo4j · {url}"),
+        }
+    }
+
+    /// The address without its scheme and credentials, for the top bar.
+    pub fn host(&self) -> String {
+        let url = self.neo4j_url.trim();
+        let rest = url.split_once("://").map_or(url, |(_, r)| r);
+        rest.rsplit('@').next().unwrap_or(rest).to_owned()
+    }
 }
 
 /// A change from the settings form; a missing password keeps the stored one.
@@ -189,6 +214,24 @@ impl Settings {
         self
     }
 
+    /// These settings pointed at another database for this run only, as `VIEWER_DB` asks: the
+    /// address read as written, its password (if it carries one) kept from the keychain's way,
+    /// the demo and the first launch's setup left aside. Nothing of it is saved unless the
+    /// settings are saved from the form.
+    pub fn pointed_at(mut self, url: &str) -> Self {
+        self.neo4j_url = url.trim().to_owned();
+        if let Ok(config) = <tokio_postgres::Config as std::str::FromStr>::from_str(url.trim())
+            && let Some(password) = config.get_password()
+        {
+            self.password = String::from_utf8_lossy(password).into_owned();
+        }
+        self.demo = false;
+        self.jev_saved = true;
+        // Not the engine this Mac may start: the address is what the bar names.
+        self.engine = Engine::Server;
+        self
+    }
+
     /// Reads the file, without the keychain. A password still in the file is moved to the
     /// keychain and taken out of the file. `VIEWER_MOCK=1` opens the demo whatever was saved,
     /// without changing the file.
@@ -248,6 +291,18 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::Settings;
+
+    #[test]
+    fn the_pages_name_the_store_without_its_credentials() {
+        let mut s = Settings::default().pointed_at("postgres://viewer:pw@db.internal:5433/withhuman");
+        assert_eq!(s.password, "pw", "taken from the address, so no keychain prompt");
+        assert!(!s.demo && s.jev_saved);
+        let p = s.public(std::path::Path::new("/tmp/x"));
+        assert_eq!(p.store(), "PostgreSQL · db.internal:5433/withhuman");
+        assert_eq!(p.host(), "db.internal:5433/withhuman");
+        s.neo4j_url = "http://127.0.0.1:7474".into();
+        assert_eq!(s.public(std::path::Path::new("/tmp/x")).store(), "Neo4j · http://127.0.0.1:7474");
+    }
 
     #[test]
     fn the_file_never_holds_the_password() {

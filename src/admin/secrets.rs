@@ -200,7 +200,7 @@ pub fn Secrets() -> Element {
     let period = period_label(days());
     let at = clock(loaded);
     let none = if loading { "불러오는 중…" } else { "데이터 없음" };
-    let source = if p.demo { "데모 데이터".to_owned() } else { format!("Neo4j · {}", p.neo4j_url) };
+    let source = p.store();
     let current: Option<Trail> = picked()
         .and_then(|(s, k)| list.iter().find(|t| t.session == s && t.mentions.first().is_some_and(|m| m.key == k)).cloned())
         .or_else(|| list.first().cloned());

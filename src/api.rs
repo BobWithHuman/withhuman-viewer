@@ -1,4 +1,5 @@
-//! The app's data source: Neo4j or the demo graph, chosen by the settings. The screens call
+//! The app's data source: the engine's PostgreSQL store, Neo4j (engines before withhuman-core
+//! #118), or the demo graph, chosen by the settings. The screens call
 //! these functions directly and get typed answers.
 
 use std::path::PathBuf;
@@ -18,6 +19,8 @@ pub struct Backend {
     settings: Mutex<Settings>,
     path: PathBuf,
     demo: Mutex<Demo>,
+    /// The PostgreSQL connection kept between reads.
+    pg: crate::pg::Pool,
 }
 
 /// What a settings test found: how many sessions the graph holds, and how long it took.
@@ -44,9 +47,13 @@ impl Backend {
             .expect("HTTP client");
         Self {
             client,
-            settings: Mutex::new(Settings::load(&path)),
+            settings: Mutex::new(match std::env::var("VIEWER_DB") {
+                Ok(url) if !url.trim().is_empty() => Settings::load(&path).pointed_at(&url),
+                _ => Settings::load(&path),
+            }),
             path,
             demo: Mutex::new(Demo::load()),
+            pg: crate::pg::Pool::default(),
         }
     }
 
@@ -65,12 +72,11 @@ impl Backend {
         let value = if settings.demo {
             Ok(self.demo.lock().expect("demo lock").sessions())
         } else {
-            Neo4j {
-                client: &self.client,
-                settings: &settings,
+            if crate::pg::is_postgres(&settings) {
+                crate::pg::Postgres { settings: &settings, pool: &self.pg }.sessions().await
+            } else {
+                Neo4j { client: &self.client, settings: &settings }.sessions().await
             }
-            .sessions()
-            .await
         };
         typed(value)
     }
@@ -80,12 +86,11 @@ impl Backend {
         let value = if settings.demo {
             self.demo.lock().expect("demo lock").graph(session)
         } else {
-            Neo4j {
-                client: &self.client,
-                settings: &settings,
+            if crate::pg::is_postgres(&settings) {
+                crate::pg::Postgres { settings: &settings, pool: &self.pg }.graph(session).await
+            } else {
+                Neo4j { client: &self.client, settings: &settings }.graph(session).await
             }
-            .graph(session)
-            .await
         };
         typed(value)
     }
@@ -95,12 +100,11 @@ impl Backend {
         let value = if settings.demo {
             Ok(self.demo.lock().expect("demo lock").node(session, seq))
         } else {
-            Neo4j {
-                client: &self.client,
-                settings: &settings,
+            if crate::pg::is_postgres(&settings) {
+                crate::pg::Postgres { settings: &settings, pool: &self.pg }.node(session, seq).await
+            } else {
+                Neo4j { client: &self.client, settings: &settings }.node(session, seq).await
             }
-            .node(session, seq)
-            .await
         };
         typed(value)
     }
@@ -112,12 +116,11 @@ impl Backend {
         let value = if settings.demo {
             Ok(self.demo.lock().expect("demo lock").call_facts())
         } else {
-            Neo4j {
-                client: &self.client,
-                settings: &settings,
+            if crate::pg::is_postgres(&settings) {
+                crate::pg::Postgres { settings: &settings, pool: &self.pg }.call_facts().await
+            } else {
+                Neo4j { client: &self.client, settings: &settings }.call_facts().await
             }
-            .call_facts()
-            .await
         };
         typed(value)
     }
@@ -129,12 +132,11 @@ impl Backend {
         let value = if settings.demo {
             Ok(self.demo.lock().expect("demo lock").secrets())
         } else {
-            Neo4j {
-                client: &self.client,
-                settings: &settings,
+            if crate::pg::is_postgres(&settings) {
+                crate::pg::Postgres { settings: &settings, pool: &self.pg }.secrets().await
+            } else {
+                Neo4j { client: &self.client, settings: &settings }.secrets().await
             }
-            .secrets()
-            .await
         };
         typed(value)
     }
@@ -148,12 +150,11 @@ impl Backend {
         let value = if settings.demo {
             Ok(self.demo.lock().expect("demo lock").calls(sessions))
         } else {
-            Neo4j {
-                client: &self.client,
-                settings: &settings,
+            if crate::pg::is_postgres(&settings) {
+                crate::pg::Postgres { settings: &settings, pool: &self.pg }.calls(sessions).await
+            } else {
+                Neo4j { client: &self.client, settings: &settings }.calls(sessions).await
             }
-            .calls(sessions)
-            .await
         };
         typed(value)
     }
@@ -164,12 +165,11 @@ impl Backend {
         let value = if settings.demo {
             self.demo.lock().expect("demo lock").delete(session)
         } else {
-            Neo4j {
-                client: &self.client,
-                settings: &settings,
+            if crate::pg::is_postgres(&settings) {
+                crate::pg::Postgres { settings: &settings, pool: &self.pg }.delete_session(session).await
+            } else {
+                Neo4j { client: &self.client, settings: &settings }.delete_session(session).await
             }
-            .delete_session(session)
-            .await
         };
         value
             .map(|v| v["deleted"].as_i64().unwrap_or(0))
@@ -197,7 +197,7 @@ impl Backend {
         if std::env::var("VIEWER_ONBOARD").is_ok_and(|v| v == "1") {
             return true;
         }
-        if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") {
+        if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") || std::env::var("VIEWER_DB").is_ok() {
             return false;
         }
         !self.settings.lock().expect("settings lock").jev_saved
@@ -287,6 +287,14 @@ impl Backend {
             .apply(change)?
             .unlocked();
         let started = Instant::now();
+        if crate::pg::is_postgres(&candidate) {
+            let pool = crate::pg::Pool::default();
+            let sessions = crate::pg::Postgres { settings: &candidate, pool: &pool }
+                .count_sessions()
+                .await
+                .map_err(|e| e.error)?;
+            return Ok(Probe { sessions, ms: started.elapsed().as_millis() });
+        }
         let db = Neo4j {
             client: &self.client,
             settings: &candidate,

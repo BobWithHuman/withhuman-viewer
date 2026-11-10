@@ -592,7 +592,7 @@ fn TopBar() -> Element {
         (true, _) => ("demo", "데모 데이터".to_owned()),
         (false, Load::Ready(_)) => ("ok", match p.engine {
             crate::settings::Engine::Local => "이 맥의 엔진".to_owned(),
-            _ => p.neo4j_url.trim_start_matches("http://").trim_start_matches("https://").to_owned(),
+            _ => p.host(),
         }),
         (false, Load::Failed(_)) => ("down", "연결 안 됨".to_owned()),
         (false, Load::Loading) => ("wait", "연결하는 중".to_owned()),
@@ -716,7 +716,7 @@ fn Sidebar() -> Element {
             div { class: "sb-tabs", i { class: "sb-grip" } span { class: "sb-tab on", "데이터" } }
             div { class: "sb-list",
                 SbRow {
-                    label: if p.demo { "데모 데이터 · Neo4j로" } else { "Neo4j · 데모로" },
+                    label: if p.demo { "데모 데이터 · 엔진 데이터로" } else { "엔진 데이터 · 데모로" },
                     icon: "M5 6c0-1.4 3.1-2.6 7-2.6s7 1.2 7 2.6-3.1 2.6-7 2.6S5 7.4 5 6zM5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6",
                     on: false,
                     onclick: move |_| state.toggle_demo(&backend),
@@ -788,7 +788,7 @@ fn Rail() -> Element {
             span { class: "fill" }
             button {
                 class: if demo { "demo" } else { "" },
-                title: if demo { "데모 데이터를 보는 중: Neo4j로 바꾸기" } else { "Neo4j를 보는 중: 데모 데이터로 바꾸기" },
+                title: if demo { "데모 데이터를 보는 중: 엔진 데이터로 바꾸기" } else { "엔진 데이터를 보는 중: 데모 데이터로 바꾸기" },
                 onclick: move |_| state.toggle_demo(&backend),
                 {icon("M5 6c0-1.4 3.1-2.6 7-2.6s7 1.2 7 2.6-3.1 2.6-7 2.6S5 7.4 5 6zM5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6")}
             }
@@ -844,13 +844,13 @@ fn StageNotice() -> Element {
         (Load::Failed(_), _) if first_run && !demo => rsx! {
             Notice {
                 title: "WithHuman Viewer에 오신 걸 환영합니다",
-                message: "WithHuman 엔진이 기록한 에이전트 세션을 그래프로 봅니다. 엔진의 Neo4j에 연결하거나, 엔진 없이 데모 데이터로 먼저 둘러보세요.",
+                message: "WithHuman 엔진이 기록한 에이전트 세션을 그래프로 봅니다. 엔진의 데이터베이스(PostgreSQL)에 연결하거나, 엔진 없이 데모 데이터로 먼저 둘러보세요.",
                 button { class: "primary", onclick: move |_| state.settings_open.set(true), "엔진에 연결" }
                 {demo_button}
             }
         },
         (Load::Failed(message), _) => rsx! {
-            Notice { title: if demo { "데모 데이터를 읽지 못했습니다" } else { "Neo4j에 연결할 수 없습니다" }, message,
+            Notice { title: if demo { "데모 데이터를 읽지 못했습니다" } else { "엔진 데이터베이스에 연결할 수 없습니다" }, message,
                 button { class: "primary", onclick: move |_| state.settings_open.set(true), "연결 설정" }
                 {demo_button}
                 button { onclick: retry, "다시 시도" }
