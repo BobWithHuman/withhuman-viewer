@@ -1,5 +1,6 @@
-//! The route map after the Figma Make design (see `crate::flow`): two levels, the session's
-//! network of tasks and one task's line, with the list beside it sliding between the two.
+//! The route map after the Figma Make design (see `crate::flow`): the session's line, turn by
+//! turn, a legend over its top left to count, grey out and light kinds of station, and the
+//! turns listed beside it.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use dioxus::prelude::*;
 
 use super::{AppState, Load, Selection};
 use crate::flow::{
-    AMBER, Flow, GREEN, Item, Kind, LINE_COLOR, LINE_MUTED, Leg, Overview, RED, Stop, Summary,
+    AMBER, Flow, GREEN, Item, Kind, LINE_COLOR, LINE_MUTED, Leg, RED, Stop, Summary,
     TEXT_COLOR, TEXT_MUTED, Glyph, Tone, Turn,
 };
 use crate::layout::clip;
@@ -25,12 +26,6 @@ const PAN_JS: &str = include_str!("pan.js");
 const TRACE_COLOR: &str = "#7c3aed";
 /// The rest of the line meanwhile: grey, out of the way.
 const DIM_COLOR: &str = "#d4d6db";
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Level {
-    Overview,
-    Detail,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Tab {
@@ -98,12 +93,11 @@ pub fn FlowMap() -> Element {
         }
         Some(Arc::new(f))
     });
-    let mut level = use_signal(|| Level::Overview);
     let mut turn = use_signal(|| 0usize);
-    let hover = use_signal(|| None::<usize>);
     let mut tab = use_signal(|| Tab::All);
-    let mut zoom = use_signal(|| 1.0_f64);
     let mut detail = use_signal(|| true);
+    // The legend over the map's top left, opened and closed from the tools.
+    let mut legend = use_signal(|| true);
     let hovered = use_signal(|| None::<i64>);
     // The session list, opened from the session's name in either level.
     let mut picking = use_context::<Picking>().0;
@@ -149,7 +143,7 @@ pub fn FlowMap() -> Element {
         }
     };
 
-    // A new session opens on its first stop; one task opens on its line, more on the network.
+    // A new session opens on its first stop.
     let drawn = use_signal(|| None::<Option<String>>);
     use_effect(move || {
         let (Some(m), Some(f)) = (metro(), flow()) else {
@@ -163,12 +157,6 @@ pub fn FlowMap() -> Element {
         drawn.set(Some(session));
         detail.set(true);
         tab.set(Tab::All);
-        zoom.set(1.0);
-        level.set(if f.tasks.len() > 1 {
-            Level::Overview
-        } else {
-            Level::Detail
-        });
         if *state.selected.peek() == Selection::None
             && let Some(seq) = m.default_dest()
         {
@@ -205,12 +193,6 @@ pub fn FlowMap() -> Element {
         state.focus.set(None);
         if let Some(t) = f.turn_of(seq) {
             turn.set(t);
-            level.set(Level::Detail);
-        }
-    });
-    use_effect(move || {
-        if (state.fit)() > 0 {
-            zoom.set(1.0);
         }
     });
 
@@ -228,7 +210,7 @@ pub fn FlowMap() -> Element {
         .filter(|&i| tab().holds(&f.turns[i]))
         .collect();
     // A filter that hides the turn picked moves to the first it shows.
-    if level() == Level::Detail && !visible.is_empty() && !visible.contains(&t) {
+    if !visible.is_empty() && !visible.contains(&t) {
         let first = visible[0];
         let f2 = f.clone();
         spawn(async move { select_turn(turn, state, &f2, first) });
@@ -237,37 +219,13 @@ pub fn FlowMap() -> Element {
         Selection::Node(seq) => f.call(seq).map(|_| seq),
         Selection::None => None,
     };
-    let is_detail = level() == Level::Detail;
-    let slide = if is_detail {
-        "translateX(-50%)"
-    } else {
-        "translateX(0)"
-    };
-    let f_focus = f.clone();
-    let mut focus_turn = move |n: usize| {
-        select_turn(turn, state, &f_focus, n);
-        level.set(Level::Detail);
-        zoom.set(1.0);
-    };
-    let f_zoom = f.clone();
-    let zoom_in = {
-        move |_| {
-            if level() == Level::Overview {
-                select_turn(turn, state, &f_zoom, t);
-                level.set(Level::Detail);
-                zoom.set(1.0);
-            } else {
-                document::eval(&format!("{PAN_JS}\nfxMap.zoomBy(1.25)"));
-            }
-        }
+    let zoom_in = move |_| {
+        document::eval(&format!("{PAN_JS}\nfxMap.zoomBy(1.25)"));
     };
     let zoom_out = move |_| {
-        if level() == Level::Detail {
-            document::eval(&format!("{PAN_JS}\nfxMap.zoomBy(0.8)"));
-        }
+        document::eval(&format!("{PAN_JS}\nfxMap.zoomBy(0.8)"));
     };
-    // Only over the line: the network is read whole, and picking there opens the line.
-    let card = SHOW_ROUTE_CARD && is_detail && detail() && picked.is_some();
+    let card = SHOW_ROUTE_CARD && detail() && picked.is_some();
     // Each turn's prompt and then its Calls, in the order made, to step through with ← and →.
     let order: Vec<Step> = f
         .turns
@@ -311,35 +269,28 @@ pub fn FlowMap() -> Element {
                     state.selected.set(Selection::Node(seq));
                 }
             }
-            level.set(Level::Detail);
         }
     };
     let (mut step_prev, mut step_next) = (step.clone(), step);
     let task_name = f.tasks[task].name.clone();
     let (a, b) = (f.tasks[task].from + 1, f.tasks[task].to + 1);
-    let anim = if is_detail {
-        "fx-stage anim-zoom-in"
-    } else {
-        "fx-stage anim-zoom-out"
-    };
 
     rsx! {
         div { class: "routes fx",
             // The controls of the map, down its left as a design app keeps its tools: the
-            // network or one line, zoom, fit, stepping through the Calls, reading live.
+            // legend, zoom, fit, stepping through the Calls, reading live.
             nav { class: "fx-tools",
-                button { class: if !is_detail { "on" } else { "" }, title: "전체 노선망", onclick: move |_| level.set(Level::Overview),
-                    {tool_icon("M4 6.5l5-2 6 2 5-2v13l-5 2-6-2-5 2zM9 4.5v13M15 6.5v13")}
-                }
-                button { class: if is_detail { "on" } else { "" }, title: "자세히 · 고른 턴의 노선", onclick: move |_| focus_turn(t),
-                    {tool_icon("M3 12h18M8.6 12a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0zM13.6 12a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0zM18.6 12a1.6 1.6 0 1 1-3.2 0 1.6 1.6 0 0 1 3.2 0z")}
+                button {
+                    class: if legend() { "on" } else { "" },
+                    title: if legend() { "범례 닫기" } else { "범례 열기 · 종류별로 보고 가리기" },
+                    onclick: move |_| legend.toggle(),
+                    {tool_icon("M4 5h16v14H4zM9 5v14M5.8 8.5h1.4M5.8 11.5h1.4M5.8 14.5h1.4")}
                 }
                 i { class: "sep" }
                 button { title: "확대", onclick: zoom_in, {tool_icon("M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM15.3 15.3L20 20M7.5 10.5h6M10.5 7.5v6")} }
-                button { title: "축소", disabled: !is_detail, onclick: zoom_out, {tool_icon("M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM15.3 15.3L20 20M7.5 10.5h6")} }
+                button { title: "축소", onclick: zoom_out, {tool_icon("M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM15.3 15.3L20 20M7.5 10.5h6")} }
                 button {
                     title: "노선 전체를 한 화면에",
-                    disabled: !is_detail,
                     onclick: move |_| { document::eval(&format!("{PAN_JS}\nfxMap.fit()")); },
                     {tool_icon("M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5")}
                 }
@@ -361,11 +312,9 @@ pub fn FlowMap() -> Element {
                 }
             }
             main { class: "fx-main",
-                div { key: "{is_detail}", class: "{anim}",
-                    if !is_detail {
-                        OverviewMap { flow: f.clone(), turn, hover, level, zoom }
-                    } else if !visible.is_empty() {
-                        LineMap { flow: f.clone(), turns: visible.clone(), turn, detail, covered: if card { CARD_W } else { 0.0 } }
+                div { class: "fx-stage",
+                    if !visible.is_empty() {
+                        LineMap { flow: f.clone(), turns: visible.clone(), turn, detail, legend, covered: if card { CARD_W } else { 0.0 } }
                     } else {
                         div { class: "fx-empty", "이 조건에 맞는 턴이 없습니다" }
                     }
@@ -376,16 +325,12 @@ pub fn FlowMap() -> Element {
                     super::metro::RoutePanel { metro: m.clone(), dest: picked, hovered, detail }
                 }
             }
-            // What is looked at, in detail: the session's tasks, or the turns of the line.
+            // What is looked at, in detail: the turns of the line.
             aside { class: "fx-aside",
                 div { class: "fx-slide-wrap",
-                    div { class: "fx-slide", style: "transform: {slide}",
-                        div { class: "fx-pane", aria_hidden: is_detail,
-                            TaskPanel { flow: f.clone(), turn, hover, level, zoom }
-                        }
-                        div { class: "fx-pane", aria_hidden: !is_detail,
+                    div { class: "fx-slide solo",
+                        div { class: "fx-pane",
                             div { class: "fx-where",
-                                button { class: "fx-back", onclick: move |_| level.set(Level::Overview), "‹ 전체" }
                                 div { class: "fx-where-row",
                                     span { class: "fx-swatch", style: "background: {LINE_COLOR}" }
                                     div { class: "fx-where-text",
@@ -440,160 +385,6 @@ fn blocked_icon(s: f64) -> Element {
         svg { width: "{s}", height: "{s}", view_box: "0 0 16 16",
             circle { cx: "8", cy: "8", r: "7", fill: "#dc2626" }
             path { d: "M5.3 5.3l5.4 5.4M10.7 5.3l-5.4 5.4", stroke: "#fff", stroke_width: "1.6", stroke_linecap: "round" }
-        }
-    }
-}
-
-/// The overview's list: the session's numbers, then its tasks by chapter, the one looked at
-/// open on its turns.
-#[component]
-fn TaskPanel(
-    flow: Arc<Flow>,
-    turn: Signal<usize>,
-    hover: Signal<Option<usize>>,
-    level: Signal<Level>,
-    zoom: Signal<f64>,
-) -> Element {
-    let state = use_context::<AppState>();
-    let f = &flow;
-    let t = turn().min(f.turns.len() - 1);
-    let sel_task = f.task_of(t);
-    let cur_ch = Flow::chapter_of(sel_task);
-    let places: HashSet<&str> = f
-        .turns
-        .iter()
-        .flat_map(|t| t.calls.iter().map(|c| c.key.as_str()))
-        .collect();
-    let blocked = f.turns.iter().filter(|t| t.blocked() > 0).count();
-    let warn = f.turns.iter().filter(|t| t.warn() > 0).count();
-    let stats = [
-        ("노선", f.tasks.len(), ""),
-        ("역", places.len(), ""),
-        ("차단", blocked, "red"),
-        ("확인", warn, "amber"),
-    ];
-    rsx! {
-        div { class: "fx-tasks",
-            div { class: "fx-tasks-head",
-                div { class: "fx-kicker", "세션 노선망" }
-                div { class: "fx-stats",
-                    for (l, n, c) in stats {
-                        div { class: "fx-stat",
-                            div { class: "n {c}", "{n}" }
-                            div { class: "l", "{l}" }
-                        }
-                    }
-                }
-            }
-            div { class: "fx-kicker pad", "노선 · 작업" }
-            div { class: "fx-task-list",
-                for ch in 0..f.chapters() {
-                    {
-                        let range = f.chapter_tasks(ch);
-                        let first_turn = f.tasks[range.start].from;
-                        let fl = flow.clone();
-                        rsx! {
-                            button {
-                                key: "ch{ch}",
-                                class: if ch == cur_ch { "fx-ch on" } else { "fx-ch" },
-                                onclick: move |_| select_turn(turn, state, &fl, first_turn),
-                                span { "{ch + 1}구간" }
-                                span { class: "rule" }
-                                span { class: "st", if ch == cur_ch { "보는 중" } else { "펼치기" } }
-                            }
-                            if ch == cur_ch {
-                                for ti in range {
-                                    TaskRow { key: "task{ti}", flow: flow.clone(), task: ti, turn, hover, level, zoom }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn TaskRow(
-    flow: Arc<Flow>,
-    task: usize,
-    turn: Signal<usize>,
-    hover: Signal<Option<usize>>,
-    level: Signal<Level>,
-    zoom: Signal<f64>,
-) -> Element {
-    let state = use_context::<AppState>();
-    let mut hover = hover;
-    let f = &flow;
-    let tk = &f.tasks[task];
-    let t = turn().min(f.turns.len() - 1);
-    let on = f.task_of(t) == task;
-    let lit = on || hover() == Some(task);
-    let turns: Vec<usize> = f.task_turns(task).collect();
-    let b = turns.iter().filter(|&&i| f.turns[i].blocked() > 0).count();
-    let w = turns.iter().filter(|&&i| f.turns[i].warn() > 0).count();
-    let places: HashSet<&str> = turns
-        .iter()
-        .flat_map(|&i| f.turns[i].calls.iter().map(|c| c.key.as_str()))
-        .collect();
-    let swatch = if lit { LINE_COLOR } else { LINE_MUTED };
-    let from = tk.from;
-    let fl = flow.clone();
-    let focus = move |n: usize, fl: &Flow| {
-        let (mut level, mut zoom) = (level, zoom);
-        select_turn(turn, state, fl, n);
-        level.set(Level::Detail);
-        zoom.set(1.0);
-    };
-    rsx! {
-        div {
-            class: if on { "fx-task on" } else { "fx-task" },
-            onmouseenter: move |_| hover.set(Some(task)),
-            onmouseleave: move |_| hover.set(None),
-            button {
-                class: "fx-task-btn",
-                onclick: move |_| select_turn(turn, state, &fl, from),
-                span { class: "fx-swatch", style: "background: {swatch}" }
-                span { class: "fx-task-text",
-                    span { class: "nm", "{tk.name}" }
-                    span { class: "meta",
-                        "역 {places.len()} · 턴 {tk.from + 1}–{tk.to + 1}"
-                        if b > 0 { b { class: "red", " · 차단 {b}" } }
-                        if w > 0 { b { class: "amber", " · 확인 {w}" } }
-                    }
-                    {legs(&f.summary(task))}
-                }
-            }
-            if on {
-                div { class: "fx-task-turns",
-                    div { class: "fx-rail",
-                        for i in turns.iter().copied() {
-                            {
-                                let tt = &f.turns[i];
-                                let dot = if tt.blocked() > 0 { "dot red" } else if tt.warn() > 0 { "dot amber" } else { "dot" };
-                                let fl = flow.clone();
-                                rsx! {
-                                    button {
-                                        key: "{i}",
-                                        class: if i == t { "fx-tturn on" } else { "fx-tturn" },
-                                        onclick: move |_| focus(i, &fl),
-                                        span { class: "{dot}" }
-                                        span { class: "no", "턴 {i + 1}" }
-                                        span { class: "rq", "{clip(&tt.req, 60)}" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    {
-                        let fl = flow.clone();
-                        rsx! {
-                            button { class: "fx-go", onclick: move |_| focus(t, &fl), "자세히 보기 ›" }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -996,303 +787,208 @@ fn call_row(c: &crate::flow::Call, key: String, picked: Option<i64>, mut state: 
     }
 }
 
-// ── The overview ──────────────────────────────────────────────────────────────────────────
+// ── The legend ────────────────────────────────────────────────────────────────────────────
 
-#[component]
-fn OverviewMap(
-    flow: Arc<Flow>,
-    turn: Signal<usize>,
-    hover: Signal<Option<usize>>,
-    level: Signal<Level>,
-    zoom: Signal<f64>,
-) -> Element {
-    let state = use_context::<AppState>();
-    let mut hover = hover;
-    let mut size = use_signal(|| (1000.0_f64, 700.0_f64));
-    let f = &flow;
-    let t = turn().min(f.turns.len() - 1);
-    let sel_task = f.task_of(t);
-    let ch = Flow::chapter_of(sel_task);
-    let (w, h) = size();
-    let o: Overview = f.overview(ch, w, h);
-    let lit = hover().unwrap_or(sel_task);
-    let dim = move |task: usize| lit != task;
-    let num = |task: usize| format!("{:02}", task + 1);
-    let color_of = |task: usize| {
-        o.lines
-            .iter()
-            .find(|l| l.task == task)
-            .map_or(LINE_COLOR, |l| l.color)
-    };
-    let focus = move |n: usize, fl: &Flow| {
-        let (mut level, mut zoom) = (level, zoom);
-        select_turn(turn, state, fl, n);
-        level.set(Level::Detail);
-        zoom.set(1.0);
-    };
-    let mut order: Vec<usize> = (0..o.lines.len()).collect();
-    order.sort_by_key(|&i| o.lines[i].task == lit);
-    let range = f.chapter_tasks(ch);
-    let rest_tasks: Vec<usize> = range.clone().collect();
+/// How wide the legend over the map is, with its margin: kept in step with `.fx-legend-panel`.
+const LEGEND_W: f64 = 300.0;
 
+/// What a Call's verdict is, as the legend counts it.
+fn verdict(c: &crate::flow::Call) -> &'static str {
+    if c.blocked {
+        "blocked"
+    } else if c.warn {
+        "warn"
+    } else if c.allowed {
+        "allowed"
+    } else {
+        "none"
+    }
+}
+
+/// Whether the legend hides a Call: its verdict or its kind of tool.
+fn hides(hidden: &HashSet<&'static str>, c: &crate::flow::Call) -> bool {
+    hidden.contains(verdict(c)) || hidden.contains(c.glyph.name())
+}
+
+/// The marks the legend can light.
+const LIGHTS: [(&str, &str); 5] = [
+    ("told", "도구 결과가 시킨 호출"),
+    ("carried", "이전 턴의 값을 쓴 호출"),
+    ("loose", "시킨 것을 못 찾은 호출"),
+    ("outside", "밖과 주고받은 호출"),
+    ("changed", "파일을 바꾼 호출"),
+];
+
+fn lights(key: &str, c: &crate::flow::Call) -> bool {
+    match key {
+        "told" => c.by.is_some() || c.cause.is_some(),
+        "carried" => c.origin.is_some(),
+        "loose" => c.loose,
+        "outside" => matches!(c.glyph, Glyph::Web | Glyph::Plug),
+        "changed" => c.glyph == Glyph::Edit,
+        _ => false,
+    }
+}
+
+/// The Calls a station stands for: its own and those folded into it, or its group's.
+fn stop_calls<'a>(f: &'a Flow, s: &Stop) -> Vec<&'a crate::flow::Call> {
+    let t = &f.turns[s.turn];
+    if let Some(Item::Group { calls, .. }) = s.group.and_then(|g| t.items.get(g)) {
+        return calls.iter().map(|&i| &t.calls[i]).collect();
+    }
+    s.seq
+        .iter()
+        .chain(s.also.iter())
+        .filter_map(|q| t.calls.iter().find(|c| c.seq == *q))
+        .collect()
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum LegIcon {
+    All,
+    Swatch(&'static str),
+    Glyph(Glyph),
+    /// A verdict's mark: `blocked`, `warn`, `allowed` or `none`.
+    Mark(&'static str),
+    Light,
+}
+
+/// A Call (or a turn's request) a legend row unfolds into.
+#[derive(Clone, Debug, PartialEq)]
+struct LegPick {
+    turn: usize,
+    seq: Option<i64>,
+    text: String,
+    at: String,
+}
+
+struct LegRow {
+    key: &'static str,
+    label: String,
+    n: usize,
+    icon: LegIcon,
+    picks: Vec<LegPick>,
+}
+
+fn pick_of(n: usize, c: &crate::flow::Call) -> LegPick {
+    LegPick { turn: n, seq: Some(c.seq), text: c.title.clone(), at: hm(c.at) }
+}
+
+/// The legend's kinds of station over the turns shown, those there are, in the line's order:
+/// every Call, the requests, the verdicts, the kinds of tool, the answers.
+fn legend_rows(f: &Flow, turns: &[usize], stops: &[Stop]) -> Vec<LegRow> {
+    let calls: Vec<(usize, &crate::flow::Call)> =
+        turns.iter().flat_map(|&n| f.turns[n].calls.iter().map(move |c| (n, c))).collect();
+    let mut rows = vec![LegRow { key: "all", label: "모든 호출".into(), n: calls.len(), icon: LegIcon::All, picks: Vec::new() }];
+    let asks: Vec<LegPick> = turns
+        .iter()
+        .map(|&n| LegPick { turn: n, seq: None, text: f.turns[n].req.clone(), at: hm(f.turns[n].asked) })
+        .collect();
+    if !asks.is_empty() {
+        rows.push(LegRow { key: "ask", label: "사용자 요청".into(), n: asks.len(), icon: LegIcon::Swatch(Tone::Ask.color()), picks: asks });
+    }
+    for (key, label) in [("blocked", "차단"), ("warn", "확인 요청"), ("allowed", "허용"), ("none", "판정 없음")] {
+        let picks: Vec<LegPick> = calls.iter().filter(|(_, c)| verdict(c) == key).map(|&(n, c)| pick_of(n, c)).collect();
+        if !picks.is_empty() {
+            rows.push(LegRow { key, label: label.into(), n: picks.len(), icon: LegIcon::Mark(key), picks });
+        }
+    }
+    for g in Glyph::ALL {
+        let picks: Vec<LegPick> = calls.iter().filter(|(_, c)| c.glyph == g).map(|&(n, c)| pick_of(n, c)).collect();
+        if !picks.is_empty() {
+            rows.push(LegRow { key: g.name(), label: g.name().into(), n: picks.len(), icon: LegIcon::Glyph(g), picks });
+        }
+    }
+    let says = stops.iter().filter(|s| s.kind == Kind::Say).count();
+    if says > 0 {
+        rows.push(LegRow { key: "say", label: "에이전트 답변".into(), n: says, icon: LegIcon::Swatch(Tone::Say.color()), picks: Vec::new() });
+    }
+    rows
+}
+
+/// The marks to light over the turns shown, each with the Calls it lights.
+fn light_rows(f: &Flow, turns: &[usize]) -> Vec<LegRow> {
+    LIGHTS
+        .iter()
+        .map(|&(key, label)| {
+            let picks: Vec<LegPick> = turns
+                .iter()
+                .flat_map(|&n| f.turns[n].calls.iter().filter(|c| lights(key, c)).map(move |c| pick_of(n, c)))
+                .collect();
+            LegRow { key, label: label.into(), n: picks.len(), icon: LegIcon::Light, picks }
+        })
+        .collect()
+}
+
+fn legend_icon(icon: &LegIcon) -> Element {
+    match icon {
+        LegIcon::All => rsx! {
+            svg { width: "16", height: "16", view_box: "0 0 16 16",
+                rect { x: "2", y: "2", width: "9", height: "9", rx: "1.5", fill: "none", stroke: "#c9c9cd", stroke_width: "1.4" }
+                rect { x: "5", y: "5", width: "9", height: "9", rx: "1.5", fill: "#3a3a3f", stroke: "#c9c9cd", stroke_width: "1.4" }
+            }
+        },
+        LegIcon::Swatch(c) => rsx! { i { class: "sw", style: "background: {c}" } },
+        LegIcon::Glyph(g) => rsx! {
+            span { class: "lg-glyph",
+                svg { width: "14", height: "14", view_box: "0 0 16 16", {glyph(*g, 8.0, 8.0, 14.0, g.tone().color())} }
+            }
+        },
+        LegIcon::Mark(k) => rsx! { span { class: "lg-mark {k}" } },
+        LegIcon::Light => rsx! {
+            svg { width: "16", height: "16", view_box: "0 0 16 16",
+                circle { cx: "8", cy: "8", r: "6", fill: "none", stroke: "#b48cff", stroke_width: "1.6" }
+                circle { cx: "8", cy: "8", r: "2.6", fill: "#b48cff" }
+            }
+        },
+    }
+}
+
+fn eye_icon(off: bool) -> Element {
     rsx! {
-        div {
-            class: "fx-overview",
-            onresize: move |e| {
-                if let Ok(b) = e.get_border_box_size() {
-                    let (w0, h0) = *size.peek();
-                    if (b.width - w0).abs() > 1.0 || (b.height - h0).abs() > 1.0 {
-                        size.set((b.width, b.height));
-                    }
-                }
-            },
-            svg { width: "{w}", height: "{h}", view_box: "0 0 {w} {h}", class: "fx-svg",
-                for i in order.iter().copied() {
-                    {
-                        let l = &o.lines[i];
-                        let task = l.task;
-                        let from = f.tasks[task].from;
-                        let sw = if task == sel_task { "11" } else { "7" };
-                        // The other tasks step back as a route finder's other routes do: a faint
-                        // trace, their stations unnamed, until hovered.
-                        let op = if dim(task) { "0.13" } else { "1" };
-                        let fl = flow.clone();
-                        rsx! {
-                            path {
-                                key: "line{task}",
-                                d: "{l.d}",
-                                fill: "none",
-                                stroke: "{l.color}",
-                                stroke_width: "{sw}",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                opacity: "{op}",
-                                class: "fx-hit",
-                                onmouseenter: move |_| hover.set(Some(task)),
-                                onmouseleave: move |_| hover.set(None),
-                                onclick: move |_| select_turn(turn, state, &fl, from),
-                            }
-                        }
-                    }
-                }
-                for l in o.lines.iter() {
-                    for (j, (e, bpt)) in l.ends.iter().enumerate() {
-                        {
-                            let task = l.task;
-                            let from = f.tasks[task].from;
-                            let op = if dim(task) { "0.2" } else { "1" };
-                            let fl = flow.clone();
-                            let n = num(task);
-                            rsx! {
-                                g {
-                                    key: "end{task}-{j}",
-                                    opacity: "{op}",
-                                    class: "fx-hit",
-                                    onclick: move |_| select_turn(turn, state, &fl, from),
-                                    onmouseenter: move |_| hover.set(Some(task)),
-                                    onmouseleave: move |_| hover.set(None),
-                                    circle { cx: "{e.0}", cy: "{e.1}", r: "10", fill: "#fff", stroke: "{l.color}", stroke_width: "5" }
-                                    circle { cx: "{bpt.0}", cy: "{bpt.1}", r: "13", fill: "{l.color}" }
-                                    text { x: "{bpt.0}", y: "{bpt.1 + 4.5}", text_anchor: "middle", font_size: "11.5", font_weight: "700", fill: "#fff", "{n}" }
-                                }
-                            }
-                        }
-                    }
-                }
-                for (si, s) in o.stops.iter().enumerate() {
-                    {
-                        let p = &o.places[s.place];
-                        let faint = dim(s.task);
-                        let op = if faint { "0.22" } else { "1" };
-                        let turn_n = s.turn;
-                        let fl = flow.clone();
-                        let fl2 = flow.clone();
-                        let tip = format!("{} · 턴 {} · 두 번 누르면 자세히", p.name, turn_n + 1);
-                        let (x, y) = (s.x, s.y);
-                        rsx! {
-                            g {
-                                key: "st{si}",
-                                opacity: "{op}",
-                                class: "fx-hit",
-                                onclick: move |_| select_turn(turn, state, &fl, turn_n),
-                                ondoubleclick: move |_| focus(turn_n, &fl2),
-                                title { "{tip}" }
-                                circle { cx: "{x}", cy: "{y}", r: "11", fill: "transparent" }
-                                {overview_mark(x, y, p.blocked, p.warn)}
-                                if !faint {
-                                    {overview_label(x, y, s.level, &p.name, label_fill(p), s.task == sel_task || p.blocked || p.warn)}
-                                }
-                            }
-                        }
-                    }
-                }
-                for (xi, x) in o.xfers.iter().enumerate() {
-                    {
-                        let p = &o.places[x.place];
-                        let faded = !x.tasks.contains(&lit);
-                        let op = if faded { "0.2" } else { "1" };
-                        let owner = if x.tasks.contains(&sel_task) { sel_task } else { x.tasks[0] };
-                        let turn_n = o.turn_for(x.place, owner, f);
-                        let fill = if p.blocked { RED } else if p.warn { AMBER } else { "#fff" };
-                        let tip = format!("{} · 환승: 노선 {} · {} · 두 번 누르면 자세히", p.name, num(x.tasks[0]), num(x.tasks[1]));
-                        let fl = flow.clone();
-                        let fl2 = flow.clone();
-                        rsx! {
-                            g {
-                                key: "x{xi}",
-                                opacity: "{op}",
-                                class: "fx-hit",
-                                onclick: move |_| select_turn(turn, state, &fl, turn_n),
-                                ondoubleclick: move |_| focus(turn_n, &fl2),
-                                title { "{tip}" }
-                                circle { cx: "{x.x}", cy: "{x.y}", r: "8", fill: "{fill}", stroke: "#2b2e34", stroke_width: "2.5" }
-                                if !faded {
-                                    {overview_label(x.x, x.y, false, &p.name, label_fill(p), true)}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            // The chapters: picking one draws its network.
-            div { class: "fx-chapters",
-                for c in 0..f.chapters() {
-                    {
-                        let r = f.chapter_tasks(c);
-                        let turns: Vec<&Turn> = r.clone().flat_map(|ti| f.task_turns(ti)).map(|i| &f.turns[i]).collect();
-                        let b = turns.iter().filter(|t| t.blocked() > 0).count();
-                        let wn = turns.iter().filter(|t| t.warn() > 0).count();
-                        let from_t = hm(turns.iter().find_map(|t| t.at()));
-                        let to_t = hm(turns.iter().rev().find_map(|t| t.at()));
-                        let span = match (from_t.is_empty(), from_t == to_t) {
-                            (true, _) => String::new(),
-                            (false, true) => from_t,
-                            (false, false) => format!("{from_t}–{to_t}"),
-                        };
-                        let first = f.tasks[r.start].from;
-                        let fl = flow.clone();
-                        let n_tasks = r.len();
-                        rsx! {
-                            button {
-                                key: "c{c}",
-                                class: if c == ch { "fx-chapter on" } else { "fx-chapter" },
-                                onclick: move |_| select_turn(turn, state, &fl, first),
-                                span { class: "top", "{c + 1}구간" if !span.is_empty() { span { class: "tm", "{span}" } } }
-                                span { class: "bot",
-                                    "작업 {n_tasks}"
-                                    if b > 0 { span { class: "red", i { class: "d" } "차단 {b}" } }
-                                    if wn > 0 { span { class: "amber", i { class: "d dia" } "확인 {wn}" } }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if o.lines.is_empty() {
-                div { class: "fx-ov-empty", "이 구간의 작업은 대화만 하고 파일이나 명령을 쓰지 않았습니다." }
-            }
-            div { class: "fx-title",
-                div { class: "big", "{ch + 1}구간 노선망" }
-                p { "노선은 작업, 역은 파일·명령입니다. 두 노선이 만나는 역은 두 작업이 함께 건드린 파일입니다." }
-            }
-            div { class: "fx-legend",
-                for task in rest_tasks {
-                    {
-                        let from = f.tasks[task].from;
-                        let fl = flow.clone();
-                        let bare = o.bare.contains(&task);
-                        let cls = format!(
-                            "fx-leg{}{}{}",
-                            if task == sel_task { " on" } else { "" },
-                            if dim(task) { " dim" } else { "" },
-                            if bare { " bare" } else { "" }
-                        );
-                        let col = if bare { "transparent" } else { color_of(task) };
-                        let n = num(task);
-                        let tip = if bare { "역 없음: 대화만 한 작업이라 지도에 노선을 그리지 않았습니다" } else { "" };
-                        rsx! {
-                            button {
-                                key: "lg{task}",
-                                class: "{cls}",
-                                title: "{tip}",
-                                onmouseenter: move |_| hover.set(Some(task)),
-                                onmouseleave: move |_| hover.set(None),
-                                onclick: move |_| select_turn(turn, state, &fl, from),
-                                span { class: "no", style: "background: {col}", "{n}" }
-                                span { class: "nm", "{f.tasks[task].name}" }
-                                if bare { span { class: "none", "역 없음" } }
-                            }
-                        }
-                    }
-                }
+        svg { width: "16", height: "16", view_box: "0 0 24 24",
+            path { d: "M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z", fill: "none", stroke: "currentColor", stroke_width: "1.7" }
+            circle { cx: "12", cy: "12", r: "2.8", fill: "none", stroke: "currentColor", stroke_width: "1.7" }
+            if off {
+                path { d: "M4 4l16 16", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round" }
             }
         }
     }
 }
 
-fn label_fill(p: &crate::flow::Place) -> &'static str {
-    if p.blocked {
-        RED
-    } else if p.warn {
-        "#a8790c"
-    } else if p.text {
-        TEXT_COLOR
-    } else {
-        "#3a3d44"
-    }
-}
-
-fn overview_mark(x: f64, y: f64, blocked: bool, warn: bool) -> Element {
-    if blocked {
-        let d = format!(
-            "M{} {}l5.2 5.2M{} {}l-5.2 5.2",
-            x - 2.6,
-            y - 2.6,
-            x + 2.6,
-            y - 2.6
-        );
-        rsx! {
-            circle { cx: "{x}", cy: "{y}", r: "7", fill: RED, stroke: "#fff", stroke_width: "2" }
-            path { d: "{d}", stroke: "#fff", stroke_width: "1.7", stroke_linecap: "round" }
-        }
-    } else if warn {
-        rsx! {
-            g { transform: "translate({x - 8.0} {y - 8.0})",
-                path { d: "M8 1L16 14.5H0z", fill: AMBER, stroke: "#fff", stroke_width: "1.6", stroke_linejoin: "round" }
-                rect { x: "7.25", y: "5", width: "1.5", height: "4.6", rx: "0.75", fill: "#fff" }
-                circle { cx: "8", cy: "11.8", r: "0.85", fill: "#fff" }
-            }
-        }
-    } else {
-        rsx! { circle { cx: "{x}", cy: "{y}", r: "4", fill: "#fff" } }
-    }
-}
-
-fn overview_label(
-    x: f64,
-    y: f64,
-    level: bool,
-    name: &str,
-    fill: &'static str,
-    bold: bool,
-) -> Element {
-    let fw = if bold { "700" } else { "500" };
-    if level {
-        rsx! {
-            text {
-                transform: "translate({x + 3.0} {y - 11.0}) rotate(-38)",
-                font_size: "12", font_weight: "{fw}", fill: "{fill}",
-                stroke: "#fff", stroke_width: "3", paint_order: "stroke",
-                "{name}"
-            }
-        }
-    } else {
-        rsx! {
-            text {
-                x: "{x + 13.0}", y: "{y + 4.0}",
-                font_size: "12", font_weight: "{fw}", fill: "{fill}",
-                stroke: "#fff", stroke_width: "3", paint_order: "stroke",
-                "{name}"
+/// A legend row's Calls (or requests), one picked opening it on the line.
+#[component]
+fn LegendPicks(picks: Vec<LegPick>, flow: Arc<Flow>, turn: Signal<usize>, detail: Signal<bool>) -> Element {
+    let mut state = use_context::<AppState>();
+    let mut detail = detail;
+    let picked = match (state.selected)() {
+        Selection::Node(seq) => Some(seq),
+        Selection::None => None,
+    };
+    rsx! {
+        div { class: "lg-picks",
+            for (i, p) in picks.into_iter().enumerate() {
+                {
+                    let fl = flow.clone();
+                    let on = p.seq.is_some() && p.seq == picked;
+                    rsx! {
+                        button {
+                            key: "{i}",
+                            class: if on { "lg-pick on" } else { "lg-pick" },
+                            title: "{p.text}",
+                            onclick: move |_| {
+                                select_turn(turn, state, &fl, p.turn);
+                                if let Some(seq) = p.seq {
+                                    state.selected.set(Selection::Node(seq));
+                                    detail.set(true);
+                                }
+                            },
+                            span { class: "t", "턴 {p.turn + 1}" }
+                            span { class: "x", "{p.text}" }
+                            span { class: "at", "{p.at}" }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1306,11 +1002,23 @@ fn LineMap(
     turns: Vec<usize>,
     turn: Signal<usize>,
     detail: Signal<bool>,
+    /// The legend over the map's top left is open.
+    legend: Signal<bool>,
     /// How much of the view's right side a card covers.
     covered: f64,
 ) -> Element {
     let mut state = use_context::<AppState>();
     let mut detail = detail;
+    let mut legend = legend;
+    // The legend: kinds of station hidden (greyed on the line), the mark lit (the rest greyed),
+    // and the row unfolded into its Calls.
+    let mut hidden = use_signal(HashSet::<&'static str>::new);
+    let mut lit_by = use_signal(|| None::<&'static str>);
+    let mut unfolded = use_signal(|| None::<&'static str>);
+    // What the map brings into view stays clear of the legend.
+    use_effect(move || {
+        document::eval(&format!("window.fxLeft = {};", if legend() { LEGEND_W } else { 0.0 }));
+    });
     let f = &flow;
     // The groups opened by hand into their Calls, by (turn, item).
     let mut opened = use_signal(HashSet::<(usize, usize)>::new);
@@ -1391,8 +1099,6 @@ fn LineMap(
         }
     }
     glyphs.sort_by_key(|g| Glyph::ALL.iter().position(|a| a == g).unwrap_or(9));
-    let has_ask = line.stops.iter().any(|s| s.tone == Tone::Ask);
-    let has_say = line.stops.iter().any(|s| s.kind == Kind::Say);
     let has_branch = !line.branch_labels.is_empty();
     // The way back, when it is on: (cause, follower) pairs from the Call picked up its causes.
     let mut trace: Vec<(i64, i64)> = Vec::new();
@@ -1454,8 +1160,6 @@ fn LineMap(
         placed.push((b.qx, b.qx + b.qw, y));
         quote_y.insert(bi, y);
     }
-    let has_block = line.stops.iter().any(|s| s.kind == Kind::Blocked);
-    let has_warn = line.stops.iter().any(|s| s.kind == Kind::Warn);
     let target = picked.and_then(|seq| {
         line.stops
             .iter()
@@ -1468,6 +1172,12 @@ fn LineMap(
             .cloned()
             .or(grouped.clone())
     });
+    let rows = legend_rows(f, &turns, &line.stops);
+    // The kinds there are, for the first row's eye: all hidden, or none.
+    let present: Vec<&'static str> = rows.iter().map(|r| r.key).filter(|k| *k != "all").collect();
+    let light_rows = light_rows(f, &turns);
+    let hid_set = hidden();
+    let light = lit_by();
     let col = move |n: usize| if n == t { LINE_COLOR } else { LINE_MUTED };
     let mut segs = line.segs.clone();
     segs.sort_by_key(|s| s.turn == t);
@@ -1618,7 +1328,15 @@ fn LineMap(
                     {
                         // With the way back shown, only its stations keep their colour and names.
                         let lit = s.seq.is_some_and(|q| chain.contains(&q));
-                        let dim = tracing && !lit;
+                        // The legend's: a kind hidden, or another kind lit.
+                        let here = stop_calls(f, &s);
+                        let hid = match s.kind {
+                            Kind::Start => hid_set.contains("ask"),
+                            Kind::Say => hid_set.contains("say"),
+                            _ => !here.is_empty() && here.iter().all(|c| hides(&hid_set, c)),
+                        };
+                        let shines = light.is_some_and(|k| here.iter().any(|c| lights(k, c)));
+                        let dim = (tracing && !lit) || hid || (light.is_some() && !shines);
                         let color = if dim {
                             DIM_COLOR
                         } else if s.branch {
@@ -1633,8 +1351,11 @@ fn LineMap(
                         let fl = flow.clone();
                         let st = s.clone();
                         rsx! {
+                            g { key: "{s.id}",
+                            if shines && !hid {
+                                circle { class: "fx-nohit fx-halo", cx: "{s.x}", cy: "{s.y}", r: "17" }
+                            }
                             LineStop {
-                                key: "{s.id}",
                                 stop: s.clone(),
                                 color: color.to_string(),
                                 sel,
@@ -1657,6 +1378,7 @@ fn LineMap(
                                         detail.set(true);
                                     }
                                 },
+                            }
                             }
                         }
                     }
@@ -1880,19 +1602,98 @@ fn LineMap(
                     " 호출의 원인 경로 · 다른 역을 누르면 돌아가요"
                 }
             }
-            // What the colours mean.
-            div { class: "fx-tones", onmousedown: move |e| e.stop_propagation(),
-                if has_ask { span { class: "it", i { class: "sw", style: "background: {Tone::Ask.color()}" } "사용자 요청" } }
-                for g in glyphs.iter().copied() {
-                    span { key: "{g:?}", class: "it",
-                        svg { width: "16", height: "16", view_box: "0 0 16 16", {glyph(g, 8.0, 8.0, 14.0, g.tone().color())} }
-                        "{g.name()}"
+            // The legend, as a console's over its process tree: each kind of station with how
+            // many there are, an eye to grey it out on the line, a row unfolded into its Calls
+            // (one picked opens it); then marks to light, the rest greyed.
+            if legend() {
+                div { class: "fx-legend-panel", onmousedown: move |e| e.stop_propagation(), onwheel: move |e| e.stop_propagation(),
+                    div { class: "lg-head",
+                        strong { "범례" }
+                        button { class: "lg-close", title: "범례 닫기", onclick: move |_| legend.set(false),
+                            {tool_icon("M4 5h16v14H4zM9 5v14M16 9.5L13.5 12l2.5 2.5")}
+                        }
+                    }
+                    for row in rows {
+                        {
+                            let key = row.key;
+                            let off = if key == "all" { present.iter().all(|k| hid_set.contains(k)) } else { hid_set.contains(key) };
+                            let open = unfolded() == Some(key);
+                            let keys = present.clone();
+                            rsx! {
+                                div { key: "{key}", class: if off { "lg-row off" } else { "lg-row" },
+                                    span { class: "lg-icon", {legend_icon(&row.icon)} }
+                                    span { class: "lg-name", "{row.label}" }
+                                    span { class: "lg-n", "{row.n}" }
+                                    button {
+                                        class: "lg-eye",
+                                        title: if off { "다시 보기" } else { "노선에서 흐리게" },
+                                        onclick: move |_| {
+                                            let mut h = hidden.write();
+                                            if key == "all" {
+                                                if off { h.clear() } else { h.extend(keys.iter().copied()) }
+                                            } else if !h.remove(key) {
+                                                h.insert(key);
+                                            }
+                                        },
+                                        {eye_icon(off)}
+                                    }
+                                    if row.picks.is_empty() {
+                                        span { class: "lg-fold" }
+                                    } else {
+                                        button {
+                                            class: if open { "lg-fold on" } else { "lg-fold" },
+                                            title: if open { "접기" } else { "하나씩 보기" },
+                                            onclick: move |_| unfolded.set(if open { None } else { Some(key) }),
+                                            {tool_icon("M7 10l5 5 5-5")}
+                                        }
+                                    }
+                                }
+                                if open {
+                                    LegendPicks { key: "{key}-picks", picks: row.picks.clone(), flow: flow.clone(), turn, detail }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "lg-head sub", strong { "강조해서 보기" } }
+                    for row in light_rows {
+                        {
+                            let key = row.key;
+                            let on = light == Some(key);
+                            let open = unfolded() == Some(key);
+                            rsx! {
+                                div {
+                                    key: "{key}",
+                                    class: if on { "lg-row lit on" } else { "lg-row lit" },
+                                    title: if on { "강조 끄기" } else { "이 호출만 강조하고 나머지는 흐리게" },
+                                    onclick: move |_| lit_by.set(if on { None } else { Some(key) }),
+                                    span { class: "lg-icon", {legend_icon(&row.icon)} }
+                                    span { class: "lg-name", "{row.label}" }
+                                    span { class: "lg-n", "{row.n}" }
+                                    span {}
+                                    if row.picks.is_empty() {
+                                        span { class: "lg-fold" }
+                                    } else {
+                                        button {
+                                            class: if open { "lg-fold on" } else { "lg-fold" },
+                                            title: if open { "접기" } else { "하나씩 보기" },
+                                            onclick: move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                unfolded.set(if open { None } else { Some(key) });
+                                            },
+                                            {tool_icon("M7 10l5 5 5-5")}
+                                        }
+                                    }
+                                }
+                                if open {
+                                    LegendPicks { key: "{key}-picks", picks: row.picks.clone(), flow: flow.clone(), turn, detail }
+                                }
+                            }
+                        }
+                    }
+                    if has_branch {
+                        p { class: "lg-foot", i { class: "sw", style: "background: {TEXT_COLOR}" } "보라색 길은 도구 결과의 글을 따라간 길입니다." }
                     }
                 }
-                if has_say { span { class: "it", i { class: "sw", style: "background: {Tone::Say.color()}" } "에이전트 답변" } }
-                if has_branch { span { class: "it", i { class: "sw", style: "background: {TEXT_COLOR}" } "글을 따라감" } }
-                if has_block { span { class: "it red", "✕ 차단" } }
-                if has_warn { span { class: "it amber", "▲ 확인 요청" } }
             }
         }
     }

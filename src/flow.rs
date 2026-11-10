@@ -22,18 +22,8 @@ pub const TEXT_MUTED: &str = "#d6d0e6";
 pub const GREEN: &str = "#3e9b84";
 pub const AMBER: &str = "#d9a21b";
 pub const RED: &str = "#d8403a";
-/// The overview's line colours, by task.
-pub const LINE_COLORS: [&str; 9] = [
-    "#3a95d4", "#e9833a", "#8cc43f", "#3e7d3a", "#8e5bb5", "#d0679d", "#1b9e8f", "#d4a017",
-    "#4b5d73",
-];
-/// Tasks a chapter holds: one overview has room for this many lines.
-pub const CHAPTER: usize = 7;
 /// The most turns one task takes.
 const TASK_TURNS: usize = 6;
-/// The most stations a task's line shows on the overview.
-const LINE_STOPS: usize = 9;
-
 /// One Call as the map names it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
@@ -780,201 +770,16 @@ impl Flow {
             .unwrap_or(0)
     }
 
-    pub fn chapters(&self) -> usize {
-        self.tasks.len().div_ceil(CHAPTER).max(1)
-    }
-
-    pub fn chapter_of(task: usize) -> usize {
-        task / CHAPTER
-    }
-
-    /// The tasks of a chapter, by index.
-    pub fn chapter_tasks(&self, ch: usize) -> std::ops::Range<usize> {
-        let a = (ch * CHAPTER).min(self.tasks.len());
-        a..((ch + 1) * CHAPTER).min(self.tasks.len())
-    }
-
     pub fn task_turns(&self, task: usize) -> std::ops::RangeInclusive<usize> {
         let t = &self.tasks[task];
         t.from..=t.to
     }
 }
 
-// ── The overview ──────────────────────────────────────────────────────────────────────────
-
 type Pt = (f64, f64);
-
-/// The line shapes the overview lays tasks on, on a 1000 × 640 canvas: horizontal, vertical and
-/// 45° runs only, crossing one another as a city's lines do.
-const TEMPLATES: [&[Pt]; CHAPTER] = [
-    &[
-        (300., 40.),
-        (300., 140.),
-        (390., 230.),
-        (620., 230.),
-        (720., 330.),
-        (720., 520.),
-        (640., 600.),
-    ],
-    &[
-        (60., 600.),
-        (230., 430.),
-        (330., 430.),
-        (450., 310.),
-        (940., 310.),
-    ],
-    &[
-        (80., 40.),
-        (80., 200.),
-        (240., 360.),
-        (470., 360.),
-        (720., 610.),
-    ],
-    &[
-        (230., 620.),
-        (110., 500.),
-        (110., 330.),
-        (270., 170.),
-        (440., 170.),
-        (560., 50.),
-        (840., 50.),
-    ],
-    &[(40., 520.), (380., 520.), (450., 590.), (960., 590.)],
-    &[(960., 450.), (800., 450.), (660., 310.), (660., 120.)],
-    &[(560., 625.), (560., 400.), (480., 320.), (480., 110.)],
-];
-const TW: f64 = 1000.0;
-const TH: f64 = 640.0;
-
-/// A place on the overview.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Place {
-    pub key: String,
-    pub name: String,
-    /// The tasks that went there.
-    pub tasks: Vec<usize>,
-    pub blocked: bool,
-    pub warn: bool,
-    /// Words read there told a Call.
-    pub text: bool,
-    /// The first turn each task went there in.
-    first: HashMap<usize, usize>,
-    /// How many Calls went there.
-    visits: usize,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct OLine {
-    pub task: usize,
-    pub color: &'static str,
-    pub d: String,
-    /// Each end: the terminal, and where its number badge sits.
-    pub ends: [(Pt, Pt); 2],
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct OStop {
-    pub place: usize,
-    pub task: usize,
-    pub x: f64,
-    pub y: f64,
-    /// The way the line runs there: names go aslant along a level run, beside a steep one.
-    pub level: bool,
-    /// The turn picking it opens.
-    pub turn: usize,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct OXfer {
-    pub place: usize,
-    pub x: f64,
-    pub y: f64,
-    pub tasks: [usize; 2],
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Overview {
-    pub places: Vec<Place>,
-    pub lines: Vec<OLine>,
-    pub stops: Vec<OStop>,
-    pub xfers: Vec<OXfer>,
-    /// The chapter's tasks that went nowhere, talk only: listed, but drawn as no line.
-    pub bare: Vec<usize>,
-}
-
-impl Overview {
-    pub fn turn_for(&self, place: usize, task: usize, flow: &Flow) -> usize {
-        self.places[place]
-            .first
-            .get(&task)
-            .copied()
-            .unwrap_or(flow.tasks[task].from)
-    }
-}
 
 fn seg_len(a: Pt, b: Pt) -> f64 {
     (b.0 - a.0).hypot(b.1 - a.1)
-}
-
-fn path_len(p: &[Pt]) -> f64 {
-    p.windows(2).map(|w| seg_len(w[0], w[1])).sum()
-}
-
-/// The point `t` along a path, and the way the path runs there.
-fn along(p: &[Pt], mut t: f64) -> (Pt, Pt) {
-    for i in 1..p.len() {
-        let l = seg_len(p[i - 1], p[i]);
-        if t <= l || i == p.len() - 1 {
-            let r = if l > 0.0 { (t / l).min(1.0) } else { 0.0 };
-            let (a, b) = (p[i - 1], p[i]);
-            return (
-                (a.0 + (b.0 - a.0) * r, a.1 + (b.1 - a.1) * r),
-                (b.0 - a.0, b.1 - a.1),
-            );
-        }
-        t -= l;
-    }
-    (p[0], (1.0, 0.0))
-}
-
-/// How far along a path the point nearest `q` is.
-fn project(p: &[Pt], q: Pt) -> f64 {
-    let (mut acc, mut best) = (0.0, (0.0, f64::INFINITY));
-    for i in 1..p.len() {
-        let (a, b) = (p[i - 1], p[i]);
-        let l = seg_len(a, b);
-        let u = if l > 0.0 {
-            (((q.0 - a.0) * (b.0 - a.0) + (q.1 - a.1) * (b.1 - a.1)) / (l * l)).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let d = (a.0 + (b.0 - a.0) * u - q.0).hypot(a.1 + (b.1 - a.1) * u - q.1);
-        if d < best.1 {
-            best = (acc + u * l, d);
-        }
-        acc += l;
-    }
-    best.0
-}
-
-/// Where two paths cross.
-fn crossings(p: &[Pt], q: &[Pt]) -> Vec<Pt> {
-    let mut out = Vec::new();
-    for i in 1..p.len() {
-        for j in 1..q.len() {
-            let (a, b, c, d) = (p[i - 1], p[i], q[j - 1], q[j]);
-            let den = (b.0 - a.0) * (d.1 - c.1) - (b.1 - a.1) * (d.0 - c.0);
-            if den.abs() < 1e-9 {
-                continue;
-            }
-            let u = ((c.0 - a.0) * (d.1 - c.1) - (c.1 - a.1) * (d.0 - c.0)) / den;
-            let v = ((c.0 - a.0) * (b.1 - a.1) - (c.1 - a.1) * (b.0 - a.0)) / den;
-            if u > 0.02 && u < 0.98 && v > 0.02 && v < 0.98 {
-                out.push((a.0 + (b.0 - a.0) * u, a.1 + (b.1 - a.1) * u));
-            }
-        }
-    }
-    out
 }
 
 /// A path through `pts` with each corner rounded.
@@ -1008,77 +813,6 @@ pub fn rounded(pts: &[Pt], r: f64) -> String {
 }
 
 impl Flow {
-    /// The places a chapter's tasks went to, and each task's way through them.
-    fn places(&self, tasks: std::ops::Range<usize>) -> (Vec<Place>, HashMap<usize, Vec<usize>>) {
-        let mut places: Vec<Place> = Vec::new();
-        let mut index: HashMap<String, usize> = HashMap::new();
-        let mut paths: HashMap<usize, Vec<usize>> = HashMap::new();
-        let mut visit =
-            |task: usize, turn: usize, c: &Call, text: bool, places: &mut Vec<Place>| {
-                let i = *index.entry(c.key.clone()).or_insert_with(|| {
-                    places.push(Place {
-                        key: c.key.clone(),
-                        name: c.place.clone(),
-                        tasks: Vec::new(),
-                        blocked: false,
-                        warn: false,
-                        text: false,
-                        first: HashMap::new(),
-                        visits: 0,
-                    });
-                    places.len() - 1
-                });
-                let p = &mut places[i];
-                if !p.tasks.contains(&task) {
-                    p.tasks.push(task);
-                }
-                p.first.entry(task).or_insert(turn);
-                if text {
-                    p.text = true;
-                } else {
-                    p.blocked |= c.blocked;
-                    p.warn |= c.warn;
-                    p.visits += 1;
-                }
-                let path = paths.entry(task).or_default();
-                if !path.contains(&i) {
-                    path.push(i);
-                }
-            };
-        for task in tasks {
-            for turn in self.task_turns(task) {
-                for c in &self.turns[turn].calls {
-                    if let Some(b) = c.by.and_then(|b| self.call(b)) {
-                        visit(task, turn, b, true, &mut places);
-                    }
-                    visit(task, turn, c, false, &mut places);
-                }
-            }
-        }
-        // A line shows what matters on it: its stops, the words it followed, the places it
-        // shares; then the places it went to most.
-        for path in paths.values_mut() {
-            let keep = |i: &usize| {
-                let p = &places[*i];
-                p.blocked || p.warn || p.text || p.tasks.len() > 1
-            };
-            // Stops and the words followed first, then what is shared, as long as there is room.
-            let rank = |i: &usize| {
-                let p = &places[*i];
-                if p.blocked || p.warn || p.text { 0 } else { 1 }
-            };
-            let mut kept: Vec<usize> = path.iter().copied().filter(keep).collect();
-            kept.sort_by_key(rank);
-            kept.truncate(LINE_STOPS);
-            let mut rest: Vec<usize> = path.iter().copied().filter(|i| !keep(i)).collect();
-            rest.sort_by_key(|&i| std::cmp::Reverse(places[i].visits));
-            let room = LINE_STOPS.saturating_sub(kept.len());
-            kept.extend(rest.into_iter().take(room));
-            path.retain(|i| kept.contains(i));
-        }
-        (places, paths)
-    }
-
     /// A task's summary. The legs are the turns with a Call denied or held, each with the words
     /// those Calls followed and the Calls; a task with none is its request and the Calls let
     /// through.
@@ -1138,110 +872,6 @@ impl Flow {
             calls,
             blocked: turns.iter().map(|t| t.blocked()).sum(),
             warn: turns.iter().map(|t| t.warn()).sum(),
-        }
-    }
-
-    /// The overview of a chapter on a `w` × `h` canvas.
-    pub fn overview(&self, chapter: usize, w: f64, h: f64) -> Overview {
-        let tasks = self.chapter_tasks(chapter);
-        let (places, paths) = self.places(tasks.clone());
-        let k = ((w - 90.0) / TW).min((h - 210.0) / TH).max(0.2);
-        let (ox, oy) = ((w - TW * k) / 2.0, 92.0);
-        let s = |p: &Pt| (ox + p.0 * k, oy + p.1 * k);
-        let path = |t: usize| paths.get(&t).cloned().unwrap_or_default();
-        // A task keeps its shape and colour by its place in the chapter, drawn or not.
-        let (drawn, bare): (Vec<_>, Vec<_>) =
-            tasks.clone().enumerate().partition(|(_, t)| !path(*t).is_empty());
-        let bare: Vec<usize> = bare.into_iter().map(|(_, t)| t).collect();
-        let lines: Vec<(usize, usize, Vec<Pt>)> = drawn
-            .into_iter()
-            .map(|(i, t)| (i, t, TEMPLATES[i].iter().map(s).collect()))
-            .collect();
-
-        // Interchanges: where two shapes cross, a place both tasks went to.
-        let mut fixed: HashMap<usize, Vec<(usize, f64)>> = HashMap::new();
-        let mut xfers: Vec<OXfer> = Vec::new();
-        for (i, (_, a, ta)) in lines.iter().enumerate() {
-            for (_, b, tb) in lines.iter().skip(i + 1) {
-                let mut shared: Vec<usize> = path(*a)
-                    .into_iter()
-                    .filter(|&p| places[p].tasks.contains(b) && !xfers.iter().any(|x| x.place == p))
-                    .collect();
-                for pt in crossings(ta, tb) {
-                    if shared.is_empty() {
-                        break;
-                    }
-                    let p = shared.remove(0);
-                    xfers.push(OXfer {
-                        place: p,
-                        x: pt.0,
-                        y: pt.1,
-                        tasks: [*a, *b],
-                    });
-                    fixed.entry(*a).or_default().push((p, project(ta, pt)));
-                    fixed.entry(*b).or_default().push((p, project(tb, pt)));
-                }
-            }
-        }
-
-        // The rest of each line's stations, evenly along it, stepping aside from interchanges.
-        let mut stops = Vec::new();
-        for (_, t, tpl) in &lines {
-            let l = path_len(tpl);
-            let fx = fixed.get(t).cloned().unwrap_or_default();
-            let margin = 36.0 * k.max(0.8);
-            let gap = 24.0 * k.max(0.8);
-            let others: Vec<usize> = path(*t)
-                .into_iter()
-                .filter(|p| !fx.iter().any(|f| f.0 == *p))
-                .collect();
-            let n = others.len().max(1) as f64;
-            for (j, p) in others.iter().enumerate() {
-                let mut tt = margin + (l - 2.0 * margin) * (j as f64 + 0.5) / n;
-                for f in &fx {
-                    if (tt - f.1).abs() < gap {
-                        tt = f.1 + if tt < f.1 { -gap } else { gap };
-                    }
-                }
-                let ((x, y), (dx, dy)) = along(tpl, tt.min(l - margin * 0.6).max(margin * 0.6));
-                stops.push(OStop {
-                    place: *p,
-                    task: *t,
-                    x,
-                    y,
-                    level: dx.abs() > dy.abs() * 1.5,
-                    turn: places[*p]
-                        .first
-                        .get(t)
-                        .copied()
-                        .unwrap_or(self.tasks[*t].from),
-                });
-            }
-        }
-
-        let lines = lines
-            .iter()
-            .map(|(i, t, tpl)| {
-                let end = |e: Pt, n: Pt| {
-                    let (dx, dy) = (e.0 - n.0, e.1 - n.1);
-                    let l = dx.hypot(dy).max(1.0);
-                    (e, (e.0 + dx / l * 28.0, e.1 + dy / l * 28.0))
-                };
-                let z = tpl.len() - 1;
-                OLine {
-                    task: *t,
-                    color: LINE_COLORS[i % LINE_COLORS.len()],
-                    d: rounded(tpl, 34.0 * k),
-                    ends: [end(tpl[0], tpl[1]), end(tpl[z], tpl[z - 1])],
-                }
-            })
-            .collect();
-        Overview {
-            places,
-            lines,
-            stops,
-            xfers,
-            bare,
         }
     }
 }
@@ -2307,25 +1937,5 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_overview_draws_a_line_per_task_of_the_chapter() {
-        let f = long("c4000a1b");
-        let o = f.overview(0, 1100.0, 760.0);
-        assert_eq!(o.lines.len() + o.bare.len(), f.chapter_tasks(0).len());
-        for l in &o.lines {
-            assert!(o.stops.iter().any(|s| s.task == l.task) || o.xfers.iter().any(|x| x.tasks.contains(&l.task)));
-        }
-        for x in &o.xfers {
-            for t in x.tasks {
-                assert!(o.places[x.place].tasks.contains(&t));
-            }
-        }
-        // No line shows more stations than it has room for.
-        for l in &o.lines {
-            let n = o.stops.iter().filter(|s| s.task == l.task).count()
-                + o.xfers.iter().filter(|x| x.tasks.contains(&l.task)).count();
-            assert!(n <= LINE_STOPS + CHAPTER, "line {} has {n}", l.task);
-            assert!(o.stops.iter().filter(|s| s.task == l.task).count() <= LINE_STOPS);
-        }
-    }
+
 }

@@ -2,9 +2,11 @@
 // drawn again for every step of the hand: drag (with a glide after letting go), the wheel or
 // two fingers to move, a pinch, Ctrl or Cmd with the wheel to zoom about the pointer.
 // `fxMap.frame` brings a turn, and the Call picked in it, into view; `fxMap.zoomBy` zooms
-// about the middle. A click that ends a drag does not reach the map.
+// about the middle. A click that ends a drag does not reach the map. `window.fxLeft` is how much of
+// the view's left a panel over it covers: what is brought into view is put right of it.
 window.fxMap = window.fxMap || (() => {
   const S = { x: 0, y: 0, k: 1, el: null, layer: null, raf: 0, pinch: false };
+  const L = () => window.fxLeft || 0;
   const apply = (glide) => {
     if (!S.layer) return;
     S.layer.style.transition = glide ? 'transform .5s cubic-bezier(.22,.8,.24,1)' : 'none';
@@ -108,9 +110,9 @@ window.fxMap = window.fxMap || (() => {
       const svg = S.layer.querySelector('svg');
       const w = +svg.getAttribute('width'), h = +svg.getAttribute('height');
       const r = S.el.getBoundingClientRect();
-      const k = Math.min(2.5, Math.max(0.05, Math.min(r.width / w, (r.height - 70) / h) * 0.94));
+      const k = Math.min(2.5, Math.max(0.05, Math.min((r.width - L()) / w, (r.height - 70) / h) * 0.94));
       S.k = k;
-      S.x = (r.width - w * k) / 2;
+      S.x = L() + (r.width - L() - w * k) / 2;
       S.y = (r.height - 70 - h * k) / 2;
       apply(true);
     },
@@ -120,9 +122,9 @@ window.fxMap = window.fxMap || (() => {
       if (!attach()) return;
       const r = S.el.getBoundingClientRect();
       const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
-      const k = Math.min(1, Math.max(0.05, Math.min((r.width - 120) / w, (r.height - 190) / h)));
+      const k = Math.min(1, Math.max(0.05, Math.min((r.width - L() - 120) / w, (r.height - 190) / h)));
       S.k = k;
-      S.x = r.width / 2 - (x0 + w / 2) * k;
+      S.x = L() + (r.width - L()) / 2 - (x0 + w / 2) * k;
       S.y = (r.height - 70) / 2 - (y0 + h / 2) * k;
       apply(true);
     },
@@ -134,11 +136,19 @@ window.fxMap = window.fxMap || (() => {
     frame: (ax, ay, tx, ty, rev, aw) => {
       if (!attach()) return;
       const r = S.el.getBoundingClientRect();
-      let x = rev ? r.width * 0.92 - (ax + (aw || 0)) * S.k : r.width * 0.08 - ax * S.k;
+      // Beside a panel, a zone wider than the room left is shown smaller, so it is all in view
+      // right of the panel; the Call picked in it is then in view too.
+      const room = r.width - L() - 40;
+      if (L() > 0 && aw && aw * S.k > room) S.k = Math.max(0.55, room / aw);
+      const left = L() > 0 ? L() + 16 : r.width * 0.08;
+      const edge = L() > 0 ? 70 : 160;
+      let x = rev ? r.width * 0.92 - (ax + (aw || 0)) * S.k : left - ax * S.k;
       let y = r.height * 0.22 - ay * S.k;
       if (tx !== null) {
         const px = tx * S.k + x, py = ty * S.k + y;
-        if (px > r.width - 160 || px < 40) x = r.width * 0.5 - tx * S.k;
+        // Off to the right, it is brought in near the right edge, so what led to it stays in view.
+        if (px > r.width - edge) x = r.width - 220 - tx * S.k;
+        else if (px < L() + 40) x = L() + (r.width - L()) * 0.5 - tx * S.k;
         if (py > r.height - 160 || py < 40) y = r.height * 0.45 - ty * S.k;
       }
       S.x = x; S.y = y;
