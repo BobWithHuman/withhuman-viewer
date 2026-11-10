@@ -171,8 +171,8 @@ impl Settings {
 
     pub fn apply(&self, change: Change) -> Result<Self, String> {
         let url = change.neo4j_url.trim().trim_end_matches('/').to_owned();
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            return Err("Neo4j 주소는 http:// 또는 https://로 시작해야 합니다.".into());
+        if !["http://", "https://", "postgres://", "postgresql://"].iter().any(|s| url.starts_with(s)) {
+            return Err("주소는 postgres://(엔진의 PostgreSQL) 또는 http://(예전 엔진의 Neo4j)로 시작해야 합니다.".into());
         }
         if change.database.trim().is_empty() || change.user.trim().is_empty() {
             return Err("데이터베이스와 사용자 이름을 채워 주세요.".into());
@@ -291,6 +291,20 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::Settings;
+
+    #[test]
+    fn the_form_takes_a_postgres_address() {
+        let change = |url: &str| super::Change {
+            neo4j_url: url.into(),
+            database: "withhuman".into(),
+            user: "withhuman_viewer".into(),
+            password: None,
+            demo: false,
+        };
+        assert!(Settings::default().apply(change("postgres://127.0.0.1:5432/withhuman")).is_ok());
+        assert!(Settings::default().apply(change("http://127.0.0.1:7474")).is_ok());
+        assert!(Settings::default().apply(change("127.0.0.1:5432")).is_err());
+    }
 
     #[test]
     fn the_pages_name_the_store_without_its_credentials() {
