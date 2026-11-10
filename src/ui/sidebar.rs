@@ -273,7 +273,10 @@ fn SessionItem(session: Session, pinned: bool, message: Signal<Option<(bool, Str
                 div { class: "spacer" }
                 span { class: "actions",
                     button { class: if pinned { "pin on" } else { "pin" }, title: if pinned { "고정 해제" } else { "고정" }, onclick: pin, "★" }
-                    button { class: "delete", title: "삭제", onclick: delete, "✕" }
+                    // The security team's app keeps every session: they are its audit record.
+                    if !cfg!(feature = "admin") {
+                        button { class: "delete", title: "삭제", onclick: delete, "✕" }
+                    }
                 }
             }
             p { class: "title", if title.is_empty() { "(프롬프트 없음)" } else { "{title}" } }
