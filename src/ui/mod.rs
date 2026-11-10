@@ -52,6 +52,8 @@ fn first_screen() -> Screen {
         Ok("mcp") => Screen::Mcp,
         #[cfg(feature = "admin")]
         Ok("secrets") => Screen::Secrets,
+        #[cfg(feature = "admin")]
+        Ok("inventory") => Screen::Inventory,
         _ => Screen::Home,
     }
 }
@@ -85,6 +87,7 @@ fn FeaturePage(second: bool) -> Element {
 fn ProductPage(screen: Screen) -> Element {
     match screen {
         Screen::Secrets => rsx! { crate::admin::Secrets {} },
+        Screen::Inventory => rsx! { crate::admin::InventoryPage {} },
         _ => rsx! { crate::admin::Mcp {} },
     }
 }
@@ -142,17 +145,19 @@ pub enum Screen {
     /// Two features to come, each a screen of its own in the top bar for now.
     FeatureA,
     FeatureB,
-    /// The security team's other products, opened from the rail: MCP 사용, 민감 정보.
+    /// The security team's other products, opened from the rail: MCP 사용, 민감 정보, 인벤토리.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     Mcp,
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     Secrets,
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    Inventory,
 }
 
 impl Screen {
     /// One of the rail's products other than 이상 행위 탐지.
     pub fn is_product(self) -> bool {
-        matches!(self, Screen::Mcp | Screen::Secrets)
+        matches!(self, Screen::Mcp | Screen::Secrets | Screen::Inventory)
     }
 }
 
@@ -300,7 +305,7 @@ pub fn App() -> Element {
                 }
             };
         }
-        Screen::FeatureA | Screen::FeatureB | Screen::Mcp | Screen::Secrets => {
+        Screen::FeatureA | Screen::FeatureB | Screen::Mcp | Screen::Secrets | Screen::Inventory => {
             let screen = (state.screen)();
             return rsx! {
                 div { class: "app",
@@ -748,7 +753,7 @@ fn Rail() -> Element {
         nav { class: "rail",
             // As tall as the pages' header strip, so the icons start beside the tabs under it;
             // where the page has the strip, its line runs on across the rail.
-            div { class: if matches!(screen, Screen::Home | Screen::Mcp | Screen::Secrets) { "rail-head line" } else { "rail-head" } }
+            div { class: if matches!(screen, Screen::Home) || screen.is_product() { "rail-head line" } else { "rail-head" } }
             button {
                 class: if on_detect { "product on" } else { "product" },
                 title: "이상 행위 탐지 · 메인 · 기록 · 감사 · 정책",
@@ -768,9 +773,9 @@ fn Rail() -> Element {
                 {icon("M7 10.5V8a5 5 0 0 1 10 0v2.5M5.5 10.5h13v9.5h-13zM12 14.5v2")}
             }
             button {
-                class: "product",
-                disabled: true,
-                title: "에이전트 인벤토리: 엔진이 단말과 사용자를 구분하게 되면 열립니다",
+                class: on(Screen::Inventory),
+                title: "인벤토리: 기기 · 사용자 · 세션, 키 발급과 회수",
+                onclick: move |_| state.screen.set(Screen::Inventory),
                 {icon("M4 6.5h16M4 12h16M4 17.5h16M7 4.5v4M7 10v4M7 15.5v4")}
             }
             i { class: "sep" }

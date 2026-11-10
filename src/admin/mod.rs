@@ -6,12 +6,15 @@
 //!   answered when asked; exported for an audit.
 //! - MCP 사용: the console's second product, from the same Calls: the MCP servers and web hosts
 //!   the agents used.
+//! - 인벤토리: the machines, people and sessions the engine protects; keys issued and revoked
+//!   (a person's kill switch).
 //! - 민감 정보: the sensitive values found in the sessions, followed to the Calls that used them.
 //! - 정책: the rules to give the engine, kept as a draft until the engine takes them, each
 //!   previewed on the Calls already recorded.
 
 mod audit;
 mod detections;
+mod inventory;
 mod main_page;
 mod mcp;
 mod policy;
@@ -24,6 +27,7 @@ use dioxus::prelude::*;
 
 pub use audit::Audit;
 pub use main_page::Main;
+pub use inventory::InventoryPage;
 pub use mcp::Mcp;
 pub use secrets::Secrets;
 pub use policy::Policy;

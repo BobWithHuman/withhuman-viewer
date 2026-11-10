@@ -141,6 +141,94 @@ impl Backend {
         typed(value)
     }
 
+    /// The engine's agent inventory; none when the data has none (Neo4j, or an engine that keeps
+    /// no inventory yet).
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn inventory(&self) -> Result<Option<crate::model::Inventory>, String> {
+        let settings = self.current();
+        if settings.demo {
+            return Ok(Some(self.demo.lock().expect("demo lock").inventory(now_ms())));
+        }
+        if !crate::pg::is_postgres(&settings) {
+            return Ok(None);
+        }
+        let value = crate::pg::Postgres { settings: &settings, pool: &self.pg }.inventory().await;
+        match value {
+            Ok(Value::Null) => Ok(None),
+            other => typed(other).map(Some),
+        }
+    }
+
+    /// Keeps the engine's address for key actions, and a new admin token in the keychain.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub fn save_admin(&self, engine_api: &str, token: Option<&str>) -> Result<Public, String> {
+        let mut settings = self.settings.lock().expect("settings lock");
+        let mut next = settings.with_admin(engine_api, token)?;
+        next.save(&self.path)?;
+        *settings = next;
+        Ok(settings.public(&self.path))
+    }
+
+    /// Issues a key to a person: its id, and the key itself, shown this once.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn issue_key(&self, email: &str, actor: &str, note: &str) -> Result<(String, String), String> {
+        if self.current().demo {
+            return Ok(self.demo.lock().expect("demo lock").issue_key(now_ms(), email, actor, note));
+        }
+        let answer = self
+            .admin(&["v1", "admin", "users", email, "keys"], json!({"actor": actor, "note": note}))
+            .await?;
+        let text = |k: &str| answer.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+        Ok((text("key_id"), text("key")))
+    }
+
+    /// Revokes one key, or every key of a person (the person's kill switch): how many were revoked.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn revoke(&self, key_id: Option<&str>, email: Option<&str>, actor: &str, reason: &str) -> Result<usize, String> {
+        if self.current().demo {
+            return Ok(self.demo.lock().expect("demo lock").revoke(now_ms(), key_id, email, actor, reason));
+        }
+        let body = json!({"actor": actor, "reason": reason});
+        let answer = match (key_id, email) {
+            (Some(id), _) => self.admin(&["v1", "admin", "keys", id, "revoke"], body).await?,
+            (None, Some(e)) => self.admin(&["v1", "admin", "users", e, "revoke"], body).await?,
+            (None, None) => return Ok(0),
+        };
+        Ok(answer.as_array().map_or(1, Vec::len))
+    }
+
+    /// One call of the engine's admin API (Collector's /v1/admin): a POST with the admin token.
+    async fn admin(&self, path: &[&str], body: Value) -> Result<Value, String> {
+        let settings = self.current();
+        let token = settings
+            .admin_token()
+            .ok_or("엔진 관리 토큰이 없습니다. 인벤토리의 '관리 API 연결'에서 넣어 주세요.")?;
+        let mut url = reqwest::Url::parse(&settings.engine_api).map_err(|e| format!("엔진 관리 API 주소를 읽지 못했습니다: {e}"))?;
+        url.path_segments_mut()
+            .map_err(|_| "엔진 관리 API 주소가 올바르지 않습니다.".to_owned())?
+            .pop_if_empty()
+            .extend(path);
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("엔진 관리 API({})에 닿지 않습니다: {e}", settings.engine_api))?;
+        let status = response.status().as_u16();
+        let answer: Value = response.json().await.unwrap_or(Value::Null);
+        match status {
+            200..=299 => Ok(answer),
+            401 | 403 => Err("엔진이 관리 토큰을 받지 않았습니다. 토큰을 다시 넣어 주세요.".into()),
+            404 => Err("엔진에 관리 API가 꺼져 있거나 대상이 없습니다(엔진의 WITHHUMAN_ADMIN_TOKEN 설정을 확인해 주세요).".into()),
+            _ => Err(format!(
+                "엔진이 거절했습니다 (HTTP {status}): {}",
+                answer.get("error").and_then(Value::as_str).unwrap_or_default()
+            )),
+        }
+    }
+
     /// Each session's Calls, for the comparison.
     pub async fn calls(
         &self,
@@ -317,6 +405,13 @@ impl Backend {
             ms: started.elapsed().as_millis(),
         })
     }
+}
+
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// A form's change again, for one more try.

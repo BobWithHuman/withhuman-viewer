@@ -368,6 +368,30 @@ impl Postgres<'_> {
         Ok(Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>()))
     }
 
+    /// The engine's agent inventory, or null for an engine that keeps none yet (no such tables).
+    /// A key's hash is never read.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn inventory(&self) -> Result<Value, ApiError> {
+        let found = self.rows("SELECT to_regclass('public.clients') IS NOT NULL AS ok", &[]).await?;
+        if !found.first().and_then(|r| r.get("ok")).and_then(Value::as_bool).unwrap_or(false) {
+            return Ok(Value::Null);
+        }
+        let all = |rows: Rows| Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>());
+        Ok(json!({
+            "clients": all(self.rows("SELECT * FROM clients", &[]).await?),
+            "projects": all(self.rows("SELECT * FROM client_projects", &[]).await?),
+            "users": all(self.rows("SELECT * FROM users", &[]).await?),
+            "keys": all(self.rows(
+                "SELECT key_id, user_email, created_at, created_by, note, last_used_at, revoked_at, revoked_by, \
+                 revoke_reason, first_denied_at, last_denied_at, denied_count FROM api_keys", &[]).await?),
+            "events": all(self.rows("SELECT * FROM key_events ORDER BY at DESC LIMIT 5000", &[]).await?),
+            "sessions": all(self.rows(
+                "SELECT session_id, client_id, user_email, start_source, permission_mode, model, created_at, \
+                 last_seen_at, ended_at, end_reason FROM sessions WHERE created_at IS NOT NULL \
+                 ORDER BY created_at DESC LIMIT 5000", &[]).await?),
+        }))
+    }
+
     pub async fn graph(&self, session: &str) -> Result<Value, ApiError> {
         let mut nodes = self.rows(NODES, &[&session]).await?;
         nodes.sort_by_key(|r| r.get("order").and_then(Value::as_i64));

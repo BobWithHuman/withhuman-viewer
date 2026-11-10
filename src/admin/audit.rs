@@ -34,6 +34,8 @@ const REPEAT_WINDOW: i64 = 30 * MINUTE;
 enum Tab {
     Risky,
     Approvals,
+    /// Keys revoked, Calls refused for them, keys issued: who stopped whom.
+    Kills,
     Integrity,
 }
 
@@ -263,7 +265,18 @@ pub fn Audit() -> Element {
     // Sent here from the main page: the approvals open, a Call's row marked.
     let mut sent = use_context::<super::ToApprovals>().0;
     let marked = use_signal(|| sent.peek().clone().flatten());
-    let mut tab = use_signal(|| if sent.peek().is_some() { Tab::Approvals } else { Tab::Risky });
+    let mut tab = use_signal(|| {
+        if sent.peek().is_some() {
+            return Tab::Approvals;
+        }
+        // VIEWER_TAB names another tab, to work on it without clicking there.
+        match std::env::var("VIEWER_TAB").as_deref() {
+            Ok("approvals") => Tab::Approvals,
+            Ok("kills") => Tab::Kills,
+            Ok("integrity") => Tab::Integrity,
+            _ => Tab::Risky,
+        }
+    });
     use_effect(move || {
         if sent.peek().is_some() {
             sent.set(None);
@@ -314,7 +327,7 @@ pub fn Audit() -> Element {
             }
             div { class: "admin-bar",
                 nav { class: "admin-tabs",
-                    for (t, label) in [(Tab::Risky, "위험 행동 점검"), (Tab::Approvals, "승인 기록"), (Tab::Integrity, "무결성·조작 기록")] {
+                    for (t, label) in [(Tab::Risky, "위험 행동 점검"), (Tab::Approvals, "승인 기록"), (Tab::Kills, "킬스위치 기록"), (Tab::Integrity, "무결성·조작 기록")] {
                         button { key: "{label}", class: if current == t { "on" } else { "" }, onclick: move |_| tab.set(t), "{label}" }
                     }
                 }
@@ -349,6 +362,7 @@ pub fn Audit() -> Element {
             match current {
                 Tab::Risky => rsx! { Risky { facts, loading, period, note } },
                 Tab::Approvals => rsx! { Approvals { facts, loading, period, note, marked: marked() } },
+                Tab::Kills => rsx! { Kills { since: days().map(|d| now - d * DAY), period, note } },
                 Tab::Integrity => rsx! { Integrity {} },
             }
         }
@@ -591,6 +605,80 @@ fn Approvals(
 }
 
 /// What this tab will hold once the engine reports it.
+#[component]
+fn Kills(since: Option<i64>, period: String, note: Signal<Option<String>>) -> Element {
+    let state = use_context::<AppState>();
+    let backend = use_context::<std::sync::Arc<crate::api::Backend>>();
+    let found = use_resource(move || {
+        let b = backend.clone();
+        let _ = (state.reload)();
+        let _ = (state.public)();
+        async move { b.inventory().await }
+    });
+    let mut show = use_signal(|| None::<&'static str>);
+    let (events, failed, loading) = match &*found.read() {
+        Some(Ok(Some(inv))) => (inv.events.clone(), None, false),
+        Some(Ok(None)) => (Vec::new(), Some("이 엔진은 아직 키와 킬스위치 기록을 남기지 않습니다(엔진의 인벤토리 기능이 필요합니다).".to_owned()), false),
+        Some(Err(e)) => (Vec::new(), Some(format!("기록을 불러오지 못했습니다: {e}")), false),
+        None => (Vec::new(), None, true),
+    };
+    let in_period: Vec<crate::model::KeyEvent> = events.into_iter().filter(|e| since.is_none_or(|t| e.at.is_some_and(|a| a >= t))).collect();
+    let count = |k: &str| in_period.iter().filter(|e| e.kind == k).count();
+    let chips = [(None, "전체", in_period.len()), (Some("revoked"), "회수", count("revoked")), (Some("denied"), "거부", count("denied")), (Some("issued"), "발급", count("issued"))];
+    let shown: Vec<crate::model::KeyEvent> = in_period.iter().filter(|e| show().is_none_or(|k| e.kind == k)).cloned().collect();
+    let text = |v: &Option<String>| v.clone().unwrap_or_default();
+    let csv_text = csv(
+        &["시각", "종류", "누가", "사용자", "키", "사유", "기기", "세션"],
+        shown.iter().map(|e| vec![
+            stamp(e.at), super::inventory::event_label(&e.kind).to_owned(), text(&e.actor), text(&e.user_email),
+            text(&e.key_id), text(&e.reason), text(&e.client_id), text(&e.session_id),
+        ]),
+    );
+    let file = format!("withhuman-킬스위치기록-{}.csv", chrono::Local::now().format("%Y%m%d"));
+    let empty = shown.is_empty();
+    rsx! {
+        div { class: "admin-body",
+            section { class: "home-group",
+                div { class: "home-group-head",
+                    h2 { "킬스위치 기록" }
+                    span { class: "n", "{in_period.len()}" }
+                }
+                p { class: "admin-about", "{period} 동안 누가 어떤 사용자의 키를 회수했는지, 회수된 키로 온 도구 호출을 엔진이 언제 막았는지, 키를 누구에게 발급했는지입니다. 회수와 발급은 인벤토리에서 합니다." }
+                div { class: "admin-chips",
+                    for (k, label, n) in chips {
+                        button { key: "{label}", class: if show() == k { "admin-chip on" } else { "admin-chip" }, onclick: move |_| show.set(k),
+                            "{label}" span { class: "n", "{n}" }
+                        }
+                    }
+                    button { class: "admin-export", disabled: empty, onclick: move |_| export(file.clone(), csv_text.clone(), note), "CSV로 내보내기" }
+                }
+                div { class: "home-list admin-table-wrap",
+                    if let Some(f) = failed {
+                        p { class: "home-empty", "{f}" }
+                    } else if empty {
+                        p { class: "home-empty", if loading { "불러오는 중…" } else { "기간 안에 기록이 없습니다." } }
+                    } else {
+                        div { class: "admin-kill head",
+                            span { "시각" } span { "종류" } span { "누가" } span { "사용자" } span { "키" } span { "사유" } span { "기기 · 세션" }
+                        }
+                    }
+                    for (i, e) in shown.into_iter().enumerate() {
+                        div { key: "{i}", class: "admin-kill",
+                            span { class: "when", title: "{stamp(e.at)}", "{short_stamp(e.at)}" }
+                            span { class: "kind {e.kind}", "{super::inventory::event_label(&e.kind)}" }
+                            span { "{e.actor.clone().unwrap_or_else(|| \"엔진\".into())}" }
+                            span { class: "machine", "{text(&e.user_email)}" }
+                            span { class: "what", "{text(&e.key_id)}" }
+                            span { class: "why", title: "{text(&e.reason)}", "{text(&e.reason)}" }
+                            span { class: "why", "{text(&e.client_id)} {e.session_id.as_deref().map(|s| s.chars().take(8).collect::<String>()).unwrap_or_default()}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 fn Integrity() -> Element {
     rsx! {

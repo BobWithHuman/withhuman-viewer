@@ -37,6 +37,11 @@ pub struct Settings {
     pub engine_dir: Option<String>,
     /// A Jev key was taken by Jev and is kept in the keychain.
     pub jev_saved: bool,
+    /// The engine's address for the security team's key actions (Collector's /v1/admin, through
+    /// the gateway).
+    pub engine_api: String,
+    /// The keychain holds the engine's admin token for `engine_api`.
+    pub admin_token_saved: bool,
 }
 
 /// Where the engine runs: started by the viewer on this Mac, or reached on a server.
@@ -66,6 +71,8 @@ impl Default for Settings {
             engine: Engine::Unset,
             engine_dir: None,
             jev_saved: false,
+            engine_api: env("WITHHUMAN_ENGINE_API", "http://127.0.0.1:3000"),
+            admin_token_saved: false,
         }
     }
 }
@@ -83,6 +90,8 @@ pub struct Public {
     pub engine: Engine,
     pub engine_dir: Option<String>,
     pub jev_saved: bool,
+    pub engine_api: String,
+    pub has_admin_token: bool,
 }
 
 impl Public {
@@ -166,7 +175,40 @@ impl Settings {
             engine: self.engine,
             engine_dir: self.engine_dir.clone(),
             jev_saved: self.jev_saved,
+            engine_api: self.engine_api.clone(),
+            has_admin_token: self.admin_token_saved,
         }
+    }
+
+    /// The keychain account of the admin token: another engine is another token.
+    fn admin_account(&self) -> String {
+        format!("admin-token@{}", self.engine_api)
+    }
+
+    /// The engine's admin token, read from the keychain only when a key action needs it.
+    pub fn admin_token(&self) -> Option<String> {
+        if !self.admin_token_saved {
+            return None;
+        }
+        keychain::get(&self.admin_account()).filter(|t| !t.is_empty())
+    }
+
+    /// These settings with another engine address for key actions, and a new admin token kept
+    /// in the keychain if one is given.
+    pub fn with_admin(&self, engine_api: &str, token: Option<&str>) -> Result<Self, String> {
+        let url = engine_api.trim().trim_end_matches('/').to_owned();
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err("엔진 관리 API 주소는 http:// 또는 https://로 시작해야 합니다.".into());
+        }
+        let mut next = self.clone();
+        next.engine_api = url;
+        if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+            keychain::set(&next.admin_account(), token)?;
+            next.admin_token_saved = true;
+        } else if next.engine_api != self.engine_api {
+            next.admin_token_saved = false;
+        }
+        Ok(next)
     }
 
     pub fn apply(&self, change: Change) -> Result<Self, String> {
@@ -189,6 +231,8 @@ impl Settings {
             engine: self.engine,
             engine_dir: self.engine_dir.clone(),
             jev_saved: self.jev_saved,
+            engine_api: self.engine_api.clone(),
+            admin_token_saved: self.admin_token_saved,
         };
         match change.password {
             Some(password) => {
@@ -304,6 +348,9 @@ mod tests {
         assert!(Settings::default().apply(change("postgres://127.0.0.1:5432/withhuman")).is_ok());
         assert!(Settings::default().apply(change("http://127.0.0.1:7474")).is_ok());
         assert!(Settings::default().apply(change("127.0.0.1:5432")).is_err());
+        assert!(Settings::default().with_admin("ftp://x", None).is_err());
+        let next = Settings::default().with_admin("http://engine:3000/", None).unwrap();
+        assert_eq!((next.engine_api.as_str(), next.admin_token_saved), ("http://engine:3000", false));
     }
 
     #[test]

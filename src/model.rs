@@ -318,3 +318,118 @@ mod tests {
         assert_eq!(p.source.as_deref(), Some("Read"));
     }
 }
+
+/// What the engine knows of the machines, people and sessions it protects (withhuman-core's agent
+/// inventory): its tables as they are, or the demo's.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct Inventory {
+    pub clients: Vec<Device>,
+    pub projects: Vec<DeviceProject>,
+    pub users: Vec<Person>,
+    pub keys: Vec<ApiKey>,
+    pub events: Vec<KeyEvent>,
+    pub sessions: Vec<SessionRun>,
+}
+
+/// A machine with the hooks: its client ID, what it said when it registered, when its hooks were
+/// first and last heard.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct Device {
+    pub client_id: String,
+    pub team: Option<String>,
+    pub hostname: Option<String>,
+    pub os: Option<String>,
+    pub os_user: Option<String>,
+    pub hook_version: Option<String>,
+    pub agent: Option<String>,
+    pub user_email: Option<String>,
+    /// It registered at install; none when only its hooks were heard.
+    pub registered_at: Option<i64>,
+    pub updated_at: Option<i64>,
+    pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
+}
+
+/// A project a machine's hooks were installed in.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct DeviceProject {
+    pub client_id: String,
+    pub project: String,
+    pub agent: Option<String>,
+    pub hook_version: Option<String>,
+    pub installed_at: Option<i64>,
+    pub updated_at: Option<i64>,
+}
+
+/// A person keys were issued to.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct Person {
+    pub email: String,
+    pub created_at: Option<i64>,
+    /// `person` or `service`, when the engine tells.
+    pub kind: Option<String>,
+}
+
+/// A person's key, without its hash: who issued it, when it was last used, whether and why it
+/// was revoked, and the Calls refused with it since.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct ApiKey {
+    pub key_id: String,
+    pub user_email: String,
+    pub created_at: Option<i64>,
+    pub created_by: Option<String>,
+    pub note: Option<String>,
+    pub last_used_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+    pub revoked_by: Option<String>,
+    pub revoke_reason: Option<String>,
+    pub first_denied_at: Option<i64>,
+    pub last_denied_at: Option<i64>,
+    pub denied_count: Option<i64>,
+}
+
+/// A key issued, revoked, or a Call refused for a revoked key: the audit's record of who stopped
+/// whom.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct KeyEvent {
+    /// `issued`, `revoked` or `denied`.
+    pub kind: String,
+    pub actor: Option<String>,
+    pub reason: Option<String>,
+    pub user_email: Option<String>,
+    pub key_id: Option<String>,
+    pub session_id: Option<String>,
+    pub client_id: Option<String>,
+    pub at: Option<i64>,
+}
+
+/// A session as the inventory sees it: which machine and person, how it started and ended.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct SessionRun {
+    pub session_id: String,
+    pub client_id: Option<String>,
+    pub user_email: Option<String>,
+    /// `startup`, `resume`, `clear`, `compact` or `fork`.
+    pub start_source: Option<String>,
+    pub permission_mode: Option<String>,
+    pub model: Option<String>,
+    pub created_at: Option<i64>,
+    pub last_seen_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    /// `clear`, `resume`, `logout`, `prompt_input_exit` or `other`.
+    pub end_reason: Option<String>,
+}
