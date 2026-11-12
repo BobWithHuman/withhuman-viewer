@@ -27,7 +27,7 @@
 ```sh
 git clone https://github.com/BobWithHuman/withhuman-viewer.git
 cd withhuman-viewer
-cargo run
+cargo admin
 ```
 
 처음 빌드는 몇 분 걸립니다. 그다음부터는 바뀐 부분만 빌드해서 금방 뜹니다.
