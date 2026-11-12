@@ -1,5 +1,6 @@
-//! Where the viewer finds Neo4j, kept in the app's config folder between launches. The
-//! password is kept in the system keychain, never in the file.
+//! Where the viewer finds the engine's data (its PostgreSQL, or Neo4j before withhuman-core #118),
+//! kept in the app's config folder between launches. The password is kept in the system keychain,
+//! never in the file.
 
 use std::fs;
 use std::path::Path;
@@ -27,6 +28,30 @@ pub struct Settings {
     new_password: bool,
     /// Reads the bundled demo graph instead of Neo4j.
     pub demo: bool,
+    /// No settings were saved yet: the app greets instead of reporting a failed connection.
+    #[serde(skip)]
+    pub first_run: bool,
+    /// Where the engine runs, as chosen on the first launch.
+    pub engine: Engine,
+    /// The engine's folder, when the viewer starts it on this Mac.
+    pub engine_dir: Option<String>,
+    /// A Jev key was taken by Jev and is kept in the keychain.
+    pub jev_saved: bool,
+    /// The engine's address for the security team's key actions (Collector's /v1/admin, through
+    /// the gateway).
+    pub engine_api: String,
+    /// The keychain holds the engine's admin token for `engine_api`.
+    pub admin_token_saved: bool,
+}
+
+/// Where the engine runs: started by the viewer on this Mac, or reached on a server.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    #[default]
+    Unset,
+    Local,
+    Server,
 }
 
 impl Default for Settings {
@@ -42,6 +67,12 @@ impl Default for Settings {
             password_saved: false,
             new_password: false,
             demo: std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1"),
+            first_run: false,
+            engine: Engine::Unset,
+            engine_dir: None,
+            jev_saved: false,
+            engine_api: env("WITHHUMAN_ENGINE_API", "http://127.0.0.1:3000"),
+            admin_token_saved: false,
         }
     }
 }
@@ -54,7 +85,36 @@ pub struct Public {
     pub user: String,
     pub has_password: bool,
     pub demo: bool,
+    pub first_run: bool,
     pub path: String,
+    pub engine: Engine,
+    pub engine_dir: Option<String>,
+    pub jev_saved: bool,
+    pub engine_api: String,
+    pub has_admin_token: bool,
+}
+
+impl Public {
+    /// Where the data comes from, without the credentials an address may carry: the engine's
+    /// PostgreSQL, Neo4j (engines before withhuman-core #118), or the demo.
+    pub fn store(&self) -> String {
+        if self.demo {
+            return "데모 데이터".into();
+        }
+        let url = self.neo4j_url.trim();
+        match url.split_once("://") {
+            Some(("postgres" | "postgresql", _)) => format!("PostgreSQL · {}", self.host()),
+            _ => format!("Neo4j · {url}"),
+        }
+    }
+
+    /// The address without its scheme, credentials and options, for the top bar.
+    pub fn host(&self) -> String {
+        let url = self.neo4j_url.trim();
+        let rest = url.split_once("://").map_or(url, |(_, r)| r);
+        let rest = rest.split('?').next().unwrap_or(rest);
+        rest.rsplit('@').next().unwrap_or(rest).to_owned()
+    }
 }
 
 /// A change from the settings form; a missing password keeps the stored one.
@@ -87,6 +147,14 @@ mod keychain {
     }
 }
 
+/// The keychain account the Jev API key is kept under.
+const JEV_ACCOUNT: &str = "jev-api-key";
+
+/// Keeps a Jev API key Jev took in the keychain.
+pub fn save_jev_key(key: &str) -> Result<(), String> {
+    keychain::set(JEV_ACCOUNT, key.trim())
+}
+
 impl Settings {
     /// The keychain account: the same user on another server is another password.
     fn account(&self) -> String {
@@ -98,16 +166,57 @@ impl Settings {
             neo4j_url: self.neo4j_url.clone(),
             database: self.database.clone(),
             user: self.user.clone(),
-            has_password: self.password_saved || !self.password.is_empty(),
+            // Saved by the person, not the development default the app starts with.
+            has_password: self.password_saved,
             demo: self.demo,
+            first_run: self.first_run,
             path: path.display().to_string(),
+            engine: self.engine,
+            engine_dir: self.engine_dir.clone(),
+            jev_saved: self.jev_saved,
+            engine_api: self.engine_api.clone(),
+            has_admin_token: self.admin_token_saved,
         }
+    }
+
+    /// The keychain account of the admin token: another engine is another token.
+    fn admin_account(&self) -> String {
+        format!("admin-token@{}", self.engine_api)
+    }
+
+    /// The engine's admin token, read from the keychain only when a key action needs it.
+    pub fn admin_token(&self) -> Option<String> {
+        if !self.admin_token_saved {
+            return None;
+        }
+        keychain::get(&self.admin_account()).filter(|t| !t.is_empty())
+    }
+
+    /// These settings with another engine address for key actions, and a new admin token kept
+    /// in the keychain if one is given.
+    pub fn with_admin(&self, engine_api: &str, token: Option<&str>) -> Result<Self, String> {
+        let url = engine_api.trim().trim_end_matches('/').to_owned();
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err("엔진 관리 API 주소는 http:// 또는 https://로 시작해야 합니다.".into());
+        }
+        let mut next = self.clone();
+        next.engine_api = url;
+        if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+            keychain::set(&next.admin_account(), token)?;
+            next.admin_token_saved = true;
+        } else if next.engine_api != self.engine_api {
+            next.admin_token_saved = false;
+        }
+        Ok(next)
     }
 
     pub fn apply(&self, change: Change) -> Result<Self, String> {
         let url = change.neo4j_url.trim().trim_end_matches('/').to_owned();
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            return Err("Neo4j 주소는 http:// 또는 https://로 시작해야 합니다.".into());
+        if !["http://", "https://", "postgres://", "postgresql://"]
+            .iter()
+            .any(|s| url.starts_with(s))
+        {
+            return Err("주소는 postgres://(엔진의 PostgreSQL) 또는 http://(예전 엔진의 Neo4j)로 시작해야 합니다.".into());
         }
         if change.database.trim().is_empty() || change.user.trim().is_empty() {
             return Err("데이터베이스와 사용자 이름을 채워 주세요.".into());
@@ -120,6 +229,12 @@ impl Settings {
             password_saved: self.password_saved,
             new_password: self.new_password,
             demo: change.demo,
+            first_run: self.first_run,
+            engine: self.engine,
+            engine_dir: self.engine_dir.clone(),
+            jev_saved: self.jev_saved,
+            engine_api: self.engine_api.clone(),
+            admin_token_saved: self.admin_token_saved,
         };
         match change.password {
             Some(password) => {
@@ -145,6 +260,26 @@ impl Settings {
         self
     }
 
+    /// These settings pointed at another database for this run only, as `VIEWER_DB` asks: the
+    /// address read as written, its password (if it carries one) kept from the keychain's way,
+    /// the demo and the first launch's setup left aside. Nothing of it is saved unless the
+    /// settings are saved from the form.
+    pub fn pointed_at(mut self, url: &str) -> Self {
+        self.neo4j_url = url.trim().to_owned();
+        // Without sslmode and sslrootcert, which tokio-postgres doesn't read.
+        let without = url.trim().split('?').next().unwrap_or(url);
+        if let Ok(config) = <tokio_postgres::Config as std::str::FromStr>::from_str(without)
+            && let Some(password) = config.get_password()
+        {
+            self.password = String::from_utf8_lossy(password).into_owned();
+        }
+        self.demo = false;
+        self.jev_saved = true;
+        // Not the engine this Mac may start: the address is what the bar names.
+        self.engine = Engine::Server;
+        self
+    }
+
     /// Reads the file, without the keychain. A password still in the file is moved to the
     /// keychain and taken out of the file. `VIEWER_MOCK=1` opens the demo whatever was saved,
     /// without changing the file.
@@ -162,7 +297,10 @@ impl Settings {
                 }
                 saved
             }
-            None => Self::default(),
+            None => Self {
+                first_run: true,
+                ..Self::default()
+            },
         };
         if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") {
             settings.demo = true;
@@ -177,7 +315,9 @@ impl Settings {
             self.password_saved = true;
             self.new_password = false;
         }
-        self.write(path)
+        self.write(path)?;
+        self.first_run = false;
+        Ok(())
     }
 
     fn write(&self, path: &Path) -> Result<(), String> {
@@ -199,6 +339,64 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::Settings;
+
+    #[test]
+    fn the_form_takes_a_postgres_address() {
+        let change = |url: &str| super::Change {
+            neo4j_url: url.into(),
+            database: "withhuman".into(),
+            user: "withhuman_viewer".into(),
+            password: None,
+            demo: false,
+        };
+        assert!(
+            Settings::default()
+                .apply(change("postgres://127.0.0.1:5432/withhuman"))
+                .is_ok()
+        );
+        assert!(
+            Settings::default()
+                .apply(change("http://127.0.0.1:7474"))
+                .is_ok()
+        );
+        assert!(Settings::default().apply(change("127.0.0.1:5432")).is_err());
+        assert!(Settings::default().with_admin("ftp://x", None).is_err());
+        let next = Settings::default()
+            .with_admin("http://engine:3000/", None)
+            .unwrap();
+        assert_eq!(
+            (next.engine_api.as_str(), next.admin_token_saved),
+            ("http://engine:3000", false)
+        );
+    }
+
+    #[test]
+    fn the_pages_name_the_store_without_its_credentials() {
+        let mut s =
+            Settings::default().pointed_at("postgres://viewer:pw@db.internal:5433/withhuman");
+        assert_eq!(
+            s.password, "pw",
+            "taken from the address, so no keychain prompt"
+        );
+        assert!(!s.demo && s.jev_saved);
+        let p = s.public(std::path::Path::new("/tmp/x"));
+        assert_eq!(p.store(), "PostgreSQL · db.internal:5433/withhuman");
+        assert_eq!(p.host(), "db.internal:5433/withhuman");
+        s.neo4j_url = "http://127.0.0.1:7474".into();
+        assert_eq!(
+            s.public(std::path::Path::new("/tmp/x")).store(),
+            "Neo4j · http://127.0.0.1:7474"
+        );
+        // The encryption's options are neither shown nor in the way of the password.
+        let s = Settings::default().pointed_at(
+            "postgres://viewer:pw@db.example.com/wh?sslmode=verify-full&sslrootcert=/x/ca.pem",
+        );
+        assert_eq!(s.password, "pw");
+        assert_eq!(
+            s.public(std::path::Path::new("/tmp/x")).store(),
+            "PostgreSQL · db.example.com/wh"
+        );
+    }
 
     #[test]
     fn the_file_never_holds_the_password() {
