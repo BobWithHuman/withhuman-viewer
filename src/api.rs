@@ -197,6 +197,27 @@ impl Backend {
         Ok(answer.as_array().map_or(1, Vec::len))
     }
 
+    /// The MCP servers and tools the gateway lets through, with the developers' requests and the
+    /// calls it refused; none until the gateway keeps an MCP allowlist, which only the demo has
+    /// yet.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn mcp_catalog(&self) -> Result<Option<crate::model::McpCatalog>, String> {
+        if self.current().demo {
+            return Ok(Some(self.demo.lock().expect("demo lock").mcp(now_ms())));
+        }
+        Ok(None)
+    }
+
+    /// Changes the gateway's MCP allowlist: the demo's only, until the gateway has an API for it.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn mcp_change(&self, change: crate::model::McpChange) -> Result<(), String> {
+        if self.current().demo {
+            self.demo.lock().expect("demo lock").mcp_change(now_ms(), &change);
+            return Ok(());
+        }
+        Err("게이트웨이에 MCP 허용 목록을 바꾸는 API가 아직 없습니다.".into())
+    }
+
     /// One call of the engine's admin API (Collector's /v1/admin): a POST with the admin token.
     async fn admin(&self, path: &[&str], body: Value) -> Result<Value, String> {
         let settings = self.current();

@@ -433,3 +433,142 @@ pub struct SessionRun {
     /// `clear`, `resume`, `logout`, `prompt_input_exit` or `other`.
     pub end_reason: Option<String>,
 }
+
+/// The MCP servers and tools the gateway lets the agents use, as its allowlist keeps them, with
+/// the requests developers sent to have more let through, and the calls the gateway refused.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpCatalog {
+    /// The allowlist's version, and when it last changed.
+    pub version: String,
+    pub updated_at: Option<i64>,
+    pub servers: Vec<McpServer>,
+    pub requests: Vec<McpRequest>,
+    pub refused: Vec<McpRefusal>,
+}
+
+/// An approved server: reached at a URL (`remote`) or run by the gateway (`local`).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpServer {
+    pub name: String,
+    pub transport: String,
+    /// The URL, or the command.
+    pub endpoint: String,
+    pub approved_by: Option<String>,
+    pub approved_at: Option<i64>,
+    /// The request it was approved on, if one.
+    pub request: Option<String>,
+    pub tools: Vec<McpTool>,
+}
+
+/// A tool of an approved server, and how far it is let through.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpTool {
+    pub name: String,
+    /// What the server tells the agent the tool does.
+    pub description: String,
+    /// `read`, `write`, `delete` or `send` (out of the company).
+    pub nature: String,
+    /// `allow`, `review` (a person confirms each call) or `deny`.
+    pub level: String,
+    /// The teams or people it is for; everyone when empty.
+    pub scope: Vec<String>,
+    pub approved_by: Option<String>,
+    pub approved_at: Option<i64>,
+    pub calls: Vec<McpUse>,
+}
+
+/// A call of a tool that went through the gateway.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpUse {
+    pub at: i64,
+    pub user: String,
+    pub client: String,
+    /// What it was called on, cut short.
+    pub target: String,
+    /// `ALLOW`, `REVIEW` or `DENY`, as for any Call.
+    pub decision: String,
+    pub ran: bool,
+}
+
+/// A developer's request, sent from their machine, to have a server or a tool let through, or a
+/// tool opened to them, and why; and what the security team answered.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpRequest {
+    pub id: String,
+    pub at: i64,
+    pub user: String,
+    pub client: String,
+    /// The project it was asked from.
+    pub cwd: Option<String>,
+    /// `server` (a new server), `tool` (a new tool of an approved server) or `scope` (an
+    /// approved tool opened to the person).
+    pub kind: String,
+    pub server: String,
+    /// A new server's URL or command, and `remote` or `local`.
+    pub endpoint: Option<String>,
+    pub transport: Option<String>,
+    /// The tools the server offers, as the gateway listed them when the request came.
+    pub offered: Vec<McpOffered>,
+    /// The tools asked for.
+    pub wanted: Vec<String>,
+    /// Why, in the developer's words.
+    pub message: String,
+    /// The calls refused for this before it was asked.
+    pub attempts: i64,
+    /// `pending`, `approved` or `rejected`.
+    pub status: String,
+    pub decided_by: Option<String>,
+    pub decided_at: Option<i64>,
+    /// The security team's answer to the developer.
+    pub answer: Option<String>,
+}
+
+/// A tool a server offers, before it is approved.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpOffered {
+    pub name: String,
+    pub description: String,
+    pub nature: String,
+}
+
+/// Calls the gateway refused, the same person, server, tool and reason counted together.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpRefusal {
+    pub first_at: i64,
+    pub last_at: i64,
+    pub count: i64,
+    pub user: String,
+    pub client: String,
+    pub server: String,
+    pub tool: Option<String>,
+    /// `unapproved` (not on the allowlist), `pending` (asked for, not yet decided), `scope`
+    /// (approved, not for this person) or `deny` (a tool set to deny).
+    pub reason: String,
+    /// The request made for it, if one.
+    pub request: Option<String>,
+}
+
+/// A change the MCP page makes to the allowlist.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub enum McpChange {
+    /// How far a tool is let through: `allow`, `review` or `deny`.
+    Level { server: String, tool: String, level: String },
+    /// A request approved, with the level for each tool offered and whom they are for, or
+    /// rejected; with the answer to the developer.
+    Decide { id: String, approve: bool, actor: String, answer: String, levels: Vec<(String, String)>, scope: Vec<String> },
+}

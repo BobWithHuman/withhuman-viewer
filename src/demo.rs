@@ -35,6 +35,9 @@ fn attention(graph: &Value) -> Value {
     json!({"risky": risky, "undecided": undecided, "from_result": from_result, "mode": mode})
 }
 
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+mod mcp;
+
 static FIXTURE: &str = include_str!("../mock/fixture.json");
 
 pub struct Demo {
@@ -43,6 +46,9 @@ pub struct Demo {
     /// actions until the app restarts.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     inventory: Option<crate::model::Inventory>,
+    /// The demo's MCP allowlist, likewise ([`mcp`]).
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    mcp: Option<crate::model::McpCatalog>,
 }
 
 impl Demo {
@@ -63,7 +69,7 @@ impl Demo {
             eprintln!("데모 데이터 형식이 잘못됐습니다: {e}");
             json!({"sessions": [], "graphs": {}, "nodes": {}, "calls": {}})
         });
-        Self { data, inventory: None }
+        Self { data, inventory: None, mcp: None }
     }
 
     /// The stored sessions, each with the counts the sessions query adds since the fixture was
