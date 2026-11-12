@@ -70,6 +70,20 @@ cargo run
 | `VIEWER_DB=<주소>` | 이번 실행만 그 데이터베이스를 읽습니다(저장하지 않음). 엔진의 PostgreSQL은 `postgres://사용자:비밀번호@호스트:포트/DB`, 예전 엔진의 Neo4j는 `http://…`. |
 | `VIEWER_SIGN_IDENTITY=<인증서 이름>` | `cargo run`이 앱을 서명할 인증서입니다(아래 참고). |
 
+### 클라우드의 PostgreSQL에 붙을 때
+
+다른 기기의 PostgreSQL은 주소에 따로 적지 않아도 암호화하고, 인증서가 믿을 만한 곳에서 그 호스트 이름으로 발급됐는지 확인합니다(`verify-full`).
+이 컴퓨터의 PostgreSQL(`localhost`, `127.0.0.1`)은 서버가 받으면 암호화합니다(`prefer`). 주소 끝에 libpq와 같은 옵션을 붙여 바꿉니다.
+
+| 붙일 것 | 언제 |
+|---|---|
+| `?sslrootcert=<CA 파일>` | 클라우드가 자기 CA로 인증서를 발급할 때(AWS RDS, Cloud SQL 등). 그 파일의 CA만 믿습니다. `~/`를 쓸 수 있습니다. |
+| `?sslmode=verify-ca` | SSH 터널이나 IP 주소로 붙어 인증서의 이름이 주소와 다를 때. CA는 확인합니다. |
+| `?sslmode=require` | 암호화만 하고 인증서는 확인하지 않을 때. `sslrootcert`가 있으면 `verify-ca`와 같습니다. |
+| `?sslmode=disable` | 암호화를 받지 않는 서버. 사설망 안에서만 씁니다. |
+
+옵션이 둘이면 `&`로 잇습니다: `postgres://withhuman_viewer@db.example.com:5432/withhuman?sslmode=verify-ca&sslrootcert=~/certs/rds-ca.pem`
+
 설정은 `~/Library/Application Support/dev.withhuman.viewer/`(`settings.json`, `prefs.json`)에 저장됩니다. 지우면 처음 상태로 돌아갑니다.
 비밀번호와 Jev 키는 키체인의 `dev.withhuman.viewer` 항목에 있습니다.
 

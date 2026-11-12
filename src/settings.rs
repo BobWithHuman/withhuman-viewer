@@ -103,17 +103,16 @@ impl Public {
         }
         let url = self.neo4j_url.trim();
         match url.split_once("://") {
-            Some(("postgres" | "postgresql", rest)) => {
-                format!("PostgreSQL · {}", rest.rsplit('@').next().unwrap_or(rest))
-            }
+            Some(("postgres" | "postgresql", _)) => format!("PostgreSQL · {}", self.host()),
             _ => format!("Neo4j · {url}"),
         }
     }
 
-    /// The address without its scheme and credentials, for the top bar.
+    /// The address without its scheme, credentials and options, for the top bar.
     pub fn host(&self) -> String {
         let url = self.neo4j_url.trim();
         let rest = url.split_once("://").map_or(url, |(_, r)| r);
+        let rest = rest.split('?').next().unwrap_or(rest);
         rest.rsplit('@').next().unwrap_or(rest).to_owned()
     }
 }
@@ -264,7 +263,9 @@ impl Settings {
     /// settings are saved from the form.
     pub fn pointed_at(mut self, url: &str) -> Self {
         self.neo4j_url = url.trim().to_owned();
-        if let Ok(config) = <tokio_postgres::Config as std::str::FromStr>::from_str(url.trim())
+        // Without sslmode and sslrootcert, which tokio-postgres doesn't read.
+        let without = url.trim().split('?').next().unwrap_or(url);
+        if let Ok(config) = <tokio_postgres::Config as std::str::FromStr>::from_str(without)
             && let Some(password) = config.get_password()
         {
             self.password = String::from_utf8_lossy(password).into_owned();
@@ -363,6 +364,10 @@ mod tests {
         assert_eq!(p.host(), "db.internal:5433/withhuman");
         s.neo4j_url = "http://127.0.0.1:7474".into();
         assert_eq!(s.public(std::path::Path::new("/tmp/x")).store(), "Neo4j · http://127.0.0.1:7474");
+        // The encryption's options are neither shown nor in the way of the password.
+        let s = Settings::default().pointed_at("postgres://viewer:pw@db.example.com/wh?sslmode=verify-full&sslrootcert=/x/ca.pem");
+        assert_eq!(s.password, "pw");
+        assert_eq!(s.public(std::path::Path::new("/tmp/x")).store(), "PostgreSQL · db.example.com/wh");
     }
 
     #[test]

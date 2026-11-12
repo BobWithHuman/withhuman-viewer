@@ -17,10 +17,12 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 use tokio_postgres::types::ToSql;
-use tokio_postgres::{Client, Config, NoTls};
+use tokio_postgres::{Client, Config};
 
 use crate::graph::{ApiError, Rows, call_row, check_idle, clip, preview, summary};
 use crate::settings::Settings;
+
+mod tls;
 
 /// A trace whose `irreversible` is at least one half, as PostgreSQL's regular expressions read
 /// it: the same match as [`crate::graph::IRREVERSIBLE_TRACE`] without the anchors `~` needs not.
@@ -207,7 +209,7 @@ impl Pool {
         {
             return Ok(c);
         }
-        let client = Arc::new(connect(&config(s, true)?, &s.neo4j_url).await?);
+        let client = Arc::new(connect(config(s, true)?, &s.neo4j_url).await?);
         *self.slot.lock().expect("pool lock") = Some((key, client.clone()));
         Ok(client)
     }
@@ -224,10 +226,13 @@ pub fn is_postgres(s: &Settings) -> bool {
 }
 
 /// The connection the settings name: the address, then the user, password and database from the
-/// form unless the address already says them. Reads run read-only.
-fn config(s: &Settings, read_only: bool) -> Result<Config, ApiError> {
-    let mut c = Config::from_str(s.neo4j_url.trim())
+/// form unless the address already says them, and its encryption ([`tls`]). Reads run read-only.
+fn config(s: &Settings, read_only: bool) -> Result<(Config, tls::Connector), ApiError> {
+    let address = tls::Address::read(&s.neo4j_url);
+    let mut c = Config::from_str(&address.url)
         .map_err(|e| ApiError::new(400, format!("데이터베이스 주소를 읽지 못했습니다: {e}")))?;
+    let (mode, check) = address.plan(c.get_hosts()).map_err(|e| ApiError::new(400, e))?;
+    c.ssl_mode(mode);
     if c.get_user().is_none() && !s.user.is_empty() {
         c.user(&s.user);
     }
@@ -244,11 +249,12 @@ fn config(s: &Settings, read_only: bool) -> Result<Config, ApiError> {
     } else {
         "-c statement_timeout=30000"
     });
-    Ok(c)
+    let tls = address.connector(check).map_err(|e| ApiError::new(400, e))?;
+    Ok((c, tls))
 }
 
-async fn connect(config: &Config, url: &str) -> Result<Client, ApiError> {
-    let (client, connection) = config.connect(NoTls).await.map_err(|e| error(&e, url))?;
+async fn connect((config, tls): (Config, tls::Connector), url: &str) -> Result<Client, ApiError> {
+    let (client, connection) = config.connect(tls).await.map_err(|e| error(&e, url))?;
     tokio::spawn(async move {
         let _ = connection.await;
     });
@@ -257,6 +263,11 @@ async fn connect(config: &Config, url: &str) -> Result<Client, ApiError> {
 
 /// What a failure means to the person at the settings. The address is named, the password never.
 fn error(e: &tokio_postgres::Error, url: &str) -> ApiError {
+    let host = url.split('@').next_back().unwrap_or(url);
+    let host = host.split('?').next().unwrap_or(host);
+    if let Some(trouble) = tls::trouble(e, host) {
+        return ApiError::new(502, trouble);
+    }
     if let Some(db) = e.as_db_error() {
         return match db.code().code() {
             "28P01" | "28000" => ApiError::new(
@@ -278,8 +289,7 @@ fn error(e: &tokio_postgres::Error, url: &str) -> ApiError {
     ApiError::new(
         502,
         format!(
-            "{}에서 PostgreSQL이 응답하지 않습니다. WithHuman 엔진이 실행 중인지, 포트가 열려 있는지 확인해 주세요. ({e})",
-            url.split('@').next_back().unwrap_or(url)
+            "{host}에서 PostgreSQL이 응답하지 않습니다. WithHuman 엔진이 실행 중인지, 포트가 열려 있는지 확인해 주세요. ({e})"
         ),
     )
 }
@@ -470,7 +480,7 @@ impl Postgres<'_> {
     /// Deletes a session no longer active, in one transaction on a connection of its own.
     pub async fn delete_session(&self, session: &str) -> Result<Value, ApiError> {
         let url = &self.settings.neo4j_url;
-        let mut client = connect(&config(self.settings, false)?, url).await?;
+        let mut client = connect(config(self.settings, false)?, url).await?;
         let tx = client.transaction().await.map_err(|e| error(&e, url))?;
         // Deleting the session row first takes the lock the engine holds while it commits an
         // event, so no event lands between the activity check and the delete.
@@ -519,11 +529,11 @@ mod tests {
         s.database = "withhuman".into();
         s.user = "withhuman_viewer".into();
         s.password = "secret".into();
-        let c = config(&s, true).unwrap();
+        let (c, _) = config(&s, true).unwrap();
         assert_eq!(c.get_dbname(), Some("withhuman"));
         assert_eq!(c.get_user(), Some("withhuman_viewer"));
         s.neo4j_url = "postgres://reader@host/graph".into();
-        let c = config(&s, true).unwrap();
+        let (c, _) = config(&s, true).unwrap();
         assert_eq!((c.get_dbname(), c.get_user()), (Some("graph"), Some("reader")));
     }
 
@@ -533,6 +543,30 @@ mod tests {
         row.insert("target".into(), json!(r#"echo \"hi\"\nls"#));
         unescape(&mut row, "target", 300);
         assert_eq!(row["target"], json!("echo \"hi\"\nls"));
+    }
+
+    /// The connection is encrypted, or not, as the address asks: VIEWER_PG_URL is the address,
+    /// VIEWER_PG_EXPECT `encrypted`, `plain` or a piece of the error the settings would show.
+    #[test]
+    #[ignore = "needs a PostgreSQL"]
+    fn the_connection_is_as_the_address_asks() {
+        let url = std::env::var("VIEWER_PG_URL").expect("VIEWER_PG_URL");
+        let expect = std::env::var("VIEWER_PG_EXPECT").expect("VIEWER_PG_EXPECT");
+        let mut s = Settings::default();
+        s.neo4j_url = url.clone();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let got = rt.block_on(async {
+            let client = match async { connect(config(&s, true)?, &url).await }.await {
+                Ok(client) => client,
+                Err(e) => return e.error,
+            };
+            let row = client
+                .query_one("SELECT coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false)", &[])
+                .await
+                .unwrap();
+            if row.get::<_, bool>(0) { "encrypted".to_owned() } else { "plain".to_owned() }
+        });
+        assert!(got.contains(&expect), "expected {expect}, got {got}");
     }
 
     /// The store answers as the demo does for the same graph. Load a PostgreSQL holding the

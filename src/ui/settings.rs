@@ -100,6 +100,7 @@ pub fn SettingsSheet() -> Element {
                         input { r#type: "text", value: "{url}", placeholder: "postgres://127.0.0.1:5432/withhuman", oninput: move |e| url.set(e.value()) }
                     }
                     p { class: "muted", "지금 엔진은 PostgreSQL입니다: postgres://호스트:포트/DB. 예전 엔진(Neo4j)은 http://호스트:7474로 적습니다." }
+                    p { class: "muted", "다른 기기의 서버는 인증서까지 확인해 암호화합니다. 클라우드가 준 CA 파일은 주소 끝에 ?sslrootcert=파일경로 로 붙입니다." }
                     div { class: "row",
                         label { "데이터베이스"
                             input { r#type: "text", value: "{database}", oninput: move |e| database.set(e.value()) }
