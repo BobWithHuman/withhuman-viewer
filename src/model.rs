@@ -19,6 +19,8 @@ pub struct Session {
     pub prompt: Option<String>,
     pub intent: Option<String>,
     pub cwd: Option<String>,
+    /// The client ID the hooks sent (`x-withhuman-client`).
+    pub client: Option<String>,
 }
 
 impl Session {
