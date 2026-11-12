@@ -4,8 +4,8 @@
 //!   the worst first, each opened beside the list.
 //! - 감사: what the engine stopped, held or let through though hard to undo, and how people
 //!   answered when asked; exported for an audit.
-//! - MCP 사용: the console's second product, from the same Calls: the MCP servers and web hosts
-//!   the agents used.
+//! - MCP 사용: the console's second product: the MCP tools the gateway's allowlist lets through,
+//!   the requests developers send to have more let through, and the calls the gateway refused.
 //! - 인벤토리: the machines, people and sessions the engine protects; keys issued and revoked
 //!   (a person's kill switch).
 //! - 민감 정보: the sensitive values found in the sessions, followed to the Calls that used them.

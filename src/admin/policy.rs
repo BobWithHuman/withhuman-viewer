@@ -260,13 +260,6 @@ fn save(draft: &Draft) -> Result<(), String> {
 
 static HOST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"https?://([^/\s:'"?#]+)"#).expect("valid regex"));
 
-/// The MCP servers and web hosts the saved draft lets through, for the pages that mark what is
-/// outside them.
-pub(super) fn allowlists() -> (Vec<String>, Vec<String>) {
-    let d = load();
-    (d.mcp_servers, d.domains)
-}
-
 /// The web host a Call's target names, if it names one.
 pub(super) fn host_of(target: &str) -> Option<String> {
     HOST.captures(target).map(|c| c[1].to_lowercase())

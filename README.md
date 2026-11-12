@@ -61,7 +61,7 @@ cargo run
 | `VIEWER_MOCK=1` | Neo4j 대신 내장 데모 데이터로 엽니다. 첫 실행 설정도 건너뜁니다. |
 | `VIEWER_ONBOARD=1` | 이미 설정했어도 첫 실행 화면을 다시 띄웁니다. 메인 페이지 맨 아래 "처음 설정 다시 하기"와 같습니다. |
 | `VIEWER_SCREEN=<work\|a\|b\|mcp\|secrets\|inventory>` | 첫 화면을 고릅니다: 노선도(기록), 기능 A(감사), 기능 B(정책), 그리고 보안담당자 앱의 MCP 사용, 민감 정보, 인벤토리. 화면을 눌러 가지 않고 바로 볼 때 씁니다. |
-| `VIEWER_TAB=<탭>` | 보안담당자 앱의 첫 탭을 고릅니다. 메인: `detections`, `machines`, `sessions`, `engine`. 감사: `approvals`, `kills`, `integrity`. |
+| `VIEWER_TAB=<탭>` | 보안담당자 앱의 첫 탭을 고릅니다. 메인: `detections`, `machines`, `sessions`, `engine`. 감사: `approvals`, `kills`, `integrity`. MCP 사용: `requests`, `refused`. |
 | `VIEWER_NO_UPDATE=1` | 설치된 앱의 자동 업데이트 확인을 끕니다. |
 | `WITHHUMAN_CORE=<폴더>` | "이 맥에서 실행"의 엔진 폴더 기본값입니다(없으면 `~/withhuman-core`). |
 | `JEV_URL=<주소>` | 키를 확인할 Jev 주소입니다(기본 `https://api.typesafe.ai`). |
