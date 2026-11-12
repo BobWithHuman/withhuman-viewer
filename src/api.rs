@@ -105,6 +105,25 @@ impl Backend {
         typed(value)
     }
 
+    /// Each session's Calls, for the comparison.
+    pub async fn calls(
+        &self,
+        sessions: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<crate::model::CallRow>>, String> {
+        let settings = self.current();
+        let value = if settings.demo {
+            Ok(self.demo.lock().expect("demo lock").calls(sessions))
+        } else {
+            Neo4j {
+                client: &self.client,
+                settings: &settings,
+            }
+            .calls(sessions)
+            .await
+        };
+        typed(value)
+    }
+
     /// Deletes a session for good; returns how many nodes went with it.
     pub async fn delete(&self, session: &str) -> Result<i64, String> {
         let settings = self.current();

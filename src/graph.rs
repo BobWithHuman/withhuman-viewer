@@ -261,7 +261,6 @@ impl Neo4j<'_> {
     }
 
     /// Each session's Calls: tool, verdict and deviation, without payload or trace.
-    #[allow(dead_code)]
     pub async fn calls(&self, sessions: &[String]) -> Result<Value, ApiError> {
         let mut found: Map<String, Value> = sessions
             .iter()
