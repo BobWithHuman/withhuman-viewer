@@ -259,13 +259,16 @@ impl Demo {
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     fn made_inventory(&self, now: i64) -> crate::model::Inventory {
         use crate::model::{
-            ApiKey, Device, DeviceProject, Inventory, KeyEvent, Person, SessionRun,
+            ApiKey, Device, DeviceProject, Inventory, KeyEvent, Person, SessionRun, ShadowAgent,
         };
         const MIN: i64 = 60_000;
         const DAY: i64 = 24 * 60 * MIN;
         let person = |client: &str| match client {
             "claude-code-mock" => Some("dev.kim@example.com".to_owned()),
             "personal-mock" => Some("dev.lee@example.com".to_owned()),
+            "lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4" => Some("dev.park@example.com".to_owned()),
+            "platform/mac-21" => Some("ops.choi@example.com".to_owned()),
+            "data/linux-04" => Some("data.jung@example.com".to_owned()),
             _ => None,
         };
         let mut sessions: Vec<SessionRun> = Vec::new();
@@ -274,18 +277,42 @@ impl Demo {
             .cloned()
             .unwrap_or_default();
         let newest = list.iter().filter_map(|s| s["created_at"].as_i64()).max();
+        // The newest session of all is still running, and so is a machine's newest when it
+        // started within the last few hours.
+        let mut newest_of: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
         for s in &list {
+            if let (Some(c), Some(at)) = (s["client"].as_str(), s["created_at"].as_i64()) {
+                let e = newest_of.entry(c.to_owned()).or_insert(at);
+                *e = (*e).max(at);
+            }
+        }
+        for (i, s) in list.iter().enumerate() {
             let id = s["id"].as_str().unwrap_or_default().to_owned();
             let client = s["client"].as_str().map(str::to_owned);
             let created = s["created_at"].as_i64();
-            let running = created.is_some() && created == newest;
+            let running = created.is_some()
+                && (created == newest
+                    || (created.is_some_and(|at| at >= now - 6 * 60 * MIN)
+                        && client.as_ref().and_then(|c| newest_of.get(c)) == created.as_ref()));
             let last = s["last_at"].as_i64().or(created);
+            // How the agent was let run: mostly asking, some accepting edits or planning, and
+            // the data team's machine with every check off.
+            let permission = if client.as_deref() == Some("data/linux-04") && i % 3 == 0 {
+                "bypassPermissions"
+            } else if running || i % 4 == 1 {
+                "acceptEdits"
+            } else if i % 7 == 3 {
+                "plan"
+            } else {
+                "default"
+            };
             sessions.push(SessionRun {
                 session_id: id,
                 user_email: client.as_deref().and_then(person),
                 client_id: client,
                 start_source: Some("startup".into()),
-                permission_mode: Some(if running { "acceptEdits" } else { "default" }.into()),
+                permission_mode: Some(permission.into()),
                 model: Some("claude-sonnet".into()),
                 created_at: created,
                 last_seen_at: if running { Some(now - 2 * MIN) } else { last },
@@ -366,6 +393,20 @@ impl Demo {
                 "dev.park@example.com",
                 Some(now - 9 * DAY),
             ),
+            device(
+                "platform/mac-21",
+                "ops-mac-21",
+                "macOS 15",
+                "ops.choi@example.com",
+                Some(now - 18 * DAY),
+            ),
+            device(
+                "data/linux-04",
+                "data-linux-04",
+                "Ubuntu 24.04",
+                "data.jung@example.com",
+                Some(now - 6 * DAY),
+            ),
             Device {
                 client_id: "repoguard-codex-main/s14".into(),
                 first_seen: Some(now - 4 * DAY),
@@ -399,14 +440,21 @@ impl Demo {
                 now - 9 * DAY,
             ),
         ];
-        let users = ["dev.kim", "dev.lee", "dev.park", "ci-bot"]
-            .iter()
-            .map(|u| Person {
-                email: format!("{u}@example.com"),
-                created_at: Some(now - 30 * DAY),
-                kind: Some(if *u == "ci-bot" { "service" } else { "person" }.into()),
-            })
-            .collect();
+        let users = [
+            "dev.kim",
+            "dev.lee",
+            "dev.park",
+            "ops.choi",
+            "data.jung",
+            "ci-bot",
+        ]
+        .iter()
+        .map(|u| Person {
+            email: format!("{u}@example.com"),
+            created_at: Some(now - 30 * DAY),
+            kind: Some(if *u == "ci-bot" { "service" } else { "person" }.into()),
+        })
+        .collect();
         let key = |id: &str, user: &str, made: i64, used: Option<i64>| ApiKey {
             key_id: id.into(),
             user_email: format!("{user}@example.com"),
@@ -426,6 +474,13 @@ impl Demo {
                 Some(now - DAY - 2 * 60 * MIN),
             ),
             key("k-c1b0", "ci-bot", now - 14 * DAY, Some(now - 6 * 60 * MIN)),
+            key(
+                "k-44d2",
+                "ops.choi",
+                now - 18 * DAY,
+                seen("platform/mac-21"),
+            ),
+            key("k-b7e1", "data.jung", now - 6 * DAY, seen("data/linux-04")),
         ];
         let stopped = now - DAY - 60 * MIN;
         if let Some(k) = keys.iter_mut().find(|k| k.key_id == "k-9e04") {
@@ -483,6 +538,38 @@ impl Demo {
             events.push(e);
         }
         events.sort_by_key(|e| std::cmp::Reverse(e.at));
+        // Projects the machines' checks found an agent in with no hooks.
+        let shadow =
+            |client: &str, user: &str, agent: &str, project: &str, seen: i64| ShadowAgent {
+                client_id: Some(client.into()),
+                user_email: Some(format!("{user}@example.com")),
+                agent: agent.into(),
+                project: Some(project.into()),
+                last_seen: Some(seen),
+            };
+        let shadow = vec![
+            shadow(
+                "personal-mock",
+                "dev.lee",
+                "codex",
+                "/Users/dev/src/scratch-codex",
+                now - 35 * MIN,
+            ),
+            shadow(
+                "platform/mac-21",
+                "ops.choi",
+                "codex",
+                "/Users/ops/src/oncall-scripts",
+                now - 5 * 60 * MIN,
+            ),
+            shadow(
+                "lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4",
+                "dev.park",
+                "claude-code",
+                "C:/work/legacy-batch",
+                now - 2 * DAY,
+            ),
+        ];
         Inventory {
             clients,
             projects,
@@ -490,6 +577,7 @@ impl Demo {
             keys,
             events,
             sessions,
+            shadow: Some(shadow),
         }
     }
 

@@ -1,12 +1,14 @@
 //! 인벤토리: the machines, people and sessions the engine protects (withhuman-core's agent
 //! inventory), on the rail beside 이상 행위 탐지.
-//! - Four counts first, protected or not by whether the hooks are heard, running or not by a
+//! - Four cards first, protected or not by whether the hooks are heard, running or not by a
 //!   session still going within the window:
-//!   - machines with a session running;
-//!   - registered machines with none (installed only, or idle);
-//!   - agents running unprotected, which only the gateway can tell, so named and left empty;
-//!   - sessions whose hooks sent no ID, a setup to look at.
-//! - Then machines, people and sessions, one picked told beside the list.
+//!   - machines with a session running out of those registered, a mark for each machine;
+//!   - registered machines with none, by how long ago they were last heard (or never);
+//!   - shadow AI: Claude Code and Codex projects a machine's check found with no hooks, by
+//!     agent; empty and saying so on an engine that does not look for them yet;
+//!   - the last week's sessions by permission mode, those run with every check off counted.
+//! - Then machines, people, sessions and shadow AI, one picked told beside the list; a
+//!   machine's detail ends with its person's kill switch.
 //! - People hold the keys: one issued is shown once; one revoked, or a person stopped (every
 //!   key), refuses that person's Calls from then on. Those actions go to the engine's admin API,
 //!   and its record is 감사's 킬스위치 기록.
@@ -16,9 +18,10 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 
-use super::main_page::{Card, Empty, clock, now_ms, stamp};
+use super::charts::mix;
+use super::main_page::{Card, DAY_MS, Empty, clock, now_ms, stamp};
 use crate::api::Backend;
-use crate::model::{Device, Inventory, Session, SessionRun};
+use crate::model::{Device, Inventory, Session, SessionRun, ShadowAgent};
 use crate::ui::{AppState, Load, Mode, Screen};
 
 const MIN: i64 = 60_000;
@@ -28,6 +31,24 @@ enum Tab {
     Devices,
     People,
     Sessions,
+    Shadow,
+}
+
+/// How an agent was let run, as the hooks name it: its name here, its colour, and whether it
+/// runs tools without asking.
+const MODES: [(&str, &str, &str); 4] = [
+    ("bypassPermissions", "확인 없이 실행", "#ff6b6b"),
+    ("acceptEdits", "편집 자동 수락", "#8fb8ff"),
+    ("plan", "계획만", "#7fd6f2"),
+    ("default", "물어보고 실행", "#77777c"),
+];
+
+fn agent_label(agent: &str) -> &str {
+    match agent {
+        "claude-code" => "Claude Code",
+        "codex" => "Codex",
+        other => other,
+    }
 }
 
 /// Whether a session is still going: not ended, and heard from within the window.
@@ -302,6 +323,81 @@ pub fn InventoryPage() -> Element {
         .iter()
         .filter(|r| r.client_id.is_none())
         .collect();
+    // The registered machines one mark each, the running ones first, for the first card.
+    let fleet: Vec<(String, &'static str, &'static str)> = registered
+        .iter()
+        .map(|d| {
+            let name = d
+                .device
+                .hostname
+                .clone()
+                .unwrap_or_else(|| d.device.client_id.clone());
+            let (tone, label) = match d.state {
+                State::Running => ("run", "활동 중"),
+                State::InstalledOnly => ("never", "설치만 됨"),
+                _ => ("idle", "쉬는 중"),
+            };
+            (name, tone, label)
+        })
+        .collect();
+    // The machines with nothing running, by how long ago they were last heard.
+    let quiet = |from: i64, to: i64| {
+        registered
+            .iter()
+            .filter(|d| d.state == State::Idle)
+            .filter(|d| d.last.is_some_and(|t| now - t >= from && now - t < to))
+            .count()
+    };
+    let quiet_mix = [
+        ("오늘 들림", "#c9c9cd", quiet(0, DAY_MS)),
+        ("7일 안", "#8b8b90", quiet(DAY_MS, 7 * DAY_MS)),
+        ("7일 넘음", "#55555b", quiet(7 * DAY_MS, i64::MAX)),
+        ("설치만 됨", "#f2c26b", installed_only),
+    ];
+    // How the last week's sessions were let run.
+    let week: Vec<&SessionRun> = inv
+        .sessions
+        .iter()
+        .filter(|r| {
+            r.last_seen_at
+                .or(r.created_at)
+                .is_some_and(|t| t >= now - 7 * DAY_MS)
+        })
+        .collect();
+    let mode_mix: Vec<(&'static str, &'static str, usize)> = MODES
+        .iter()
+        .map(|(key, label, color)| {
+            (
+                *label,
+                *color,
+                week.iter()
+                    .filter(|r| r.permission_mode.as_deref() == Some(key))
+                    .count(),
+            )
+        })
+        .collect();
+    let bypass = mode_mix[0].2;
+    let bypass_machines: HashSet<&str> = week
+        .iter()
+        .filter(|r| r.permission_mode.as_deref() == Some("bypassPermissions"))
+        .filter_map(|r| r.client_id.as_deref())
+        .collect();
+    // The agents found running without the hooks, the latest seen first.
+    let mut shadow: Vec<ShadowAgent> = inv.shadow.clone().unwrap_or_default();
+    shadow.sort_by_key(|a| std::cmp::Reverse(a.last_seen));
+    let shadow_mix: Vec<(&'static str, &'static str, usize)> = [
+        ("claude-code", "Claude Code", "#f2a46b"),
+        ("codex", "Codex", "#c48cf2"),
+    ]
+    .iter()
+    .map(|(key, label, color)| {
+        (
+            *label,
+            *color,
+            shadow.iter().filter(|a| a.agent == *key).count(),
+        )
+    })
+    .collect();
     let host: HashMap<&str, String> = inv
         .clients
         .iter()
@@ -336,35 +432,61 @@ pub fn InventoryPage() -> Element {
             }
             div { class: "cs-grid",
                 div { class: "cs-row four",
-                    Card { title: "보호됨 · 동작 중", note: "우리 훅이 들리는 기기 중 세션이 도는 것", stamp: at.clone(),
-                        div { class: "cs-figure static", span { class: "cs-big good", "{protected_running}" } }
-                        div { class: "cs-sub", span { "도는 세션 " strong { "{running_sessions}" } "개" } }
+                    Card { title: "보호됨 · 동작 중", note: "훅이 들리는 기기 중 지금 세션이 도는 것", stamp: at.clone(),
+                        div { class: "cs-figure static",
+                            span { class: "cs-big good", "{protected_running}" }
+                            span { class: "cs-of", "/ {registered.len()}" }
+                        }
+                        div { class: "inv-fleet",
+                            for (name, tone, label) in fleet {
+                                i { key: "{name}", class: "{tone}", title: "{name} · {label}" }
+                            }
+                        }
+                        div { class: "cs-sub", span { "도는 세션 " strong { "{running_sessions}" } "개 · 등록된 기기 " strong { "{registered.len()}" } "대" } }
                     }
                     Card { title: "보호됨 · 동작 안 함", note: "등록됐지만 지금 도는 세션이 없는 기기", stamp: at.clone(),
                         div { class: "cs-figure static", span { class: "cs-big", "{installed_only + idle}" } }
-                        div { class: "cs-sub",
-                            span { "설치만 됨 " strong { class: "warn", "{installed_only}" } "대" }
-                            span { "쉬는 중 " strong { "{idle}" } "대" }
+                        if installed_only + idle == 0 {
+                            div { class: "cs-sub", span { "등록된 기기가 모두 돌고 있습니다." } }
+                        } else {
+                            {mix(&quiet_mix)}
                         }
                     }
-                    Card { title: "보호 안 됨 · 동작 중", note: "훅을 거치지 않고 도는 에이전트", stamp: at.clone(),
-                        div { class: "cs-figure static", span { class: "cs-big muted", "–" } }
-                        div { class: "cs-sub",
-                            span { "모델 호출이 엔진 게이트웨이를 지나는 환경에서만 셀 수 있습니다." }
-                        }
-                    }
-                    Card { title: "ID 없이 들어온 세션", note: "앱·IDE 실행이나 컨테이너에서 기기 ID가 빠짐", stamp: at.clone(),
-                        div { class: "cs-figure static", span { class: if no_id.is_empty() { "cs-big" } else { "cs-big bad" }, "{no_id.len()}" } }
-                        div { class: "cs-sub",
-                            if let Some(last) = no_id.iter().filter_map(|r| r.created_at).max() {
-                                span { "마지막 " strong { "{stamp(Some(last))}" } }
+                    Card { title: "섀도 AI", note: "보호 안 됨 · 훅을 거치지 않고 도는 에이전트", stamp: at.clone(),
+                        if inv.shadow.is_some() {
+                            button { class: "cs-figure", title: "섀도 AI 목록 보기", onclick: move |_| tab.set(Tab::Shadow),
+                                span { class: if shadow.is_empty() { "cs-big" } else { "cs-big bad" }, "{shadow.len()}" }
                             }
-                            span { "설치나 환경 변수를 확인할 기기가 있다는 뜻입니다." }
+                            if shadow.is_empty() {
+                                div { class: "cs-sub", span { "기기 점검에서 훅 없는 에이전트가 나오지 않았습니다." } }
+                            } else {
+                                {mix(&shadow_mix)}
+                            }
+                            div { class: "cs-sub tight",
+                                span { "ID 없이 들어온 세션 " strong { class: if no_id.is_empty() { "" } else { "warn" }, "{no_id.len()}" } "개" }
+                            }
+                        } else {
+                            div { class: "cs-figure static", span { class: "cs-big muted", "–" } }
+                            div { class: "cs-sub",
+                                span { "기기 점검이 훅 없는 Claude Code·Codex 프로젝트를 알려 오면 여기에 셉니다." }
+                                span { "ID 없이 들어온 세션 " strong { class: if no_id.is_empty() { "" } else { "warn" }, "{no_id.len()}" } "개" }
+                            }
+                        }
+                    }
+                    Card { title: "확인 없이 도는 세션", note: format!("최근 7일 세션의 권한 모드 · bypass 기기 {}대", bypass_machines.len()), stamp: at.clone(),
+                        div { class: "cs-figure static",
+                            span { class: if bypass > 0 { "cs-big bad" } else { "cs-big" }, "{bypass}" }
+                            span { class: "cs-of", "/ {week.len()}" }
+                        }
+                        if week.is_empty() {
+                            div { class: "cs-sub", span { "최근 7일에 들어온 세션이 없습니다." } }
+                        } else {
+                            {mix(&mode_mix)}
                         }
                     }
                 }
                 nav { class: "inv-tabs",
-                    for (t, label, n) in [(Tab::Devices, "기기", registered.len()), (Tab::People, "사용자", people.len()), (Tab::Sessions, "세션", runs.len())] {
+                    for (t, label, n) in [(Tab::Devices, "기기", registered.len()), (Tab::People, "사용자", people.len()), (Tab::Sessions, "세션", runs.len()), (Tab::Shadow, "섀도 AI", shadow.len())] {
                         button { key: "{label}", class: if tab() == t { "on" } else { "" }, onclick: move |_| tab.set(t),
                             "{label}" span { class: "n", "{n}" }
                         }
@@ -413,7 +535,7 @@ pub fn InventoryPage() -> Element {
                             }
                             Card { title: "기기 자세히", note: device.as_ref().map_or(String::new(), |d| d.device.client_id.clone()), stamp: at.clone(),
                                 if let Some(d) = device.clone() {
-                                    DeviceDetail { row: d, inv: inv.clone(), titles: titles.clone(), ask }
+                                    DeviceDetail { row: d, inv: inv.clone(), titles: titles.clone(), ask, now, window: window() }
                                 } else {
                                     Empty { text: "기기를 고르세요" }
                                 }
@@ -477,6 +599,42 @@ pub fn InventoryPage() -> Element {
                                     for r in runs.iter().take(300).cloned() {
                                         RunRow { key: "{r.session_id}", run: r.clone(), host: r.client_id.as_deref().and_then(|c| host.get(c).cloned()),
                                             title: titles.get(&r.session_id).cloned(), is_running: running(&r, now, window()) }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Tab::Shadow => rsx! {
+                        Card { title: "섀도 AI", note: "훅 없이 도는 Claude Code·Codex 프로젝트, 최근에 보인 순", stamp: at.clone(),
+                            div { class: "inv-table",
+                                div { class: "inv-tr shadow head",
+                                    span { "에이전트" } span { "기기" } span { "사용자" } span { "프로젝트" } span { "마지막으로 보임" } span {}
+                                }
+                                if inv.shadow.is_none() {
+                                    Empty { text: "이 엔진은 아직 훅 없는 에이전트를 찾지 않습니다" }
+                                } else if shadow.is_empty() {
+                                    Empty { text: "훅 없이 도는 에이전트가 없습니다" }
+                                }
+                                div { class: "inv-tbody",
+                                    for a in shadow.iter().cloned() {
+                                        {
+                                            let client = a.client_id.clone();
+                                            let name = client.as_deref().and_then(|c| host.get(c).cloned()).or(client.clone()).unwrap_or_else(|| "–".into());
+                                            rsx! {
+                                                div { key: "{name}-{a.project.clone().unwrap_or_default()}", class: "inv-tr shadow",
+                                                    span { class: "name", i { class: "inv-agent {a.agent}" } "{agent_label(&a.agent)}" }
+                                                    span { "{name}" }
+                                                    span { class: "muted", "{a.user_email.clone().unwrap_or_else(|| \"–\".into())}" }
+                                                    code { "{a.project.clone().unwrap_or_else(|| \"–\".into())}" }
+                                                    span { class: "when", "{stamp(a.last_seen)}" }
+                                                    if let Some(c) = client {
+                                                        button { class: "link", onclick: move |_| { picked_device.set(Some(c.clone())); tab.set(Tab::Devices); }, "기기 보기" }
+                                                    } else {
+                                                        span {}
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -565,10 +723,19 @@ fn DeviceDetail(
     inv: Inventory,
     titles: HashMap<String, Session>,
     ask: Signal<Option<Ask>>,
+    now: i64,
+    window: i64,
 ) -> Element {
     let mut state = use_context::<AppState>();
     let mut ask = ask;
     let d = row.device.clone();
+    let shadow: Vec<ShadowAgent> = inv
+        .shadow
+        .iter()
+        .flatten()
+        .filter(|a| a.client_id.as_deref() == Some(&d.client_id))
+        .cloned()
+        .collect();
     let projects: Vec<_> = inv
         .projects
         .iter()
@@ -610,6 +777,7 @@ fn DeviceDetail(
                     let id = r.session_id.clone();
                     let t = titles.get(&r.session_id).map(|s| s.title().to_owned());
                     let opens = t.is_some();
+                    let going = running(&r, now, window);
                     rsx! {
                         button { key: "{r.session_id}", class: if opens { "inv-line pick" } else { "inv-line" },
                             onclick: move |_| if opens {
@@ -617,15 +785,32 @@ fn DeviceDetail(
                                 state.mode.set(Mode::Graph);
                                 state.screen.set(Screen::Work);
                             },
-                            span { "{t.clone().unwrap_or_else(|| r.session_id.chars().take(8).collect())}" }
+                            span { class: "what",
+                                i { class: if going { "inv-dot run" } else { "inv-dot" }, title: if going { "진행 중" } else { "끝남" } }
+                                "{t.clone().unwrap_or_else(|| r.session_id.chars().take(8).collect())}"
+                            }
+                            span { class: if r.permission_mode.as_deref() == Some("bypassPermissions") { "mode bad" } else { "mode" }, "{r.permission_mode.clone().unwrap_or_default()}" }
                             span { class: "when", "{stamp(r.last_seen_at.or(r.created_at))}" }
                         }
                     }
                 }
             }
+            if !shadow.is_empty() {
+                h4 { "훅 없이 도는 에이전트 " span { class: "n", "{shadow.len()}" } }
+                for a in shadow {
+                    div { key: "{a.project.clone().unwrap_or_default()}", class: "inv-line shadow",
+                        span { class: "what", i { class: "inv-agent {a.agent}" } "{agent_label(&a.agent)}" }
+                        code { "{a.project.clone().unwrap_or_default()}" }
+                        span { class: "when", "{stamp(a.last_seen)}" }
+                    }
+                }
+            }
             if let Some(email) = user {
-                div { class: "inv-acts",
-                    span { "사용자 " strong { "{email}" } }
+                div { class: "inv-kill",
+                    div { class: "body",
+                        strong { "킬 스위치" }
+                        span { "{email}의 키를 모두 회수합니다. 이 기기를 포함해 이 사용자의 모든 호출이 그때부터 거부됩니다." }
+                    }
                     button { class: "inv-stop", onclick: move |_| ask.set(Some(Ask::StopPerson(email.clone()))), "이 사용자 멈추기" }
                 }
             }

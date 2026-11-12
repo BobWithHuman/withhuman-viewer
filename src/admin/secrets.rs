@@ -3,6 +3,12 @@
 //! (the person's prompt, a tool result, or the agent itself), whether the agent then put it in a
 //! Call, and whether that Call sent it outside, and was stopped or ran. The engine keeps only a
 //! hash and a masked form of each value, so the page shows the masked form.
+//!
+//! - Four cards: the values by category; how far they got (seen, put in a Call, about to be
+//!   sent out, sent); each machine's values by how they ended; where they were being sent to.
+//! - The values as a flow from where they came in, through what they are, to how they ended,
+//!   beside how they ended over time.
+//! - The values listed, the worst first, one picked followed through its session beside.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};
@@ -10,7 +16,8 @@ use std::sync::{Arc, LazyLock};
 use dioxus::prelude::*;
 use regex::Regex;
 
-use super::main_page::{Card, DAY_MS, Empty, clock, now_ms, period_label, stamp};
+use super::charts::{Series, Stop, flow, mix, stacked_bars};
+use super::main_page::{Axis, Card, DAY_MS, Empty, clock, now_ms, period_label, stamp};
 use crate::api::Backend;
 use crate::model::SecretMention;
 use crate::ui::{AppState, Screen};
@@ -53,16 +60,6 @@ pub(super) fn kind_label(kind: &str) -> &str {
     }
 }
 
-fn category_label(category: &str) -> &'static str {
-    match category {
-        "credential" => "키·토큰",
-        "pii" => "개인정보",
-        "financial" => "금융정보",
-        "device" => "기기 식별자",
-        _ => "그 밖",
-    }
-}
-
 fn slot_label(slot: &str) -> &'static str {
     match slot {
         "user" => "사용자 프롬프트",
@@ -79,6 +76,59 @@ fn node_label(m: &SecretMention) -> &'static str {
         (Some("Segment" | "Error"), _) => "도구 결과",
         _ => "기록",
     }
+}
+
+/// The categories in a fixed order, each with its name and its colour wherever it is drawn.
+const CATEGORIES: [(&str, &str, &str); 4] = [
+    ("credential", "키·토큰", "#8f8cf6"),
+    ("pii", "개인정보", "#7fd6f2"),
+    ("financial", "금융정보", "#f2a46b"),
+    ("device", "기기 식별자", "#9fe0a6"),
+];
+const CATEGORY_STOPS: [Stop; 4] = [
+    (CATEGORIES[0].1, CATEGORIES[0].2),
+    (CATEGORIES[1].1, CATEGORIES[1].2),
+    (CATEGORIES[2].1, CATEGORIES[2].2),
+    (CATEGORIES[3].1, CATEGORIES[3].2),
+];
+/// Who wrote a value first, as [`Trail::from`] names them and as the flow shows them.
+const FROM: [&str; 3] = ["external", "user", "agent"];
+const ENTRIES: [Stop; 3] = [
+    ("도구 결과(파일·웹)", "#c9c9cd"),
+    ("사용자 프롬프트", "#c9c9cd"),
+    ("에이전트가 처음 씀", "#c9c9cd"),
+];
+/// How a value ended, the worst first ([`Trail::status`] counts them the other way).
+const OUTCOMES: [Stop; 4] = [
+    ("밖으로 나감", "#ff6b6b"),
+    ("보내려다 막힘", "#f2c26b"),
+    ("호출에 씀", "#8fb8ff"),
+    ("보이기만 함", "#6b6b70"),
+];
+
+/// A host in a command or a URL: after `http(s)://`, or between `user@` and `:` as scp names it.
+static HOST: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"https?://([^/\s:?'"]+)|@([A-Za-z0-9.\-]+):"#).expect("valid regex")
+});
+
+/// Where an outward Call sends to: its MCP server, the host it names, or else its tool.
+fn destination(m: &SecretMention) -> String {
+    let tool = m.tool.as_deref().unwrap_or("");
+    if let Some(rest) = tool.strip_prefix("mcp__") {
+        return format!("{} (MCP)", rest.split("__").next().unwrap_or(rest));
+    }
+    m.target
+        .as_deref()
+        .and_then(|t| HOST.captures(t))
+        .and_then(|c| c.get(1).or(c.get(2)))
+        .map(|h| h.as_str().to_owned())
+        .unwrap_or_else(|| {
+            if tool.is_empty() {
+                "알 수 없음".into()
+            } else {
+                tool.to_owned()
+            }
+        })
 }
 
 /// One sensitive value as it went through one session.
@@ -196,18 +246,61 @@ pub fn Secrets() -> Element {
         .iter()
         .filter(|t| t.out_ran == 0 && t.out_stopped > 0)
         .count();
-    let mut by_category: Vec<(String, usize)> = Vec::new();
-    for c in ["credential", "pii", "financial", "device"] {
-        let n = list.iter().filter(|t| t.category == c).count();
-        if n > 0 {
-            by_category.push((category_label(c).to_owned(), n));
+    let tried = left + stopped;
+    let by_category: Vec<(&'static str, &'static str, usize)> = CATEGORIES
+        .iter()
+        .map(|(c, label, color)| {
+            (
+                *label,
+                *color,
+                list.iter().filter(|t| t.category == *c).count(),
+            )
+        })
+        .collect();
+    // Where each value came in, what it is and how it ended, for the flow.
+    let flows: Vec<[usize; 3]> = list
+        .iter()
+        .filter_map(|t| {
+            let from = FROM.iter().position(|f| *f == t.from).unwrap_or(2);
+            let category = CATEGORIES.iter().position(|c| c.0 == t.category)?;
+            Some([from, category, 3 - t.status().0 as usize])
+        })
+        .collect();
+    // Each machine's values by how they ended, the ones that let the most out first.
+    let mut by_client: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    for t in &list {
+        let name = if t.client.is_empty() {
+            "이름 없는 단말"
+        } else {
+            t.client.as_str()
+        };
+        by_client.entry(name.to_owned()).or_default()[t.status().0 as usize] += 1;
+    }
+    let mut clients: Vec<(String, [usize; 4])> = by_client.into_iter().collect();
+    clients.sort_by_key(|(_, n)| std::cmp::Reverse((n[3], n[2], n[1], n[0])));
+    let client_max = clients
+        .iter()
+        .map(|(_, n)| n.iter().sum::<usize>())
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    // The values by how they ended over the period, a bar per day or hour of their last mention.
+    let axis = Axis::new(days(), now);
+    let labels = axis.labels();
+    let mut over_time: Vec<Series> = OUTCOMES
+        .iter()
+        .rev()
+        .map(|(label, color)| Series {
+            label,
+            color,
+            values: vec![0; labels.len()],
+        })
+        .collect();
+    for t in &list {
+        if let Some(i) = t.last.and_then(|at| axis.index(at)) {
+            over_time[t.status().0 as usize].values[i] += 1;
         }
     }
-    let from: Vec<(&str, usize)> = ["external", "user", "agent"]
-        .iter()
-        .map(|s| (slot_label(s), list.iter().filter(|t| t.from == *s).count()))
-        .collect();
-    let from_max = from.iter().map(|f| f.1).max().unwrap_or(0).max(1);
     // The Calls that sent a value outside, or tried to, the latest first.
     let mut outgoing: Vec<(SecretMention, &'static str, &'static str)> = list
         .iter()
@@ -229,6 +322,25 @@ pub fn Secrets() -> Element {
         })
         .collect();
     outgoing.sort_by_key(|(m, _, _)| std::cmp::Reverse((m.at, m.seq)));
+    // Where those Calls were sending to, the places that got the most first.
+    let mut by_place: BTreeMap<String, (usize, usize, SecretMention)> = BTreeMap::new();
+    for (m, tone, _) in outgoing.iter().rev() {
+        let e = by_place.entry(destination(m)).or_insert((0, 0, m.clone()));
+        if *tone == "bad" {
+            e.0 += 1;
+        } else {
+            e.1 += 1;
+        }
+        e.2 = m.clone();
+    }
+    let mut places: Vec<(String, (usize, usize, SecretMention))> = by_place.into_iter().collect();
+    places.sort_by_key(|(_, (ran, held, m))| std::cmp::Reverse((*ran, *held, m.at)));
+    let place_max = places
+        .iter()
+        .map(|(_, p)| p.0 + p.1)
+        .max()
+        .unwrap_or(0)
+        .max(1);
     let period = period_label(days());
     let at = clock(loaded);
     let none = if loading {
@@ -272,47 +384,97 @@ pub fn Secrets() -> Element {
             }
             div { class: "cs-grid",
                 div { class: "cs-row four",
-                    Card { title: "드러난 민감 값", note: period.clone(), stamp: at.clone(),
+                    Card { title: "드러난 민감 값", note: format!("{period} · 가려진 값만 보관"), stamp: at.clone(),
                         div { class: "cs-figure static", span { class: "cs-big", if loading { "…" } else { "{list.len()}" } } }
-                        div { class: "cs-sub",
-                            if by_category.is_empty() { span { "세션마다 같은 값은 하나로 셉니다" } }
-                            for (c, n) in by_category {
-                                span { key: "{c}", "{c} " strong { "{n}" } "개" }
+                        if list.is_empty() {
+                            div { class: "cs-sub", span { "세션마다 같은 값은 하나로 셉니다" } }
+                        } else {
+                            {mix(&by_category)}
+                        }
+                    }
+                    Card { title: "유출 단계", note: "드러난 값이 어디까지 갔나", stamp: at.clone(),
+                        if list.is_empty() {
+                            Empty { text: none }
+                        } else {
+                            div { class: "vz-steps",
+                                for (label, tone, n) in [("드러남", "seen", list.len()), ("호출에 넣음", "used", used), ("밖으로 보내려 함", "tried", tried), ("밖으로 나감", "left", left)] {
+                                    div { key: "{label}", class: "vz-step",
+                                        span { class: "name", "{label}" }
+                                        span { class: "track", span { class: "fill {tone}", style: "width:{n as f64 / list.len() as f64 * 100.0:.1}%" } }
+                                        span { class: "n", "{n}" }
+                                    }
+                                }
+                            }
+                            div { class: "cs-sub",
+                                span { "보내려다 막힘 " strong { class: "warn", "{stopped}" } "개 · 막지 못함 " strong { class: "bad", "{left}" } "개" }
                             }
                         }
                     }
-                    Card { title: "에이전트가 호출에 넣은 값", note: period.clone(), stamp: at.clone(),
-                        div { class: "cs-figure static", span { class: "cs-big", if loading { "…" } else { "{used}" } } }
-                        div { class: "cs-sub",
-                            span { "밖으로 나감 " strong { class: "bad", "{left}" } "개" }
-                            span { "보내려다 막힘 " strong { class: "warn", "{stopped}" } "개" }
-                        }
-                    }
-                    Card { title: "밖으로 보내려 한 호출", note: "WebFetch·MCP·네트워크 명령", stamp: at.clone(),
-                        if outgoing.is_empty() {
+                    Card { title: "에이전트별 유출", note: "단말마다 값이 어떻게 끝났나", stamp: at.clone(),
+                        if clients.is_empty() {
                             Empty { text: none }
                         } else {
                             div { class: "cs-list",
-                                for (m, tone, label) in outgoing {
-                                    OutRow { key: "{m.session}-{m.seq}-{m.key}", m, tone, label }
-                                }
-                            }
-                        }
-                    }
-                    Card { title: "들어온 곳", note: "값이 세션에 처음 나온 자리", stamp: at.clone(),
-                        div { class: "cs-list",
-                            for (l, n) in from {
-                                {
-                                    let width = n as f64 / from_max as f64 * 100.0;
-                                    rsx! {
-                                        div { key: "{l}", class: "cs-list-row host",
-                                            span { class: "name", "{l}" }
-                                            span { class: "track", span { class: "fill", style: "width:{width:.1}%" } }
-                                            span { class: "n", "{n}" }
+                                for (name, n) in clients {
+                                    {
+                                        let total: usize = n.iter().sum();
+                                        let title = format!("{name}\n밖으로 나감 {}\n보내려다 막힘 {}\n호출에 씀 {}\n보이기만 함 {}", n[3], n[2], n[1], n[0]);
+                                        rsx! {
+                                            div { key: "{name}", class: "vz-rank", title: "{title}",
+                                                span { class: "name", "{name}" }
+                                                span { class: "track",
+                                                    span { class: "stack", style: "width:{total as f64 / client_max as f64 * 100.0:.1}%",
+                                                        for rank in [3, 2, 1, 0] {
+                                                            if n[rank] > 0 {
+                                                                span { key: "{rank}", style: "flex-grow:{n[rank]};background:{OUTCOMES[3 - rank].1}" }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                if n[3] > 0 {
+                                                    span { class: "n bad", "나감 {n[3]}" }
+                                                } else if n[2] > 0 {
+                                                    span { class: "n warn", "막힘 {n[2]}" }
+                                                } else {
+                                                    span { class: "n", "{total}" }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
+                            div { class: "vz-keys",
+                                for (label, color) in OUTCOMES {
+                                    span { key: "{label}", i { style: "background:{color}" } "{label}" }
+                                }
+                            }
+                        }
+                    }
+                    Card { title: "어디로 보내려 했나", note: "WebFetch·MCP·네트워크 명령의 목적지", stamp: at.clone(),
+                        if places.is_empty() {
+                            Empty { text: none }
+                        } else {
+                            div { class: "cs-list",
+                                for (place, (ran, held, m)) in places {
+                                    PlaceRow { key: "{place}", place, ran, held, max: place_max, m }
+                                }
+                            }
+                        }
+                    }
+                }
+                div { class: "cs-row split secrets-viz",
+                    Card { title: "민감 값의 흐름", note: "들어온 곳 → 종류 → 어떻게 끝났나", stamp: at.clone(),
+                        if flows.is_empty() {
+                            Empty { text: none }
+                        } else {
+                            {flow([&ENTRIES, &CATEGORY_STOPS, &OUTCOMES], &flows, "개")}
+                        }
+                    }
+                    Card { title: "노출 추이", note: "값이 마지막으로 나온 때, 끝난 모습별", stamp: at.clone(),
+                        if list.is_empty() {
+                            Empty { text: none }
+                        } else {
+                            {stacked_bars(&labels, &over_time, 520.0, 236.0)}
                         }
                     }
                 }
@@ -374,9 +536,9 @@ pub fn Secrets() -> Element {
     }
 }
 
-/// A Call that sent a value outside, or tried to; it opens on the route map.
+/// A place values were sent to, or about to be; it opens the latest of those Calls on the route map.
 #[component]
-fn OutRow(m: SecretMention, tone: &'static str, label: &'static str) -> Element {
+fn PlaceRow(place: String, ran: usize, held: usize, max: usize, m: SecretMention) -> Element {
     let mut state = use_context::<AppState>();
     let (session, seq) = (m.session.clone(), m.seq);
     let what = m
@@ -386,16 +548,24 @@ fn OutRow(m: SecretMention, tone: &'static str, label: &'static str) -> Element 
         .unwrap_or_default();
     rsx! {
         button {
-            class: "cs-list-row pick secrets-out",
-            title: "노선도에서 보기",
+            class: "vz-rank",
+            title: "{what}\n\n가장 최근 호출을 노선도에서 보기",
             onclick: move |_| {
                 state.open_call(session.clone(), seq);
                 state.screen.set(Screen::Work);
             },
-            span { class: "status {tone}", "{label}" }
-            span { class: "kind", "{kind_label(m.kind.as_deref().unwrap_or(\"\"))}" }
-            code { "{what}" }
-            span { class: "meta", "{clock(m.at)}" }
+            span { class: "name", "{place}" }
+            span { class: "track",
+                span { class: "stack", style: "width:{(ran + held) as f64 / max as f64 * 100.0:.1}%",
+                    if ran > 0 { span { style: "flex-grow:{ran};background:{OUTCOMES[0].1}" } }
+                    if held > 0 { span { style: "flex-grow:{held};background:{OUTCOMES[1].1}" } }
+                }
+            }
+            if ran > 0 {
+                span { class: "n bad", "나감 {ran}" }
+            } else {
+                span { class: "n warn", "막힘 {held}" }
+            }
         }
     }
 }

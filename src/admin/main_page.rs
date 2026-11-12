@@ -1,10 +1,12 @@
 //! The security team's main page, laid out as an endpoint console's activity dashboard: a thin
 //! header, tabs, a filter bar, then cards on a dark grid, each saying when it was read.
 //!
-//! - 개요: machines blocking out of those active, new requests for a person's approval, the
-//!   prompts whose turns were stopped most, the Calls people approved (hardest to undo first); the Calls worth a look over time beside the latest of them; and those Calls by
-//!   kind over time. A figure, a bar or a legend clicked narrows the filter, as a console's
-//!   widgets do.
+//! - 개요: what the engine stopped, held and let through though hard to undo, each against the
+//!   period before, and the machines it blocks on; the Calls worth a look over time by how bad
+//!   they are, beside what made the agent take them; those Calls by kind, by the hour of the
+//!   week and by machine; then the latest of them, the prompts whose turns were stopped most
+//!   and the Calls people approved. A figure, a bar or a row clicked narrows the filter, as a
+//!   console's widgets do.
 //! - 단말: every machine, the riskiest first, found by name.
 //! - 위험 세션: the sessions worth a look in four kinds.
 //! - 엔진 상태: how the engine enforced on each machine; what it cannot tell yet is named.
@@ -15,9 +17,10 @@
 use std::collections::{BTreeMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{Duration, Local, NaiveDate, TimeZone, Timelike};
+use chrono::{Datelike, Duration, Local, NaiveDate, TimeZone, Timelike};
 use dioxus::prelude::*;
 
+use super::charts::{Series, heat, mix, spark, stacked_bars};
 use super::policy::{Grade, grade_of};
 use crate::model::{CallFact, Session};
 use crate::ui::home::{big, when};
@@ -494,29 +497,6 @@ pub(super) fn kind_color(kind: &str) -> &'static str {
     }
 }
 
-/// The Calls worth a look by kind over the period: the axis's labels, each bucket's counts by
-/// kind, and the kinds seen, the most first.
-type ByKind = (
-    Vec<String>,
-    Vec<BTreeMap<String, usize>>,
-    Vec<(String, usize)>,
-);
-
-fn by_kind(facts: &[CallFact], days: Option<i64>, now: i64) -> ByKind {
-    let axis = Axis::new(days, now);
-    let labels = axis.labels();
-    let mut buckets = vec![BTreeMap::new(); labels.len()];
-    let mut kept = Vec::new();
-    for f in facts {
-        let (Some(kind), Some(i)) = (detection_kind(f), f.at.and_then(|at| axis.index(at))) else {
-            continue;
-        };
-        *buckets[i].entry(kind.clone()).or_default() += 1;
-        kept.push(kind);
-    }
-    (labels, buckets, counted(kept.into_iter()))
-}
-
 /// How bad a Call worth a look is, for the list of the latest ones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Severity {
@@ -555,6 +535,70 @@ impl Severity {
             Severity::Medium => ("mid", "중간"),
             Severity::After => ("after", "사후 확인"),
         }
+    }
+}
+
+/// The severities, the worst first, each with its colour wherever it is drawn.
+const SEVERITIES: [(Severity, &str); 4] = [
+    (Severity::Critical, "#e5484d"),
+    (Severity::High, "#f08a4b"),
+    (Severity::Medium, "#f2c26b"),
+    (Severity::After, "#5fc6b0"),
+];
+
+/// How many of the Calls given are of each severity, in [`SEVERITIES`]' order.
+fn severity_counts<'a>(facts: impl Iterator<Item = &'a CallFact>) -> [usize; 4] {
+    let mut n = [0; 4];
+    for s in facts.filter_map(Severity::of) {
+        if let Some(i) = SEVERITIES.iter().position(|x| x.0 == s) {
+            n[i] += 1;
+        }
+    }
+    n
+}
+
+/// The Calls worth a look over the period by severity: the axis's labels and a layer for each
+/// severity, the worst at the bottom.
+fn by_severity(facts: &[CallFact], days: Option<i64>, now: i64) -> (Vec<String>, Vec<Series>) {
+    let axis = Axis::new(days, now);
+    let labels = axis.labels();
+    let mut series: Vec<Series> = SEVERITIES
+        .iter()
+        .map(|(s, color)| Series {
+            label: s.tag().1,
+            color,
+            values: vec![0; labels.len()],
+        })
+        .collect();
+    for f in facts {
+        let (Some(s), Some(i)) = (Severity::of(f), f.at.and_then(|at| axis.index(at))) else {
+            continue;
+        };
+        if let Some(k) = SEVERITIES.iter().position(|x| x.0 == s) {
+            series[k].values[i] += 1;
+        }
+    }
+    (labels, series)
+}
+
+/// The Calls worth a look by the hour of the week they were decided in, Monday first.
+fn week_hours(facts: &[CallFact]) -> [[usize; 24]; 7] {
+    let mut cells = [[0; 24]; 7];
+    for f in facts.iter().filter(|f| Severity::of(f).is_some()) {
+        if let Some(t) = f.at.and_then(|at| Local.timestamp_millis_opt(at).single()) {
+            cells[t.weekday().num_days_from_monday() as usize][t.hour() as usize] += 1;
+        }
+    }
+    cells
+}
+
+/// What a source of Calls means for the security team, under its name.
+fn source_hint(source: &str) -> &'static str {
+    match source {
+        "segment" => "도구 결과(파일·웹)의 내용이 끌어온 호출",
+        "request" => "사용자 요청을 하다가 벗어난 호출",
+        "none" => "요청에서도 결과에서도 원인을 찾지 못한 호출",
+        _ => "원인 추적이 남지 않은 호출",
     }
 }
 
@@ -639,6 +683,22 @@ pub fn Main() -> Element {
         .cloned()
         .collect();
     let facts: Vec<CallFact> = base.iter().filter(|x| f.keeps(x, now)).cloned().collect();
+    // The same filter over the period before this one, to say how the figures moved.
+    let prev: Vec<CallFact> = match f.days {
+        Some(d) => {
+            let any_time = Filter {
+                days: None,
+                ..f.clone()
+            };
+            let (from, to) = (now - 2 * d * DAY, now - d * DAY);
+            all_facts
+                .iter()
+                .filter(|x| x.at.is_some_and(|at| at >= from && at < to) && any_time.keeps(x, now))
+                .cloned()
+                .collect()
+        }
+        None => Vec::new(),
+    };
     let with_calls: HashSet<&str> = facts.iter().map(|x| x.session.as_str()).collect();
     let sessions: Vec<Session> = every
         .iter()
@@ -790,7 +850,7 @@ pub fn Main() -> Element {
             }
             match current {
                 Tab::Overview => rsx! {
-                    Overview { facts, base, days: f.days, now, loading, filter, tab, picked, refreshed: refreshed() }
+                    Overview { facts, base, prev, days: f.days, now, loading, filter, tab, picked, refreshed: refreshed() }
                 },
                 Tab::Detections => rsx! {
                     super::detections::Detections { facts, all: all_facts.clone(), picked, loading }
@@ -938,13 +998,34 @@ pub(super) fn scale(max: usize) -> (usize, usize) {
     (max.div_ceil(step) * step, step)
 }
 
-/// The overview, laid out as an endpoint console's activity dashboard: four numbers and lists
-/// across the top, then the decisions over time beside the latest Calls worth a look, then
-/// those Calls by kind over time.
+/// How a figure moved against the period before it; nothing over all time.
+fn delta(now_n: usize, before: Option<usize>) -> Element {
+    let Some(b) = before else {
+        return rsx! {};
+    };
+    let (class, text) = match now_n.cmp(&b) {
+        std::cmp::Ordering::Greater => ("ov-delta up", format!("▲ {}", now_n - b)),
+        std::cmp::Ordering::Less => ("ov-delta down", format!("▼ {}", b - now_n)),
+        std::cmp::Ordering::Equal => ("ov-delta", "＝".to_owned()),
+    };
+    rsx! {
+        span { class: "{class}", title: "바로 앞 같은 길이의 기간에는 {b}건",
+            "{text}"
+            small { "앞 기간보다" }
+        }
+    }
+}
+
+/// The overview, laid out as an endpoint console's activity dashboard:
+/// - four figures across the top, each with how it moved and its shape over the period;
+/// - the Calls worth a look over time by severity, beside what made the agent take them;
+/// - those Calls by kind, by the hour of the week, and by machine;
+/// - the latest of them, beside the prompts stopped most and the Calls people approved.
 #[component]
 fn Overview(
     facts: Vec<CallFact>,
     base: Vec<CallFact>,
+    prev: Vec<CallFact>,
     days: Option<i64>,
     now: i64,
     loading: bool,
@@ -954,12 +1035,29 @@ fn Overview(
     refreshed: Option<i64>,
 ) -> Element {
     let mut picked = picked;
+    let mut filter = filter;
     let mut state = use_context::<AppState>();
     let c = coverage(&base);
     let period = period_label(days);
     let at = clock(refreshed);
-    let count = |d: &str| facts.iter().filter(|f| decision_key(f) == d).count();
-    let (denied, reviewed) = (count("DENY"), count("REVIEW"));
+    let count = |list: &[CallFact], d: &str| list.iter().filter(|f| decision_key(f) == d).count();
+    let risky_of = |list: &[CallFact]| {
+        list.iter()
+            .filter(|f| decision_key(f) == "ALLOW" && f.irreversible)
+            .count()
+    };
+    let (denied, reviewed, risky) = (
+        count(&facts, "DENY"),
+        count(&facts, "REVIEW"),
+        risky_of(&facts),
+    );
+    let before = days.map(|_| {
+        (
+            count(&prev, "DENY"),
+            count(&prev, "REVIEW"),
+            risky_of(&prev),
+        )
+    });
     let approved_n = facts
         .iter()
         .filter(|f| decision_key(f) == "REVIEW" && f.ran)
@@ -969,15 +1067,62 @@ fn Overview(
     let approved = approved_calls(&facts);
     let mut to_approvals = use_context::<super::ToApprovals>().0;
     let buckets = trend(&facts, days, now);
-    let (labels, kind_buckets, kinds) = by_kind(&facts, days, now);
+    let shape = |pick: fn(&Bucket) -> usize| buckets.iter().map(pick).collect::<Vec<usize>>();
+    let (labels, series) = by_severity(&facts, days, now);
     let mut recent: Vec<(Severity, CallFact)> = facts
         .iter()
         .filter_map(|f| Severity::of(f).map(|s| (s, f.clone())))
         .collect();
     recent.sort_by_key(|(_, f)| std::cmp::Reverse((f.at, f.seq)));
     let recent_total = recent.len();
+    // What made the agent take the Calls worth a look, the tool results first.
+    let sources: Vec<(&'static str, [usize; 4])> = ["segment", "request", "none", "untraced"]
+        .into_iter()
+        .map(|k| {
+            (
+                k,
+                severity_counts(facts.iter().filter(|f| source_of(f) == k)),
+            )
+        })
+        .filter(|(_, n)| n.iter().sum::<usize>() > 0)
+        .collect();
+    let source_max = sources
+        .iter()
+        .map(|(_, n)| n.iter().sum::<usize>())
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let kinds = counted(facts.iter().filter_map(detection_kind));
+    let kind_max = kinds.first().map_or(1, |k| k.1).max(1);
+    let hours = week_hours(&facts);
+    // The machines with Calls worth a look, the ones with the worst first.
+    let mut by_machine: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    for (s, f) in &recent {
+        if let Some(i) = SEVERITIES.iter().position(|x| x.0 == *s) {
+            by_machine.entry(machine_of_fact(f)).or_default()[i] += 1;
+        }
+    }
+    let mut machines: Vec<(String, [usize; 4])> = by_machine.into_iter().collect();
+    machines.sort_by_key(|(_, n)| std::cmp::Reverse((n[0], n[1], n.iter().sum::<usize>())));
+    let machine_max = machines
+        .iter()
+        .map(|(_, n)| n.iter().sum::<usize>())
+        .max()
+        .unwrap_or(0)
+        .max(1);
     recent.truncate(RECENT);
     let picked_kind = filter().kind;
+    let picked_source = filter().source;
+    let picked_machine = filter().machine;
+    let cover = [
+        ("차단 모드", "#6fd3a0", c.blocking),
+        ("막지 않는 모드", "#f2c26b", c.watching),
+        (
+            "판정 없음",
+            "#55555b",
+            c.active.saturating_sub(c.blocking + c.watching),
+        ),
+    ];
     let none = if loading {
         "불러오는 중…"
     } else {
@@ -986,80 +1131,96 @@ fn Overview(
 
     rsx! {
         div { class: "cs-grid",
-            div { class: "cs-row four",
-                Card { title: "차단 모드로 보호 중", stamp: at.clone(),
-                    button { class: "cs-figure", title: "단말별 판정 방식 보기", onclick: move |_| tab.set(Tab::Engine),
-                        span { class: "cs-big", if loading { "…" } else { "{c.blocking}" } }
-                        span { class: "cs-of", "/ {c.active}" }
+            div { class: "cs-row four ov-kpi",
+                Card { title: "차단", note: period.clone(), stamp: at.clone(),
+                    button { class: "cs-figure", title: "차단된 호출을 탐지 탭에서 보기",
+                        onclick: move |_| {
+                            filter.write().decision = Some("DENY".into());
+                            tab.set(Tab::Detections);
+                        },
+                        span { class: "cs-big", if loading { "…" } else { "{big(denied as i64)}" } }
+                        {delta(denied, before.map(|b| b.0))}
                     }
-                    div { class: "cs-sub",
-                        span { "막지 않는 모드 " strong { class: "warn", "{c.watching}" } "대" }
-                        span { "판정 없는 호출이 있는 단말 " strong { "{c.undecided}" } "대" }
-                    }
+                    {spark(&shape(|b| b.denied), "#f08a4b")}
                 }
-                Card { title: "새 승인 요청", note: period.clone(), stamp: at.clone(),
-                    button {
-                        class: "cs-figure",
-                        title: "감사의 승인 기록 보기",
+                Card { title: "확인 요청", note: period.clone(), stamp: at.clone(),
+                    button { class: "cs-figure", title: "감사의 승인 기록 보기",
                         onclick: move |_| {
                             to_approvals.set(Some(None));
                             state.screen.set(Screen::FeatureA);
                         },
                         span { class: "cs-big", if loading { "…" } else { "{big(reviewed as i64)}" } }
+                        {delta(reviewed, before.map(|b| b.1))}
+                        span { class: "ov-split",
+                            span { title: "확인 요청 뒤 실행된 것", "승인 " strong { class: "good", "{approved_n}" } }
+                            span { title: "확인 요청 뒤 실행되지 않은 것", "반려 " strong { "{reviewed - approved_n}" } }
+                        }
                     }
-                    div { class: "cs-sub",
-                        span { title: "확인 요청 뒤 실행된 것", "사용자 승인 " strong { class: "good", "{approved_n}" } "건" }
-                        span { title: "확인 요청 뒤 실행되지 않은 것", "반려 " strong { "{reviewed - approved_n}" } "건" }
-                        span { "같은 기간 차단 " strong { class: "bad", "{denied}" } "건" }
-                    }
+                    {spark(&shape(|b| b.reviewed), "#f2c26b")}
                 }
-                Card { title: "자주 차단을 일으킨 프롬프트", note: "누르면 그 프롬프트로 일어난 일", stamp: at.clone(),
-                    if prompts.is_empty() {
+                Card { title: "되돌리기 어려운 허용", note: period.clone(), stamp: at.clone(),
+                    button { class: "cs-figure", title: "탐지 탭에서 보기", onclick: move |_| tab.set(Tab::Detections),
+                        span { class: "cs-big", if loading { "…" } else { "{big(risky as i64)}" } }
+                        {delta(risky, before.map(|b| b.2))}
+                    }
+                    {spark(&shape(|b| b.risky), "#5fc6b0")}
+                }
+                Card { title: "차단 모드로 보호 중", note: "활동한 단말 가운데", stamp: at.clone(),
+                    button { class: "cs-figure", title: "단말별 판정 방식 보기", onclick: move |_| tab.set(Tab::Engine),
+                        span { class: "cs-big", if loading { "…" } else { "{c.blocking}" } }
+                        span { class: "cs-of", "/ {c.active}" }
+                        if c.undecided > 0 {
+                            span { class: "ov-split", span { "판정 없는 호출이 있는 단말 " strong { "{c.undecided}" } } }
+                        }
+                    }
+                    {mix(&cover)}
+                }
+            }
+            div { class: "cs-row split ov-main",
+                Card { title: "탐지 추이", note: "심각도별 · {period}", stamp: at.clone(),
+                    if recent_total == 0 {
                         Empty { text: none }
                     } else {
-                        div { class: "cs-list",
-                            for (text, n, (session, seq)) in prompts {
-                                button {
-                                    key: "{text}",
-                                    class: "cs-list-row pick",
-                                    title: "{text}",
-                                    onclick: move |_| {
-                                        state.open_call(session.clone(), seq);
-                                        state.screen.set(Screen::Work);
-                                    },
-                                    span { class: "prompt", "“{text}”" }
-                                    span { class: "n", "{n}" }
-                                }
+                        {stacked_bars(&labels, &series, 900.0, 232.0)}
+                        div { class: "vz-keys center",
+                            for (sev, color) in SEVERITIES {
+                                span { key: "{sev.tag().0}", i { style: "background:{color}" } "{sev.tag().1}" }
                             }
                         }
-                        div { class: "cs-total",
-                            span { "차단 합계" }
-                            span { class: "n", "{prompt_total}" }
-                        }
                     }
                 }
-                Card { title: "사용자가 승인한 것", note: "되돌리기 어려운 것부터", stamp: at.clone(),
-                    if approved.is_empty() {
+                Card { title: "무엇이 호출을 시켰나", note: "탐지된 호출의 원인", stamp: at.clone(),
+                    if sources.is_empty() {
                         Empty { text: none }
                     } else {
-                        div { class: "cs-list",
-                            for f in approved {
+                        div { class: "ov-srcs",
+                            for (key, n) in sources {
                                 {
-                                    let hard = hard_to_undo(&f);
-                                    let id = (f.session.clone(), f.seq);
-                                    let what = f.target.clone().or_else(|| f.tool.clone()).unwrap_or_default();
+                                    let sum: usize = n.iter().sum();
+                                    let on = picked_source.as_deref() == Some(key);
+                                    let share = sum as f64 / recent_total.max(1) as f64 * 100.0;
                                     rsx! {
-                                        button {
-                                            key: "{f.session}-{f.seq}",
-                                            class: "cs-list-row pick approved",
-                                            title: "감사의 승인 기록에서 보기",
+                                        button { key: "{key}", class: if on { "ov-src on" } else { "ov-src" },
+                                            title: "누르면 이 원인의 호출만 봅니다",
                                             onclick: move |_| {
-                                                to_approvals.set(Some(Some(id.clone())));
-                                                state.screen.set(Screen::FeatureA);
+                                                let mut w = filter.write();
+                                                w.source = if w.source.as_deref() == Some(key) { None } else { Some(key.to_owned()) };
                                             },
-                                            span { class: if hard { "mark hard" } else { "mark" } }
-                                            code { "{what}" }
-                                            span { class: "meta", "{machine_of_fact(&f)} · {clock(f.at)}" }
+                                            span { class: "top",
+                                                span { class: "name", "{source_label(key)}" }
+                                                span { class: "n", "{sum}건" }
+                                                span { class: "pct", "{share:.0}%" }
+                                            }
+                                            span { class: "track",
+                                                span { class: "stack", style: "width:{sum as f64 / source_max as f64 * 100.0:.1}%",
+                                                    for (i, (sev, color)) in SEVERITIES.iter().enumerate() {
+                                                        if n[i] > 0 {
+                                                            span { key: "{i}", title: "{sev.tag().1} {n[i]}", style: "flex-grow:{n[i]};background:{color}" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            small { "{source_hint(key)}" }
                                         }
                                     }
                                 }
@@ -1068,10 +1229,79 @@ fn Overview(
                     }
                 }
             }
-            div { class: "cs-row split",
-                Card { title: "판정 추이", note: "차단·확인 요청·되돌리기 어려운 허용", stamp: at.clone(),
-                    Line { buckets }
+            div { class: "cs-row three",
+                Card { title: "유형별 탐지", note: "무엇을 어겼나 · 누르면 그 유형만", stamp: at.clone(),
+                    if kinds.is_empty() {
+                        Empty { text: none }
+                    } else {
+                        div { class: "cs-list",
+                            for (k, n) in kinds {
+                                {
+                                    let on = picked_kind.as_deref() == Some(k.as_str());
+                                    let key = k.clone();
+                                    rsx! {
+                                        button { key: "{k}", class: if on { "vz-rank on" } else { "vz-rank" },
+                                            disabled: k == ALLOWED_IRREVERSIBLE,
+                                            title: "{kind_label(&k)}",
+                                            onclick: move |_| pick_kind(filter, &key),
+                                            span { class: "name", i { style: "background:{kind_color(&k)}" } "{kind_label(&k)}" }
+                                            span { class: "track", span { class: "fill", style: "width:{n as f64 / kind_max as f64 * 100.0:.1}%;background:{kind_color(&k)}" } }
+                                            span { class: "n", "{n}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
+                Card { title: "언제 일어났나", note: "요일과 시간대별 탐지", stamp: at.clone(),
+                    if recent_total == 0 {
+                        Empty { text: none }
+                    } else {
+                        {heat(&hours, "건")}
+                    }
+                }
+                Card { title: "주의할 단말", note: "치명·높음이 많은 순 · 누르면 그 단말만", stamp: at.clone(),
+                    if machines.is_empty() {
+                        Empty { text: none }
+                    } else {
+                        div { class: "cs-list",
+                            for (name, n) in machines {
+                                {
+                                    let sum: usize = n.iter().sum();
+                                    let on = picked_machine.as_deref() == Some(name.as_str());
+                                    let pick = name.clone();
+                                    let title = format!("{name}\n치명 {} · 높음 {} · 중간 {} · 사후 확인 {}", n[0], n[1], n[2], n[3]);
+                                    rsx! {
+                                        button { key: "{name}", class: if on { "vz-rank on" } else { "vz-rank" }, title: "{title}",
+                                            onclick: move |_| {
+                                                let mut w = filter.write();
+                                                w.machine = if w.machine.as_deref() == Some(pick.as_str()) { None } else { Some(pick.clone()) };
+                                            },
+                                            span { class: "name", "{name}" }
+                                            span { class: "track",
+                                                span { class: "stack", style: "width:{sum as f64 / machine_max as f64 * 100.0:.1}%",
+                                                    for (i, (_, color)) in SEVERITIES.iter().enumerate() {
+                                                        if n[i] > 0 {
+                                                            span { key: "{i}", style: "flex-grow:{n[i]};background:{color}" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if n[0] > 0 {
+                                                span { class: "n bad", "치명 {n[0]}" }
+                                            } else {
+                                                span { class: "n", "{sum}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "cs-row split ov-last",
                 Card { title: "최근 탐지", note: "{recent_total}건 중 최근 {recent.len()}건", stamp: at.clone(),
                     div { class: "cs-table",
                         div { class: "cs-tr head",
@@ -1134,29 +1364,61 @@ fn Overview(
                         }
                     }
                 }
-            }
-            div { class: "cs-row",
-                Card { title: "유형별 탐지", note: "{period}", stamp: at.clone(),
-                    Stack { labels, buckets: kind_buckets, kinds: kinds.clone(), picked: picked_kind.clone(), filter }
-                    div { class: "cs-legend",
-                        for (k, _) in kinds {
-                            {
-                                let on = picked_kind.as_deref() == Some(k.as_str());
-                                let dim = picked_kind.is_some() && !on;
-                                let key = k.clone();
-                                rsx! {
-                                    button {
-                                        key: "{k}",
-                                        class: if dim { "dim" } else { "" },
-                                        disabled: k == ALLOWED_IRREVERSIBLE,
-                                        onclick: move |_| pick_kind(filter, &key),
-                                        i { style: "background:{kind_color(&k)}" }
-                                        "{kind_label(&k)}"
+                div { class: "ov-col",
+                Card { title: "자주 차단을 일으킨 프롬프트", note: "누르면 그 프롬프트로 일어난 일", stamp: at.clone(),
+                    if prompts.is_empty() {
+                        Empty { text: none }
+                    } else {
+                        div { class: "cs-list",
+                            for (text, n, (session, seq)) in prompts {
+                                button {
+                                    key: "{text}",
+                                    class: "cs-list-row pick",
+                                    title: "{text}",
+                                    onclick: move |_| {
+                                        state.open_call(session.clone(), seq);
+                                        state.screen.set(Screen::Work);
+                                    },
+                                    span { class: "prompt", "“{text}”" }
+                                    span { class: "n", "{n}" }
+                                }
+                            }
+                        }
+                        div { class: "cs-total",
+                            span { "차단 합계" }
+                            span { class: "n", "{prompt_total}" }
+                        }
+                    }
+                }
+                Card { title: "사용자가 승인한 것", note: "되돌리기 어려운 것부터", stamp: at.clone(),
+                    if approved.is_empty() {
+                        Empty { text: none }
+                    } else {
+                        div { class: "cs-list",
+                            for f in approved {
+                                {
+                                    let hard = hard_to_undo(&f);
+                                    let id = (f.session.clone(), f.seq);
+                                    let what = f.target.clone().or_else(|| f.tool.clone()).unwrap_or_default();
+                                    rsx! {
+                                        button {
+                                            key: "{f.session}-{f.seq}",
+                                            class: "cs-list-row pick approved",
+                                            title: "감사의 승인 기록에서 보기",
+                                            onclick: move |_| {
+                                                to_approvals.set(Some(Some(id.clone())));
+                                                state.screen.set(Screen::FeatureA);
+                                            },
+                                            span { class: if hard { "mark hard" } else { "mark" } }
+                                            code { "{what}" }
+                                            span { class: "meta", "{machine_of_fact(&f)} · {clock(f.at)}" }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                }
                 }
             }
         }
@@ -1210,135 +1472,6 @@ pub(super) fn Empty(text: &'static str) -> Element {
                 rect { x: "3", y: "14", width: "14", height: "3", rx: "1" }
             }
             strong { "{text}" }
-        }
-    }
-}
-
-/// The Calls worth a look over time, as one line: stopped, held, and allowed though hard to undo.
-#[component]
-fn Line(buckets: Vec<Bucket>) -> Element {
-    let (w, h, left, right, top, bottom) = (480.0, 330.0, 26.0, 18.0, 10.0, 24.0);
-    let plot_w = w - left - right;
-    let plot_h = h - top - bottom;
-    let values: Vec<usize> = buckets
-        .iter()
-        .map(|b| b.denied + b.reviewed + b.risky)
-        .collect();
-    let n = values.len().max(1);
-    let (top_v, step) = scale(values.iter().copied().max().unwrap_or(0));
-    let x = move |i: usize| {
-        if n == 1 {
-            left + plot_w / 2.0
-        } else {
-            left + plot_w * i as f64 / (n - 1) as f64
-        }
-    };
-    let y = move |v: usize| top + plot_h - v as f64 / top_v as f64 * plot_h;
-    let points: String = values
-        .iter()
-        .enumerate()
-        .map(|(i, v)| format!("{:.1},{:.1}", x(i), y(*v)))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let every = n.div_ceil(8);
-    let ticks: Vec<usize> = (0..=top_v).step_by(step).collect();
-    rsx! {
-        svg { class: "cs-chart", view_box: "0 0 {w} {h}",
-            for t in ticks {
-                g { key: "tick-{t}",
-                    line { x1: "{left}", x2: "{w - right}", y1: "{y(t):.1}", y2: "{y(t):.1}", class: "grid" }
-                    text { x: "{left - 6.0}", y: "{y(t) + 3.0:.1}", text_anchor: "end", class: "axis", "{t}" }
-                }
-            }
-            polyline { class: "cs-line", points: "{points}" }
-            for (i, b) in buckets.iter().enumerate() {
-                g { key: "pt-{i}",
-                    title { "{b.label}: 차단 {b.denied}, 확인 요청 {b.reviewed}, 되돌리기 어려운 허용 {b.risky}" }
-                    circle { cx: "{x(i):.1}", cy: "{y(values[i]):.1}", r: "2.6", class: "cs-dot" }
-                    if i % every == 0 || i + 1 == n {
-                        text { x: "{x(i):.1}", y: "{h - 8.0}", text_anchor: "middle", class: "axis", "{b.label}" }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// The Calls worth a look by kind over time, stacked; a part clicked narrows the filter to its kind.
-#[component]
-fn Stack(
-    labels: Vec<String>,
-    buckets: Vec<BTreeMap<String, usize>>,
-    kinds: Vec<(String, usize)>,
-    picked: Option<String>,
-    filter: Signal<Filter>,
-) -> Element {
-    let (w, h, left, right, top, bottom) = (1200.0, 260.0, 30.0, 10.0, 10.0, 26.0);
-    let plot_w = w - left - right;
-    let plot_h = h - top - bottom;
-    let n = labels.len().max(1);
-    let max = buckets
-        .iter()
-        .map(|b| b.values().sum::<usize>())
-        .max()
-        .unwrap_or(0);
-    let (top_v, step) = scale(max);
-    let y = move |v: usize| top + plot_h - v as f64 / top_v as f64 * plot_h;
-    let slot = plot_w / n as f64;
-    let bar = (slot * 0.6).max(2.0);
-    let every = n.div_ceil(10);
-    let ticks: Vec<usize> = (0..=top_v).step_by(step).collect();
-    rsx! {
-        svg { class: "cs-chart wide", view_box: "0 0 {w} {h}",
-            for t in ticks {
-                g { key: "tick-{t}",
-                    line { x1: "{left}", x2: "{w - right}", y1: "{y(t):.1}", y2: "{y(t):.1}", class: "grid" }
-                    text { x: "{left - 6.0}", y: "{y(t) + 3.0:.1}", text_anchor: "end", class: "axis", "{t}" }
-                }
-            }
-            for (i, b) in buckets.iter().enumerate() {
-                {
-                    let x = left + slot * i as f64 + (slot - bar) / 2.0;
-                    let mut under = 0;
-                    let parts: Vec<(String, f64, f64)> = kinds
-                        .iter()
-                        .filter_map(|(k, _)| {
-                            let v = *b.get(k)?;
-                            let part = (k.clone(), y(under + v), y(under) - y(under + v));
-                            under += v;
-                            Some(part)
-                        })
-                        .collect();
-                    let title = std::iter::once(labels[i].clone())
-                        .chain(kinds.iter().filter_map(|(k, _)| b.get(k).map(|v| format!("{} {v}", kind_label(k)))))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    rsx! {
-                        g { key: "bar-{i}",
-                            title { "{title}" }
-                            for (k, py, ph) in parts {
-                                {
-                                    let dim = picked.is_some() && picked.as_deref() != Some(k.as_str());
-                                    let key = k.clone();
-                                    rsx! {
-                                        rect {
-                                            key: "{k}",
-                                            class: "cs-part",
-                                            x: "{x:.1}", y: "{py:.1}", width: "{bar:.1}", height: "{ph:.1}",
-                                            fill: "{kind_color(&k)}",
-                                            opacity: if dim { "0.25" } else { "1" },
-                                            onclick: move |_| pick_kind(filter, &key),
-                                        }
-                                    }
-                                }
-                            }
-                            if i % every == 0 || i + 1 == n {
-                                text { x: "{x + bar / 2.0:.1}", y: "{h - 8.0}", text_anchor: "middle", class: "axis", "{labels[i]}" }
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -1841,7 +1974,8 @@ mod tests {
     }
 
     #[test]
-    fn by_kind_stacks_each_day() {
+    fn severities_stack_on_their_day_and_fall_in_their_hour_of_the_week() {
+        // A Tuesday at noon.
         let now = Local
             .with_ymd_and_hms(2026, 11, 10, 12, 0, 0)
             .unwrap()
@@ -1850,11 +1984,23 @@ mod tests {
         a.worst = Some("exfiltration".into());
         let mut b = fact("a", now - DAY, Some("ALLOW"), None);
         b.irreversible = true;
-        let (labels, buckets, kinds) = by_kind(&[a.clone(), a, b], Some(7), now);
+        let allowed = fact("a", now, Some("ALLOW"), None);
+        let facts = [a.clone(), a, b, allowed];
+        let (labels, series) = by_severity(&facts, Some(7), now);
         assert_eq!(labels.len(), 7);
-        assert_eq!(buckets[6].get("exfiltration"), Some(&2));
-        assert_eq!(buckets[5].get(ALLOWED_IRREVERSIBLE), Some(&1));
-        assert_eq!(kinds[0], ("exfiltration".to_owned(), 2));
+        assert_eq!(series[0].label, "치명");
+        assert_eq!(series[0].values[6], 2, "a stopped send is critical, today");
+        assert_eq!(
+            series[3].values[5], 1,
+            "allowed though hard to undo, yesterday"
+        );
+        assert_eq!(severity_counts(facts.iter()), [2, 0, 0, 1]);
+        let hours = week_hours(&facts);
+        assert_eq!(
+            hours[1][12], 2,
+            "Tuesday noon; the plain allowed Call is not counted"
+        );
+        assert_eq!(hours[0][12], 1, "Monday noon");
     }
 
     #[test]
