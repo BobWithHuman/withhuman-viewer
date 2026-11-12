@@ -34,7 +34,9 @@ pub async fn check_jev(client: &reqwest::Client, key: &str) -> Result<(), String
         200..=299 | 400 | 422 => Ok(()),
         401 | 403 => Err("Jev가 이 키를 받지 않았습니다. 키를 다시 확인해 주세요.".into()),
         429 => Err("Jev에 요청이 너무 많습니다. 잠시 뒤 다시 확인해 주세요.".into()),
-        status => Err(format!("Jev가 예상하지 못한 응답을 보냈습니다 (HTTP {status}).")),
+        status => Err(format!(
+            "Jev가 예상하지 못한 응답을 보냈습니다 (HTTP {status})."
+        )),
     }
 }
 
@@ -100,7 +102,11 @@ const VIEWER_PORT: u16 = 7476;
 /// Docker's command line: a Mac app started from Finder does not get the shell's PATH.
 fn docker() -> Option<PathBuf> {
     let found = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).map(|d| d.join("docker")).collect::<Vec<_>>())
+        .map(|p| {
+            std::env::split_paths(&p)
+                .map(|d| d.join("docker"))
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
     found
         .into_iter()
@@ -133,7 +139,12 @@ impl Local {
             ));
         }
         let env = read_env(dir);
-        let get = |k: &str, d: &str| env.get(k).filter(|v| !v.is_empty()).cloned().unwrap_or_else(|| d.to_owned());
+        let get = |k: &str, d: &str| {
+            env.get(k)
+                .filter(|v| !v.is_empty())
+                .cloned()
+                .unwrap_or_else(|| d.to_owned())
+        };
         Ok(Self {
             dir: dir.to_owned(),
             password: get("NEO4J_PASSWORD", "withhuman-e2e"),
@@ -177,10 +188,18 @@ impl Local {
         // Compose reports progress on stderr; read both so neither pipe fills up.
         let out = child.stdout.take().map(|s| {
             let log = log.clone();
-            std::thread::spawn(move || BufReader::new(s).lines().map_while(Result::ok).for_each(|l| push(&log, l)))
+            std::thread::spawn(move || {
+                BufReader::new(s)
+                    .lines()
+                    .map_while(Result::ok)
+                    .for_each(|l| push(&log, l))
+            })
         });
         if let Some(err) = child.stderr.take() {
-            BufReader::new(err).lines().map_while(Result::ok).for_each(|l| push(log, l));
+            BufReader::new(err)
+                .lines()
+                .map_while(Result::ok)
+                .for_each(|l| push(log, l));
         }
         if let Some(t) = out {
             let _ = t.join();
@@ -189,8 +208,13 @@ impl Local {
         if status.success() {
             Ok(())
         } else {
-            let last = log.lock().map(|l| l.last().cloned().unwrap_or_default()).unwrap_or_default();
-            Err(format!("엔진을 띄우지 못했습니다. Docker Desktop이 켜져 있는지 확인해 주세요. ({last})"))
+            let last = log
+                .lock()
+                .map(|l| l.last().cloned().unwrap_or_default())
+                .unwrap_or_default();
+            Err(format!(
+                "엔진을 띄우지 못했습니다. Docker Desktop이 켜져 있는지 확인해 주세요. ({last})"
+            ))
         }
     }
 }
@@ -211,7 +235,9 @@ fn path_with(docker: &Path) -> String {
     if let Some(p) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&p));
     }
-    std::env::join_paths(dirs).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
+    std::env::join_paths(dirs)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The viewer's own override for a folder without one: Neo4j's HTTP on loopback, for the viewer.
@@ -233,7 +259,9 @@ mod tests {
 
     #[test]
     fn the_env_file_is_read_without_comments_or_quotes() {
-        let env = parse_env("# c\nIMAGE_TAG=edge\nNEO4J_PASSWORD=\"p w\"\nexport JEV_API_KEY='k'\n\nBAD\n");
+        let env = parse_env(
+            "# c\nIMAGE_TAG=edge\nNEO4J_PASSWORD=\"p w\"\nexport JEV_API_KEY='k'\n\nBAD\n",
+        );
         assert_eq!(env["IMAGE_TAG"], "edge");
         assert_eq!(env["NEO4J_PASSWORD"], "p w");
         assert_eq!(env["JEV_API_KEY"], "k");
@@ -244,7 +272,11 @@ mod tests {
     fn the_published_port_comes_from_the_override() {
         let dir = std::env::temp_dir().join(format!("wh-engine-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("compose.override.yaml"), "services:\n  neo4j:\n    ports:\n      - \"127.0.0.1:7476:7474\"\n").unwrap();
+        fs::write(
+            dir.join("compose.override.yaml"),
+            "services:\n  neo4j:\n    ports:\n      - \"127.0.0.1:7476:7474\"\n",
+        )
+        .unwrap();
         assert_eq!(published_port(&dir), Some(7476));
         fs::remove_dir_all(&dir).unwrap();
         assert_eq!(published_port(&dir), None);

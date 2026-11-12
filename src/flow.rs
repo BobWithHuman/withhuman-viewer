@@ -207,7 +207,12 @@ pub fn text_width(text: &str, size: f64) -> f64 {
 pub fn without_confidence(text: &str) -> &str {
     let text = text.trim();
     match text.rfind('(') {
-        Some(i) if text.ends_with(')') && (text[i..].contains("확신도") || text[i..].contains("confidence")) => text[..i].trim_end(),
+        Some(i)
+            if text.ends_with(')')
+                && (text[i..].contains("확신도") || text[i..].contains("confidence")) =>
+        {
+            text[..i].trim_end()
+        }
         _ => text,
     }
 }
@@ -241,8 +246,24 @@ pub fn gist(text: &str, n: usize) -> String {
 /// that tells an outcome (done, failed, blocked, the cause, "…했습니다"), else the first one.
 pub fn outcome(text: &str, n: usize) -> String {
     const CUES: [&str; 18] = [
-        "완료", "성공", "실패", "차단", "막혔", "막았", "막혀", "오류", "에러", "원인", "결과",
-        "했습니다", "됐습니다", "되었습니다", "없습니다", "끝났", "확인했", "찾았",
+        "완료",
+        "성공",
+        "실패",
+        "차단",
+        "막혔",
+        "막았",
+        "막혀",
+        "오류",
+        "에러",
+        "원인",
+        "결과",
+        "했습니다",
+        "됐습니다",
+        "되었습니다",
+        "없습니다",
+        "끝났",
+        "확인했",
+        "찾았",
     ];
     // Each line kept, and whether it was an item of a list.
     let mut lines: Vec<(String, bool, bool)> = Vec::new();
@@ -253,14 +274,14 @@ pub fn outcome(text: &str, n: usize) -> String {
             fenced = !fenced;
             continue;
         }
-        if fenced || l.is_empty() || l.starts_with('|') || l.chars().all(|c| "-=_*~|: ".contains(c)) {
+        if fenced || l.is_empty() || l.starts_with('|') || l.chars().all(|c| "-=_*~|: ".contains(c))
+        {
             continue;
         }
         // A list's numbering, "1. " or "2) ", not a number the words begin with.
         let digits = l.chars().take_while(char::is_ascii_digit).count();
-        let numbered = digits > 0
-            && l[digits..].starts_with(['.', ')'])
-            && l[digits + 1..].starts_with(' ');
+        let numbered =
+            digits > 0 && l[digits..].starts_with(['.', ')']) && l[digits + 1..].starts_with(' ');
         // A heading ("## …", or a line all in bold) names a part rather than saying how it went;
         // so does a question. They count as list items: taken only when nothing else is there.
         // ("## 현황: Judge 진행 중" says how it stands, so it is no mere heading.)
@@ -271,7 +292,9 @@ pub fn outcome(text: &str, n: usize) -> String {
         let l = if numbered { &l[digits + 2..] } else { l };
         // Marks at the start: headings, bullets, quotes, emoji.
         let l = l
-            .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '"' && c != '\'' && c != '(' && c != '`')
+            .trim_start_matches(|c: char| {
+                !c.is_alphanumeric() && c != '"' && c != '\'' && c != '(' && c != '`'
+            })
             .replace("**", "")
             .replace("__", "")
             .replace('`', "");
@@ -298,7 +321,9 @@ pub fn outcome(text: &str, n: usize) -> String {
         }
         // A short label before the words: "현황: Judge 진행 중".
         let l = match l.split_once(": ") {
-            Some((label, rest)) if label.chars().count() <= 10 && !rest.trim().is_empty() => rest.trim(),
+            Some((label, rest)) if label.chars().count() <= 10 && !rest.trim().is_empty() => {
+                rest.trim()
+            }
             _ => l,
         };
         lines.push((l.to_owned(), item, heading));
@@ -307,7 +332,8 @@ pub fn outcome(text: &str, n: usize) -> String {
         }
     }
     // An outcome said, else a whole sentence not in a list, else the first line.
-    let sentence = |l: &str| l.ends_with(['다', '요', '.', '!']) || l.ends_with("다.") || l.ends_with("요.");
+    let sentence =
+        |l: &str| l.ends_with(['다', '요', '.', '!']) || l.ends_with("다.") || l.ends_with("요.");
     // An outcome said, else a whole sentence not in a list, else any line that is not a
     // heading, else the first.
     let pick = lines
@@ -489,7 +515,11 @@ pub enum Leg {
     Ask(usize),
     Text(String),
     /// Calls denied or held in a row at one place count as one leg.
-    Stopped { blocked: bool, name: String, times: usize },
+    Stopped {
+        blocked: bool,
+        name: String,
+        times: usize,
+    },
     Allowed(usize),
 }
 
@@ -697,7 +727,12 @@ impl Flow {
         let cwd = model
             .nodes
             .iter()
-            .find_map(|n| n.props.get("cwd").and_then(serde_json::Value::as_str).map(str::to_owned))
+            .find_map(|n| {
+                n.props
+                    .get("cwd")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            })
             .unwrap_or_default();
         // A path inside the project, relative or under its folder, or a scratch one, is what any
         // turn names anyway; it says nothing of where the value came from.
@@ -716,7 +751,11 @@ impl Flow {
         // What a value says, for choosing among a Call's: secrets and personal data first, then
         // where data can go, then paths; a fragment too short to mean anything not at all.
         let weight = |t: &TokenRow| -> i32 {
-            let meaningful = bare(&t.text).chars().filter(|c| c.is_alphanumeric()).count() >= 4;
+            let meaningful = bare(&t.text)
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .count()
+                >= 4;
             if !meaningful {
                 return -1;
             }
@@ -729,22 +768,42 @@ impl Flow {
             }
         };
         let mut found: Vec<(i64, i32, Origin)> = Vec::new();
-        for t in model.tokens.iter().filter(|t| t.slot == "agent" && !everyday(t) && weight(t) >= 0) {
-            let Some(turn) = self.turn_of(t.seq) else { continue };
+        for t in model
+            .tokens
+            .iter()
+            .filter(|t| t.slot == "agent" && !everyday(t) && weight(t) >= 0)
+        {
+            let Some(turn) = self.turn_of(t.seq) else {
+                continue;
+            };
             let same = &by_key[t.key.as_str()];
             if same.iter().any(|o| o.slot == "user" && o.seq <= t.seq) {
                 continue;
             }
-            let Some(first) = same.iter().filter(|o| o.slot == "external" && o.seq < t.seq).min_by_key(|o| o.seq) else {
+            let Some(first) = same
+                .iter()
+                .filter(|o| o.slot == "external" && o.seq < t.seq)
+                .min_by_key(|o| o.seq)
+            else {
                 continue;
             };
-            let Some(&from) = model.call_of.get(&first.seq) else { continue };
-            let Some(from_turn) = self.turn_of(from) else { continue };
+            let Some(&from) = model.call_of.get(&first.seq) else {
+                continue;
+            };
+            let Some(from_turn) = self.turn_of(from) else {
+                continue;
+            };
             if from_turn >= turn {
                 continue;
             }
             let w = weight(t) * 1000 + t.text.chars().count().min(999) as i32;
-            let origin = Origin { value: bare(&t.text).to_owned(), kind: t.kind.clone(), result: first.seq, from, turn: from_turn };
+            let origin = Origin {
+                value: bare(&t.text).to_owned(),
+                kind: t.kind.clone(),
+                result: first.seq,
+                from,
+                turn: from_turn,
+            };
             match found.iter_mut().find(|(s, _, _)| *s == t.seq) {
                 Some(slot) if slot.1 < w => *slot = (t.seq, w, origin),
                 Some(_) => {}
@@ -843,11 +902,11 @@ impl Flow {
                 }
                 let name = short(&c.title, 24);
                 match legs.last_mut() {
-                    Some(Leg::Stopped { blocked, name: n, times })
-                        if *blocked == c.blocked && *n == name =>
-                    {
-                        *times += 1
-                    }
+                    Some(Leg::Stopped {
+                        blocked,
+                        name: n,
+                        times,
+                    }) if *blocked == c.blocked && *n == name => *times += 1,
                     _ => legs.push(Leg::Stopped {
                         blocked: c.blocked,
                         name,
@@ -965,7 +1024,10 @@ fn fold_into_last(stops: &mut [Stop], turn: usize, y: f64, label: &str, seq: i64
     };
     let base = match last.also.len() {
         0 => last.label.as_str(),
-        _ => last.label.rsplit_once(" ×").map_or(last.label.as_str(), |(b, _)| b),
+        _ => last
+            .label
+            .rsplit_once(" ×")
+            .map_or(last.label.as_str(), |(b, _)| b),
     };
     if last.turn != turn
         || (last.y - y).abs() > 0.5
@@ -1085,7 +1147,8 @@ impl Flow {
         let mut off = 0.0_f64;
         let route_to = |mark: f64, at: f64| format!("M{} {TOP} H{}", x(mark), x(at));
         // Names all stand over the line (the links run under it), each clear of the next.
-        let step_after = |label: &str, size: f64, base: f64| base.max(text_width(label, size) + 26.0);
+        let step_after =
+            |label: &str, size: f64, base: f64| base.max(text_width(label, size) + 26.0);
 
         for &t in turns {
             let turn = &self.turns[t];
@@ -1107,7 +1170,11 @@ impl Flow {
                 route: String::new(),
                 seq: None,
                 group: None,
-                tone: if turn.agent.is_some() { Tone::Report } else { Tone::Ask },
+                tone: if turn.agent.is_some() {
+                    Tone::Report
+                } else {
+                    Tone::Ask
+                },
                 xfer: false,
                 glyph: None,
                 also: Vec::new(),
@@ -1120,7 +1187,9 @@ impl Flow {
                 match item {
                     // Every group is laid open: a small station for each Call, the same thing done
                     // again in a row counted on one (×n).
-                    Item::Group { label, calls, .. } if FOLD_NONE || calls.len() <= OPEN_ALWAYS || open.contains(&(t, gi)) => {
+                    Item::Group { label, calls, .. }
+                        if FOLD_NONE || calls.len() <= OPEN_ALWAYS || open.contains(&(t, gi)) =>
+                    {
                         if !FOLD_NONE && calls.len() > OPEN_ALWAYS {
                             stops.push(Stop {
                                 id: format!("t{t}-{gi}"),
@@ -1178,7 +1247,12 @@ impl Flow {
                             off += step_after(&stops[stops.len() - 1].label, 12.0, MINI);
                         }
                     }
-                    Item::Group { label, tools, calls, .. } => {
+                    Item::Group {
+                        label,
+                        tools,
+                        calls,
+                        ..
+                    } => {
                         let mut counts: HashMap<Tone, usize> = HashMap::new();
                         for &i in calls {
                             *counts.entry(turn.calls[i].tone).or_default() += 1;
@@ -1225,7 +1299,8 @@ impl Flow {
                         };
                         // Told by words it read in a Call of this turn: that Call becomes an
                         // interchange, and a passage runs from it to this one under the line.
-                        let cause = c.by.and_then(|b| stops.iter().position(|st| st.turn == t && st.is(b)));
+                        let cause =
+                            c.by.and_then(|b| stops.iter().position(|st| st.turn == t && st.is(b)));
                         let important = c.blocked || c.warn;
                         if cause.is_none()
                             && !important
@@ -1318,7 +1393,8 @@ impl Flow {
             // A turn's zone is wide enough for its heading, so what it was for and how it ended
             // read whole: short turns get room rather than a cut heading.
             let (head, res) = heading_of(turn);
-            let w = text_width(&head, 13.5).max(res.as_deref().map_or(0.0, |r| text_width(r, 12.5)));
+            let w =
+                text_width(&head, 13.5).max(res.as_deref().map_or(0.0, |r| text_width(r, 12.5)));
             let need = if w + 40.0 <= 420.0 {
                 w + 40.0
             } else if w / 2.0 + 70.0 <= 620.0 {
@@ -1336,7 +1412,9 @@ impl Flow {
             let half = text_width(&st.label, size) / 2.0 + 6.0;
             (st.x - half, st.x + half)
         };
-        let named: Vec<usize> = (0..stops.len()).filter(|&i| !stops[i].label.is_empty()).collect();
+        let named: Vec<usize> = (0..stops.len())
+            .filter(|&i| !stops[i].label.is_empty())
+            .collect();
         for k in 1..named.len() {
             let (p, c) = (named[k - 1], named[k]);
             if span(&stops[p]).1 > span(&stops[c]).0 {
@@ -1348,12 +1426,20 @@ impl Flow {
         // the Calls that followed words read in a tool result. One train, one line: it goes down
         // when the agent acts on what it read and comes back up when it acts on the request.
         let o_of = |x: f64| x - LEFT;
-        let level: Vec<f64> = stops.iter().map(|s| if s.follows { 1.0 } else { 0.0 }).collect();
+        let level: Vec<f64> = stops
+            .iter()
+            .map(|s| if s.follows { 1.0 } else { 0.0 })
+            .collect();
         // Each passage from a cause to the Call that followed it, as one with the run of Calls
         // after it that followed the same words: (cause, first follower, last follower).
         let mut passages: Vec<(usize, usize, usize)> = Vec::new();
         for &(ci, fi) in &links {
-            if let Some(p) = passages.iter().position(|&(c, _, l)| c == ci && (l + 1..fi).all(|k| !stops[k].follows || links.iter().any(|&(c2, f2)| c2 == ci && f2 == k))) {
+            if let Some(p) = passages.iter().position(|&(c, _, l)| {
+                c == ci
+                    && (l + 1..fi).all(|k| {
+                        !stops[k].follows || links.iter().any(|&(c2, f2)| c2 == ci && f2 == k)
+                    })
+            }) {
                 passages[p].2 = fi;
                 continue;
             }
@@ -1368,8 +1454,14 @@ impl Flow {
         let mut spans: Vec<(f64, f64)> = Vec::new();
         for i in 0..stops.len() {
             if level[i] > 0.0 && (i == 0 || level[i - 1] == 0.0) {
-                let a = if i > 0 { o_of(stops[i - 1].x) } else { o_of(stops[i].x) };
-                let j = (i..stops.len()).find(|&j| level[j] == 0.0).unwrap_or(stops.len() - 1);
+                let a = if i > 0 {
+                    o_of(stops[i - 1].x)
+                } else {
+                    o_of(stops[i].x)
+                };
+                let j = (i..stops.len())
+                    .find(|&j| level[j] == 0.0)
+                    .unwrap_or(stops.len() - 1);
                 spans.push((a, o_of(stops[j].x)));
             }
         }
@@ -1383,7 +1475,11 @@ impl Flow {
         let mut main_os: Vec<f64> = stops.iter().map(|s| o_of(s.x)).collect();
         main_os.sort_by(f64::total_cmp);
         main_os.dedup();
-        let turn_cuts: Vec<f64> = marks.iter().skip(1).map(|m| m.1 - ZONE_LEAD - 5.0).collect();
+        let turn_cuts: Vec<f64> = marks
+            .iter()
+            .skip(1)
+            .map(|m| m.1 - ZONE_LEAD - 5.0)
+            .collect();
         let mut cuts = vec![start];
         if wrap.is_finite() {
             let mut row = start;
@@ -1436,7 +1532,8 @@ impl Flow {
         // Each row as deep as its lower track, when the line goes down on it.
         let row_h: Vec<f64> = (0..rows)
             .map(|r| {
-                let down = (0..stops.len()).any(|i| level[i] > 0.0 && row_of(o_of(stops[i].x)) == r);
+                let down =
+                    (0..stops.len()).any(|i| level[i] > 0.0 && row_of(o_of(stops[i].x)) == r);
                 let base = ROW_SP - BR_DY + 40.0;
                 if down { base + BR_DY + 100.0 } else { base }
             })
@@ -1449,7 +1546,11 @@ impl Flow {
         let map_x = |r: usize, o: f64| x0 + anchor[r] + dir(r) * (o - cuts[r]);
         let edge = |r: usize| x0 + anchor[r + 1] + dir(r) * 30.0;
         // Every point the line passes, in order: each station at its track, and the line's end.
-        let mut along: Vec<(f64, f64)> = stops.iter().zip(&level).map(|(s, &l)| (o_of(s.x), l)).collect();
+        let mut along: Vec<(f64, f64)> = stops
+            .iter()
+            .zip(&level)
+            .map(|(s, &l)| (o_of(s.x), l))
+            .collect();
         along.push((end, 0.0));
         along.sort_by(|a, b| a.0.total_cmp(&b.0));
         let at = |o: f64, l: f64| {
@@ -1460,7 +1561,11 @@ impl Flow {
         // ramping down or up just before a station on the other track, and turning at the rows'
         // ends.
         let track = |a: f64, b: f64| {
-            let pts_in: Vec<(f64, f64)> = along.iter().copied().filter(|&(o, _)| o >= a - 0.5 && o <= b + 0.5).collect();
+            let pts_in: Vec<(f64, f64)> = along
+                .iter()
+                .copied()
+                .filter(|&(o, _)| o >= a - 0.5 && o <= b + 0.5)
+                .collect();
             if pts_in.len() < 2 {
                 return String::new();
             }
@@ -1521,19 +1626,36 @@ impl Flow {
             let mut about: Vec<i64> = c.seq.into_iter().chain(c.also.iter().copied()).collect();
             for &(c2, f2) in &links {
                 if c2 == ci && (fi..=li).contains(&f2) {
-                    about.extend(stops[f2].seq.into_iter().chain(stops[f2].also.iter().copied()));
+                    about.extend(
+                        stops[f2]
+                            .seq
+                            .into_iter()
+                            .chain(stops[f2].also.iter().copied()),
+                    );
                 }
             }
-            let cause = self.call(f.seq.unwrap_or_default()).and_then(|call| call.cause.clone());
+            let cause = self
+                .call(f.seq.unwrap_or_default())
+                .and_then(|call| call.cause.clone());
             // (Shown only when the way back is asked for.) Within a row it runs under both ends;
             // across rows, under the cause's row and then down into the follower from above.
             {
                 let pts = if row_of(offsets[ci]) == row_of(offsets[fi]) {
                     let floor = c.y.max(f.y) + LINK_DY;
-                    vec![(c.x, c.y + 14.0), (c.x, floor), (f.x, floor), (f.x, f.y + 14.0)]
+                    vec![
+                        (c.x, c.y + 14.0),
+                        (c.x, floor),
+                        (f.x, floor),
+                        (f.x, f.y + 14.0),
+                    ]
                 } else {
                     let below = row_y(row_of(offsets[ci])) + BR_DY + LINK_DY;
-                    vec![(c.x, c.y + 14.0), (c.x, below), (f.x, below), (f.x, f.y - 16.0)]
+                    vec![
+                        (c.x, c.y + 14.0),
+                        (c.x, below),
+                        (f.x, below),
+                        (f.x, f.y - 16.0),
+                    ]
                 };
                 segs.push(Seg {
                     turn: c.turn,
@@ -1574,13 +1696,24 @@ impl Flow {
         // A value that came from a tool result of an earlier turn: a passage (shown with the way
         // back) from the station whose result held it, and a note of the value under the Call.
         for (fi, f) in stops.iter().enumerate() {
-            let Some(origin) = f.seq.and_then(|q| self.call(q)).and_then(|c| c.origin.clone()) else {
+            let Some(origin) = f
+                .seq
+                .and_then(|q| self.call(q))
+                .and_then(|c| c.origin.clone())
+            else {
                 continue;
             };
-            let Some(ci) = stops.iter().position(|st| st.is(origin.from)) else { continue };
+            let Some(ci) = stops.iter().position(|st| st.is(origin.from)) else {
+                continue;
+            };
             let c = &stops[ci];
             let below = row_y(row_of(offsets[ci])) + BR_DY + LINK_DY;
-            let pts = vec![(c.x, c.y + 14.0), (c.x, below), (f.x, below), (f.x, f.y - 16.0)];
+            let pts = vec![
+                (c.x, c.y + 14.0),
+                (c.x, below),
+                (f.x, below),
+                (f.x, f.y - 16.0),
+            ];
             let about = vec![origin.from, f.seq.unwrap_or_default()];
             segs.push(Seg {
                 turn: f.turn,
@@ -1682,7 +1815,10 @@ impl Flow {
             .collect();
         let width = 80.0 + hi + 110.0;
         // Tall enough for the quote boxes under the last row, a few stacked.
-        let boxes = branch_labels.iter().map(|b| b.qy + 150.0).fold(0.0, f64::max);
+        let boxes = branch_labels
+            .iter()
+            .map(|b| b.qy + 150.0)
+            .fold(0.0, f64::max);
         let height = (tops[rows] - ZONE_UP + 10.0).max(boxes);
         Line {
             stops,
@@ -1785,19 +1921,33 @@ mod tests {
         let main_y = line.stops[0].y;
         for s in &line.stops {
             let want = if s.follows { main_y + BR_DY } else { main_y };
-            assert!((s.y - want).abs() < 0.5, "{} at {} not {}", s.label, s.y, want);
+            assert!(
+                (s.y - want).abs() < 0.5,
+                "{} at {} not {}",
+                s.label,
+                s.y,
+                want
+            );
         }
         // The Call told by a tool result follows words, and a passage leads to it from an
         // interchange.
-        assert!(line.stops.iter().any(|s| s.follows), "fa6576f7 has a Call told by a tool result");
-        assert!(line.stops.iter().any(|s| s.kind == Kind::Transfer || s.xfer));
+        assert!(
+            line.stops.iter().any(|s| s.follows),
+            "fa6576f7 has a Call told by a tool result"
+        );
+        assert!(
+            line.stops
+                .iter()
+                .any(|s| s.kind == Kind::Transfer || s.xfer)
+        );
         assert!(line.segs.iter().any(|s| s.link));
     }
 
     #[test]
     fn a_value_from_an_earlier_turns_result_is_traced_across_the_turn() {
         use crate::model::TokenRow;
-        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mock/long.json")).unwrap();
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mock/long.json"))
+            .unwrap();
         let demo = Demo::parse(&text);
         let id = demo
             .sessions()
@@ -1831,11 +1981,15 @@ mod tests {
         m.tokens = vec![token(result, "external"), token(later, "agent")];
         let mut f = base.clone();
         f.trace_values(&m);
-        let origin = f.call(later).and_then(|c| c.origin.clone()).expect("traced across turns");
+        let origin = f
+            .call(later)
+            .and_then(|c| c.origin.clone())
+            .expect("traced across turns");
         assert_eq!((origin.from, origin.result), (from, result));
         assert_eq!(Some(origin.turn), base.turn_of(from));
         // The person wrote the value: it is theirs, not the result's.
-        m.tokens.push(token(base.turns[0].calls[0].seq.min(result) - 1, "user"));
+        m.tokens
+            .push(token(base.turns[0].calls[0].seq.min(result) - 1, "user"));
         let mut f = base.clone();
         f.trace_values(&m);
         assert!(f.call(later).and_then(|c| c.origin.clone()).is_none());
@@ -1846,13 +2000,18 @@ mod tests {
         let f = long("c0001a7e");
         let turns: Vec<usize> = (0..f.turns.len()).collect();
         let line = f.line_open(&turns, &HashSet::new(), f64::INFINITY);
-        assert!(!line.stops.iter().any(|s| s.kind == Kind::Tick), "no group head is drawn");
+        assert!(
+            !line.stops.iter().any(|s| s.kind == Kind::Tick),
+            "no group head is drawn"
+        );
         for (t, turn) in f.turns.iter().enumerate() {
             for item in &turn.items {
                 if let Item::Group { calls, .. } = item {
                     for &i in calls {
                         assert!(
-                            line.stops.iter().any(|s| s.turn == t && s.is(turn.calls[i].seq)),
+                            line.stops
+                                .iter()
+                                .any(|s| s.turn == t && s.is(turn.calls[i].seq)),
                             "turn {} call {} has a station",
                             t + 1,
                             turn.calls[i].seq
@@ -1875,29 +2034,55 @@ mod tests {
         for m in &line.marks {
             assert!(!m.zones.is_empty(), "turn {} has a zone", m.turn + 1);
         }
-        assert!(line.width / line.height > 0.8, "{} x {}", line.width, line.height);
+        assert!(
+            line.width / line.height > 0.8,
+            "{} x {}",
+            line.width,
+            line.height
+        );
     }
 
     #[test]
     fn an_answer_is_summed_up_by_what_came_of_it() {
         assert_eq!(
-            outcome("**기억하기 (메모리 저장):**\n- 키 파일 위치\n- 실행 명령\n\n메모리에 저장해 두었습니다.", 40),
+            outcome(
+                "**기억하기 (메모리 저장):**\n- 키 파일 위치\n- 실행 명령\n\n메모리에 저장해 두었습니다.",
+                40
+            ),
             "메모리에 저장해 두었습니다."
         );
-        assert_eq!(outcome("## 현황: Judge 진행 중 ⏳\n남은 공격 12개", 40), "Judge 진행 중 ⏳");
         assert_eq!(
-            outcome("좋은 질문입니다!\n\n| a | b |\n|---|---|\n\n훅이 rm -rf를 차단했습니다.", 40),
+            outcome("## 현황: Judge 진행 중 ⏳\n남은 공격 12개", 40),
+            "Judge 진행 중 ⏳"
+        );
+        assert_eq!(
+            outcome(
+                "좋은 질문입니다!\n\n| a | b |\n|---|---|\n\n훅이 rm -rf를 차단했습니다.",
+                40
+            ),
             "훅이 rm -rf를 차단했습니다."
         );
-        assert_eq!(outcome("```\ncode\n```\n네, 알겠습니다", 40), "네, 알겠습니다");
-        assert_eq!(outcome("13개 공격 trajectory 완료", 40), "13개 공격 trajectory 완료");
+        assert_eq!(
+            outcome("```\ncode\n```\n네, 알겠습니다", 40),
+            "네, 알겠습니다"
+        );
+        assert_eq!(
+            outcome("13개 공격 trajectory 완료", 40),
+            "13개 공격 trajectory 완료"
+        );
         assert_eq!(outcome("1. 첫째 할 일\n2. 둘째 할 일", 40), "첫째 할 일");
         assert_eq!(
-            outcome("**INFUSE** — 흥미로운 프로젝트네요! 요약:\n\n### 🎯 이게 뭐하는 프로젝트\n- **목적**: 공격 벤치마크\n\n**더 도와드릴 수 있습니다!**", 60),
+            outcome(
+                "**INFUSE** — 흥미로운 프로젝트네요! 요약:\n\n### 🎯 이게 뭐하는 프로젝트\n- **목적**: 공격 벤치마크\n\n**더 도와드릴 수 있습니다!**",
+                60
+            ),
             "INFUSE — 흥미로운 프로젝트네요!"
         );
         assert_eq!(
-            outcome("## 이게 뭐하는 프로젝트?\n\nINFUSE는 에이전트 공격을 재현하는 벤치마크입니다.", 60),
+            outcome(
+                "## 이게 뭐하는 프로젝트?\n\nINFUSE는 에이전트 공격을 재현하는 벤치마크입니다.",
+                60
+            ),
             "INFUSE는 에이전트 공격을 재현하는 벤치마크입니다."
         );
     }
@@ -1906,11 +2091,17 @@ mod tests {
     fn a_heading_takes_the_gist_of_a_long_intent() {
         assert_eq!(gist("타입 힌트 추가해줘", 40), "타입 힌트 추가해줘");
         assert_eq!(
-            gist("강사 레포로 STEP 1~5 리허설을 돌려 ref 문제를 실제로 확인하고 싶음 (확신도: 높음)", 60),
+            gist(
+                "강사 레포로 STEP 1~5 리허설을 돌려 ref 문제를 실제로 확인하고 싶음 (확신도: 높음)",
+                60
+            ),
             "강사 레포로 STEP 1~5 리허설을 돌려 ref 문제를 실제로 확인하고 싶음"
         );
         assert_eq!(gist("Open it. Then handle the rest.", 40), "Open it.");
-        let long = gist("파트너로부터의 구금형 판례 연구 과제를 받고 그 과제를 완료하여 법원 법정 시스템에 저장하기", 24);
+        let long = gist(
+            "파트너로부터의 구금형 판례 연구 과제를 받고 그 과제를 완료하여 법원 법정 시스템에 저장하기",
+            24,
+        );
         assert!(long.ends_with('…') && long.chars().count() <= 25, "{long}");
     }
 
@@ -1936,6 +2127,4 @@ mod tests {
             }
         }
     }
-
-
 }

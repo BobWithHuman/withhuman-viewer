@@ -10,20 +10,23 @@ use std::sync::{Arc, LazyLock};
 use dioxus::prelude::*;
 use regex::Regex;
 
-use super::main_page::{Card, Empty, clock, now_ms, period_label, stamp, DAY_MS};
+use super::main_page::{Card, DAY_MS, Empty, clock, now_ms, period_label, stamp};
 use crate::api::Backend;
 use crate::model::SecretMention;
 use crate::ui::{AppState, Screen};
 
 /// A command that reaches outside: a network client, a URL, a push.
 static OUTWARD: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(curl|wget|scp|sftp|rsync|ssh|nc|ncat|ftp|telnet)\b|https?://|git\s+push").expect("valid regex")
+    Regex::new(r"(?i)\b(curl|wget|scp|sftp|rsync|ssh|nc|ncat|ftp|telnet)\b|https?://|git\s+push")
+        .expect("valid regex")
 });
 
 /// Whether a Call sends what it holds outside: a fetch, an MCP tool, or a command that reaches out.
 fn outward(m: &SecretMention) -> bool {
     let tool = m.tool.as_deref().unwrap_or("");
-    tool == "WebFetch" || tool.starts_with("mcp__") || (tool == "Bash" && m.target.as_deref().is_some_and(|t| OUTWARD.is_match(t)))
+    tool == "WebFetch"
+        || tool.starts_with("mcp__")
+        || (tool == "Bash" && m.target.as_deref().is_some_and(|t| OUTWARD.is_match(t)))
 }
 
 /// A Call the agent put the value in.
@@ -116,26 +119,38 @@ impl Trail {
 fn trails(mentions: &[SecretMention]) -> Vec<Trail> {
     let mut by: BTreeMap<(String, String), Trail> = BTreeMap::new();
     for m in mentions {
-        let t = by.entry((m.session.clone(), m.key.clone())).or_insert_with(|| Trail {
-            session: m.session.clone(),
-            kind: m.kind.clone().unwrap_or_default(),
-            category: m.category.clone().unwrap_or_default(),
-            text: m.text.clone().unwrap_or_default(),
-            ..Trail::default()
-        });
+        let t = by
+            .entry((m.session.clone(), m.key.clone()))
+            .or_insert_with(|| Trail {
+                session: m.session.clone(),
+                kind: m.kind.clone().unwrap_or_default(),
+                category: m.category.clone().unwrap_or_default(),
+                text: m.text.clone().unwrap_or_default(),
+                ..Trail::default()
+            });
         t.mentions.push(m.clone());
     }
     let mut list: Vec<Trail> = by
         .into_values()
         .map(|mut t| {
             t.mentions.sort_by_key(|m| (m.at, m.seq));
-            t.from = t.mentions.first().and_then(|m| m.slot.clone()).unwrap_or_else(|| "agent".into());
-            t.client = t.mentions.iter().find_map(|m| m.client.clone()).unwrap_or_default();
+            t.from = t
+                .mentions
+                .first()
+                .and_then(|m| m.slot.clone())
+                .unwrap_or_else(|| "agent".into());
+            t.client = t
+                .mentions
+                .iter()
+                .find_map(|m| m.client.clone())
+                .unwrap_or_default();
             t.last = t.mentions.iter().filter_map(|m| m.at).max();
             for m in t.mentions.iter().filter(|m| in_call(m)) {
                 t.calls += 1;
                 if outward(m) {
-                    if m.decision.as_deref() == Some("DENY") || (m.decision.as_deref() == Some("REVIEW") && !m.ran) {
+                    if m.decision.as_deref() == Some("DENY")
+                        || (m.decision.as_deref() == Some("REVIEW") && !m.ran)
+                    {
                         t.out_stopped += 1;
                     } else {
                         t.out_ran += 1;
@@ -163,17 +178,24 @@ pub fn Secrets() -> Element {
     let mut picked = use_signal(|| None::<(String, String)>);
     let now = now_ms();
     let p = (state.public)();
-    let (all, failed, loaded): (Vec<SecretMention>, Option<String>, Option<i64>) = match &*found.read() {
-        Some((Ok(list), at)) => (list.clone(), None, Some(*at)),
-        Some((Err(e), at)) => (Vec::new(), Some(e.clone()), Some(*at)),
-        None => (Vec::new(), None, None),
-    };
+    let (all, failed, loaded): (Vec<SecretMention>, Option<String>, Option<i64>) =
+        match &*found.read() {
+            Some((Ok(list), at)) => (list.clone(), None, Some(*at)),
+            Some((Err(e), at)) => (Vec::new(), Some(e.clone()), Some(*at)),
+            None => (Vec::new(), None, None),
+        };
     let loading = found.read().is_none();
     let since = days().map(|d| now - d * DAY_MS);
-    let list: Vec<Trail> = trails(&all).into_iter().filter(|t| since.is_none_or(|s| t.last.is_some_and(|l| l >= s))).collect();
+    let list: Vec<Trail> = trails(&all)
+        .into_iter()
+        .filter(|t| since.is_none_or(|s| t.last.is_some_and(|l| l >= s)))
+        .collect();
     let used = list.iter().filter(|t| t.calls > 0).count();
     let left = list.iter().filter(|t| t.out_ran > 0).count();
-    let stopped = list.iter().filter(|t| t.out_ran == 0 && t.out_stopped > 0).count();
+    let stopped = list
+        .iter()
+        .filter(|t| t.out_ran == 0 && t.out_stopped > 0)
+        .count();
     let mut by_category: Vec<(String, usize)> = Vec::new();
     for c in ["credential", "pii", "financial", "device"] {
         let n = list.iter().filter(|t| t.category == c).count();
@@ -189,20 +211,38 @@ pub fn Secrets() -> Element {
     // The Calls that sent a value outside, or tried to, the latest first.
     let mut outgoing: Vec<(SecretMention, &'static str, &'static str)> = list
         .iter()
-        .flat_map(|t| t.mentions.iter().filter(|m| in_call(m) && outward(m)).cloned())
+        .flat_map(|t| {
+            t.mentions
+                .iter()
+                .filter(|m| in_call(m) && outward(m))
+                .cloned()
+        })
         .map(|m| {
-            let stopped = m.decision.as_deref() == Some("DENY") || (m.decision.as_deref() == Some("REVIEW") && !m.ran);
-            let (tone, label) = if stopped { ("warn", "막힘") } else { ("bad", "나감") };
+            let stopped = m.decision.as_deref() == Some("DENY")
+                || (m.decision.as_deref() == Some("REVIEW") && !m.ran);
+            let (tone, label) = if stopped {
+                ("warn", "막힘")
+            } else {
+                ("bad", "나감")
+            };
             (m, tone, label)
         })
         .collect();
     outgoing.sort_by_key(|(m, _, _)| std::cmp::Reverse((m.at, m.seq)));
     let period = period_label(days());
     let at = clock(loaded);
-    let none = if loading { "불러오는 중…" } else { "데이터 없음" };
+    let none = if loading {
+        "불러오는 중…"
+    } else {
+        "데이터 없음"
+    };
     let source = p.store();
     let current: Option<Trail> = picked()
-        .and_then(|(s, k)| list.iter().find(|t| t.session == s && t.mentions.first().is_some_and(|m| m.key == k)).cloned())
+        .and_then(|(s, k)| {
+            list.iter()
+                .find(|t| t.session == s && t.mentions.first().is_some_and(|m| m.key == k))
+                .cloned()
+        })
         .or_else(|| list.first().cloned());
 
     rsx! {
@@ -339,7 +379,11 @@ pub fn Secrets() -> Element {
 fn OutRow(m: SecretMention, tone: &'static str, label: &'static str) -> Element {
     let mut state = use_context::<AppState>();
     let (session, seq) = (m.session.clone(), m.seq);
-    let what = m.target.clone().or_else(|| m.tool.clone()).unwrap_or_default();
+    let what = m
+        .target
+        .clone()
+        .or_else(|| m.tool.clone())
+        .unwrap_or_default();
     rsx! {
         button {
             class: "cs-list-row pick secrets-out",
@@ -369,7 +413,14 @@ fn FlowRow(m: SecretMention) -> Element {
         (Some("ALLOW"), _) => ("ok", "허용"),
         _ => ("", ""),
     };
-    let what = if call { m.target.clone().or_else(|| m.tool.clone()).unwrap_or_default() } else { String::new() };
+    let what = if call {
+        m.target
+            .clone()
+            .or_else(|| m.tool.clone())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     rsx! {
         button {
             class: if call && outward(&m) { "cs-list-row pick flow out" } else { "cs-list-row pick flow" },

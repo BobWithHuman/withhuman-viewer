@@ -52,7 +52,10 @@ pub fn Home() -> Element {
         "데모 데이터".to_owned()
     } else {
         match p.engine {
-            Engine::Local => format!("이 맥의 엔진 · {}", p.engine_dir.clone().unwrap_or_default()),
+            Engine::Local => format!(
+                "이 맥의 엔진 · {}",
+                p.engine_dir.clone().unwrap_or_default()
+            ),
             Engine::Server => format!("서버 · {}", p.host()),
             Engine::Unset => p.store(),
         }
@@ -65,13 +68,20 @@ pub fn Home() -> Element {
     ];
     // The list comes newest first; the sessions worth a look keep that order.
     let stopped: Vec<Session> = sessions.iter().filter(|s| s.denied > 0).cloned().collect();
-    let held: Vec<Session> = sessions.iter().filter(|s| s.denied == 0 && s.reviewed > 0).cloned().collect();
+    let held: Vec<Session> = sessions
+        .iter()
+        .filter(|s| s.denied == 0 && s.reviewed > 0)
+        .cloned()
+        .collect();
     let mut more_stopped = use_signal(|| false);
     let mut more_held = use_signal(|| false);
     let (empty_stopped, empty_held) = if loading {
         ("세션을 불러오는 중…", "세션을 불러오는 중…")
     } else {
-        ("차단된 호출이 있었던 세션이 없습니다.", "확인을 요청한 호출이 있었던 세션이 없습니다.")
+        (
+            "차단된 호출이 있었던 세션이 없습니다.",
+            "확인을 요청한 호출이 있었던 세션이 없습니다.",
+        )
     };
 
     rsx! {
@@ -130,10 +140,19 @@ pub fn Home() -> Element {
 /// A kind of session worth a look, as a list on a white card: the first few, then all.
 #[cfg_attr(feature = "admin", allow(dead_code))]
 #[component]
-fn SessionGroup(title: &'static str, empty: &'static str, sessions: Vec<Session>, all: bool, onmore: EventHandler<MouseEvent>) -> Element {
+fn SessionGroup(
+    title: &'static str,
+    empty: &'static str,
+    sessions: Vec<Session>,
+    all: bool,
+    onmore: EventHandler<MouseEvent>,
+) -> Element {
     let mut state = use_context::<AppState>();
     let total = sessions.len();
-    let shown: Vec<Session> = sessions.into_iter().take(if all { usize::MAX } else { SHOWN }).collect();
+    let shown: Vec<Session> = sessions
+        .into_iter()
+        .take(if all { usize::MAX } else { SHOWN })
+        .collect();
     rsx! {
         section { class: "home-group",
             div { class: "home-group-head",

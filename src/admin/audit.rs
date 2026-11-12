@@ -14,7 +14,8 @@ use std::collections::{BTreeMap, HashMap};
 use dioxus::prelude::*;
 
 use super::main_page::{
-    decision_key, decision_label, folder_of, kind_label, kind_of, machine_of_fact, now_ms, source_label, source_of,
+    decision_key, decision_label, folder_of, kind_label, kind_of, machine_of_fact, now_ms,
+    source_label, source_of,
 };
 use super::policy::{Grade, grade_of};
 use crate::model::CallFact;
@@ -52,7 +53,13 @@ enum Show {
 }
 
 impl Show {
-    const ALL: [Show; 5] = [Show::All, Show::Denied, Show::Reviewed, Show::Undoable, Show::Irreversible];
+    const ALL: [Show; 5] = [
+        Show::All,
+        Show::Denied,
+        Show::Reviewed,
+        Show::Undoable,
+        Show::Irreversible,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -81,7 +88,9 @@ fn allowed_undoable(f: &CallFact) -> bool {
 
 /// A Call an audit looks at: stopped, held, allowed though hard to undo, or graded 3-1.
 fn is_risky(f: &CallFact) -> bool {
-    matches!(f.decision.as_deref(), Some("DENY" | "REVIEW")) || allowed_undoable(f) || grade_of(f) == Grade::ThreeOne
+    matches!(f.decision.as_deref(), Some("DENY" | "REVIEW"))
+        || allowed_undoable(f)
+        || grade_of(f) == Grade::ThreeOne
 }
 
 /// The kind of request a Call held for review was, for counting repeats: the tool and the
@@ -93,7 +102,11 @@ fn request_kind(f: &CallFact) -> String {
         .as_deref()
         .and_then(|t| t.split_whitespace().next())
         .unwrap_or("");
-    if tool == "Bash" && !head.is_empty() { format!("Bash · {head}") } else { tool.to_owned() }
+    if tool == "Bash" && !head.is_empty() {
+        format!("Bash · {head}")
+    } else {
+        tool.to_owned()
+    }
 }
 
 /// A Call held for review, as the approvals list shows it.
@@ -114,7 +127,10 @@ struct Asked {
 /// kind came [`REPEATS`] times within [`REPEAT_WINDOW`] before it.
 fn asked(facts: &[CallFact]) -> Vec<Asked> {
     let mut by_session: HashMap<&str, Vec<&CallFact>> = HashMap::new();
-    for f in facts.iter().filter(|f| f.decision.as_deref() == Some("REVIEW")) {
+    for f in facts
+        .iter()
+        .filter(|f| f.decision.as_deref() == Some("REVIEW"))
+    {
         by_session.entry(f.session.as_str()).or_default().push(f);
     }
     let mut out = Vec::new();
@@ -219,7 +235,20 @@ fn export(name: String, text: String, mut note: Signal<Option<String>>) {
 
 fn risky_rows(list: &[CallFact]) -> String {
     csv(
-        &["시각", "단말", "세션", "판정", "등급(초안)", "도구", "대상", "이유", "위반 유형", "호출을 시킨 것", "되돌리기 어려움", "작업 폴더"],
+        &[
+            "시각",
+            "단말",
+            "세션",
+            "판정",
+            "등급(초안)",
+            "도구",
+            "대상",
+            "이유",
+            "위반 유형",
+            "호출을 시킨 것",
+            "되돌리기 어려움",
+            "작업 폴더",
+        ],
         list.iter().map(|f| {
             vec![
                 stamp(f.at),
@@ -241,7 +270,17 @@ fn risky_rows(list: &[CallFact]) -> String {
 
 fn asked_rows(list: &[Asked]) -> String {
     csv(
-        &["시각", "단말", "세션", "도구", "대상", "결과", "걸린 시간(초)", "반복된 요청", "반복 뒤 위험 요청"],
+        &[
+            "시각",
+            "단말",
+            "세션",
+            "도구",
+            "대상",
+            "결과",
+            "걸린 시간(초)",
+            "반복된 요청",
+            "반복 뒤 위험 요청",
+        ],
         list.iter().map(|a| {
             vec![
                 stamp(a.fact.at),
@@ -249,7 +288,12 @@ fn asked_rows(list: &[Asked]) -> String {
                 a.fact.session.clone(),
                 a.fact.tool.clone().unwrap_or_default(),
                 a.fact.target.clone().unwrap_or_default(),
-                if a.allowed { "승인(실행됨)" } else { "거절 또는 실행 안 됨" }.to_owned(),
+                if a.allowed {
+                    "승인(실행됨)"
+                } else {
+                    "거절 또는 실행 안 됨"
+                }
+                .to_owned(),
                 a.took.map(|t| (t / 1000).to_string()).unwrap_or_default(),
                 if a.repeated { "예" } else { "" }.to_owned(),
                 if a.slipped { "예" } else { "" }.to_owned(),
@@ -371,17 +415,31 @@ pub fn Audit() -> Element {
 
 /// Every Call worth an audit, newest first; a row opens it on the route map.
 #[component]
-fn Risky(facts: Vec<CallFact>, loading: bool, period: String, note: Signal<Option<String>>) -> Element {
+fn Risky(
+    facts: Vec<CallFact>,
+    loading: bool,
+    period: String,
+    note: Signal<Option<String>>,
+) -> Element {
     let mut state = use_context::<AppState>();
     let mut show = use_signal(|| Show::All);
     let mut all = use_signal(|| false);
-    let counts: Vec<(Show, usize)> = Show::ALL.iter().map(|s| (*s, facts.iter().filter(|f| s.keeps(f)).count())).collect();
+    let counts: Vec<(Show, usize)> = Show::ALL
+        .iter()
+        .map(|s| (*s, facts.iter().filter(|f| s.keeps(f)).count()))
+        .collect();
     let mut list: Vec<CallFact> = facts.iter().filter(|f| show().keeps(f)).cloned().collect();
     list.sort_by_key(|f| std::cmp::Reverse(f.at));
     let total = list.len();
     let csv_text = risky_rows(&list);
-    let file = format!("withhuman-위험행동-{}.csv", chrono::Local::now().format("%Y%m%d"));
-    let shown: Vec<CallFact> = list.into_iter().take(if all() { usize::MAX } else { ROWS }).collect();
+    let file = format!(
+        "withhuman-위험행동-{}.csv",
+        chrono::Local::now().format("%Y%m%d")
+    );
+    let shown: Vec<CallFact> = list
+        .into_iter()
+        .take(if all() { usize::MAX } else { ROWS })
+        .collect();
     rsx! {
         div { class: "admin-body",
             div { class: "admin-chips",
@@ -484,7 +542,13 @@ fn Approvals(
     }));
     let total = list.len();
     let allowed = list.iter().filter(|a| a.allowed).count();
-    let rate = |n: usize| if total == 0 { "–".to_owned() } else { format!("{:.0}%", n as f64 / total as f64 * 100.0) };
+    let rate = |n: usize| {
+        if total == 0 {
+            "–".to_owned()
+        } else {
+            format!("{:.0}%", n as f64 / total as f64 * 100.0)
+        }
+    };
     let took = median(list.iter().filter_map(|a| a.took).collect());
     let slipped = list.iter().filter(|a| a.slipped).count();
     let kinds: Vec<(String, usize)> = {
@@ -499,14 +563,35 @@ fn Approvals(
     };
     let kind_max = kinds.first().map_or(1, |k| k.1).max(1);
     let csv_text = asked_rows(&list);
-    let file = format!("withhuman-승인기록-{}.csv", chrono::Local::now().format("%Y%m%d"));
-    let shown: Vec<Asked> = list.into_iter().take(if all() { usize::MAX } else { ROWS }).collect();
+    let file = format!(
+        "withhuman-승인기록-{}.csv",
+        chrono::Local::now().format("%Y%m%d")
+    );
+    let shown: Vec<Asked> = list
+        .into_iter()
+        .take(if all() { usize::MAX } else { ROWS })
+        .collect();
     let tiles = [
-        ("확인 요청", big(total as i64), "엔진이 사람에게 물은 호출", ""),
+        (
+            "확인 요청",
+            big(total as i64),
+            "엔진이 사람에게 물은 호출",
+            "",
+        ),
         ("승인", rate(allowed), "실행된 것(결과가 돌아온 것)", "good"),
         ("반려율", rate(total - allowed), "실행되지 않은 것", "warn"),
-        ("승인까지 걸린 시간", took.map_or("–".to_owned(), span), "가운데 값", ""),
-        ("반복 뒤 위험 요청", big(slipped as i64), "비슷한 요청이 이어진 뒤 온 위험한 요청", if slipped > 0 { "bad" } else { "" }),
+        (
+            "승인까지 걸린 시간",
+            took.map_or("–".to_owned(), span),
+            "가운데 값",
+            "",
+        ),
+        (
+            "반복 뒤 위험 요청",
+            big(slipped as i64),
+            "비슷한 요청이 이어진 뒤 온 위험한 요청",
+            if slipped > 0 { "bad" } else { "" },
+        ),
     ];
     rsx! {
         div { class: "admin-body",
@@ -622,19 +707,51 @@ fn Kills(since: Option<i64>, period: String, note: Signal<Option<String>>) -> El
         Some(Err(e)) => (Vec::new(), Some(format!("기록을 불러오지 못했습니다: {e}")), false),
         None => (Vec::new(), None, true),
     };
-    let in_period: Vec<crate::model::KeyEvent> = events.into_iter().filter(|e| since.is_none_or(|t| e.at.is_some_and(|a| a >= t))).collect();
+    let in_period: Vec<crate::model::KeyEvent> = events
+        .into_iter()
+        .filter(|e| since.is_none_or(|t| e.at.is_some_and(|a| a >= t)))
+        .collect();
     let count = |k: &str| in_period.iter().filter(|e| e.kind == k).count();
-    let chips = [(None, "전체", in_period.len()), (Some("revoked"), "회수", count("revoked")), (Some("denied"), "거부", count("denied")), (Some("issued"), "발급", count("issued"))];
-    let shown: Vec<crate::model::KeyEvent> = in_period.iter().filter(|e| show().is_none_or(|k| e.kind == k)).cloned().collect();
+    let chips = [
+        (None, "전체", in_period.len()),
+        (Some("revoked"), "회수", count("revoked")),
+        (Some("denied"), "거부", count("denied")),
+        (Some("issued"), "발급", count("issued")),
+    ];
+    let shown: Vec<crate::model::KeyEvent> = in_period
+        .iter()
+        .filter(|e| show().is_none_or(|k| e.kind == k))
+        .cloned()
+        .collect();
     let text = |v: &Option<String>| v.clone().unwrap_or_default();
     let csv_text = csv(
-        &["시각", "종류", "누가", "사용자", "키", "사유", "기기", "세션"],
-        shown.iter().map(|e| vec![
-            stamp(e.at), super::inventory::event_label(&e.kind).to_owned(), text(&e.actor), text(&e.user_email),
-            text(&e.key_id), text(&e.reason), text(&e.client_id), text(&e.session_id),
-        ]),
+        &[
+            "시각",
+            "종류",
+            "누가",
+            "사용자",
+            "키",
+            "사유",
+            "기기",
+            "세션",
+        ],
+        shown.iter().map(|e| {
+            vec![
+                stamp(e.at),
+                super::inventory::event_label(&e.kind).to_owned(),
+                text(&e.actor),
+                text(&e.user_email),
+                text(&e.key_id),
+                text(&e.reason),
+                text(&e.client_id),
+                text(&e.session_id),
+            ]
+        }),
     );
-    let file = format!("withhuman-킬스위치기록-{}.csv", chrono::Local::now().format("%Y%m%d"));
+    let file = format!(
+        "withhuman-킬스위치기록-{}.csv",
+        chrono::Local::now().format("%Y%m%d")
+    );
     let empty = shown.is_empty();
     rsx! {
         div { class: "admin-body",
@@ -716,21 +833,35 @@ mod tests {
 
     #[test]
     fn a_risky_request_after_a_run_of_repeats_is_marked() {
-        let mut facts: Vec<CallFact> = (0..4).map(|i| review("s", i, i * MINUTE, "Bash", "npm test", true)).collect();
-        facts.push(review("s", 9, 5 * MINUTE, "Bash", "git push --force origin main", true));
+        let mut facts: Vec<CallFact> = (0..4)
+            .map(|i| review("s", i, i * MINUTE, "Bash", "npm test", true))
+            .collect();
+        facts.push(review(
+            "s",
+            9,
+            5 * MINUTE,
+            "Bash",
+            "git push --force origin main",
+            true,
+        ));
         let list = asked(&facts);
         let last = list.iter().find(|a| a.fact.seq == 9).unwrap();
         assert!(last.slipped, "a force push after four test runs");
         assert!(!last.repeated);
         let fourth = list.iter().find(|a| a.fact.seq == 3).unwrap();
-        assert!(fourth.repeated, "the fourth npm test follows three of its kind");
+        assert!(
+            fourth.repeated,
+            "the fourth npm test follows three of its kind"
+        );
         assert!(!fourth.slipped, "a repeat itself is not the risky one");
         assert_eq!(last.took, Some(5_000));
     }
 
     #[test]
     fn requests_far_apart_are_not_repeats() {
-        let facts: Vec<CallFact> = (0..4).map(|i| review("s", i, i * 2 * REPEAT_WINDOW, "Bash", "npm test", false)).collect();
+        let facts: Vec<CallFact> = (0..4)
+            .map(|i| review("s", i, i * 2 * REPEAT_WINDOW, "Bash", "npm test", false))
+            .collect();
         assert!(asked(&facts).iter().all(|a| !a.repeated && !a.allowed));
     }
 

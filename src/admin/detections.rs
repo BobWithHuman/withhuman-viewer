@@ -8,8 +8,8 @@ use chrono::{Local, TimeZone};
 use dioxus::prelude::*;
 
 use super::main_page::{
-    Severity, clock, decision_key, detection_kind, folder_of, kind_label, machine_of_fact, mode_label, source_label,
-    source_of, stamp,
+    Severity, clock, decision_key, detection_kind, folder_of, kind_label, machine_of_fact,
+    mode_label, source_label, source_of, stamp,
 };
 use super::policy::grade_of;
 use crate::model::CallFact;
@@ -58,7 +58,10 @@ fn day(ms: Option<i64>) -> String {
 }
 
 fn what(f: &CallFact) -> String {
-    f.target.clone().or_else(|| f.tool.clone()).unwrap_or_else(|| "(대상 없음)".into())
+    f.target
+        .clone()
+        .or_else(|| f.tool.clone())
+        .unwrap_or_else(|| "(대상 없음)".into())
 }
 
 fn copy(text: &str) {
@@ -69,13 +72,24 @@ fn copy(text: &str) {
 /// Whether a Call matches what was typed: its target, reason, machine, tool or folder.
 fn found(f: &CallFact, needle: &str) -> bool {
     needle.is_empty()
-        || [f.target.as_deref(), f.reason.as_deref(), f.tool.as_deref(), f.cwd.as_deref(), f.client.as_deref()]
-            .into_iter()
-            .flatten()
-            .any(|t| t.to_lowercase().contains(needle))
+        || [
+            f.target.as_deref(),
+            f.reason.as_deref(),
+            f.tool.as_deref(),
+            f.cwd.as_deref(),
+            f.client.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|t| t.to_lowercase().contains(needle))
 }
 
-const SEVERITIES: [Severity; 4] = [Severity::Critical, Severity::High, Severity::Medium, Severity::After];
+const SEVERITIES: [Severity; 4] = [
+    Severity::Critical,
+    Severity::High,
+    Severity::Medium,
+    Severity::After,
+];
 
 #[component]
 pub fn Detections(
@@ -92,11 +106,15 @@ pub fn Detections(
     let mut shown = use_signal(|| PAGE);
 
     let needle = query().trim().to_lowercase();
-    let worth: Vec<(Severity, CallFact)> =
-        facts.iter().filter_map(|f| Severity::of(f).map(|s| (s, f.clone()))).collect();
+    let worth: Vec<(Severity, CallFact)> = facts
+        .iter()
+        .filter_map(|f| Severity::of(f).map(|s| (s, f.clone())))
+        .collect();
     let total = worth.len();
-    let counts: Vec<(Severity, usize)> =
-        SEVERITIES.iter().map(|s| (*s, worth.iter().filter(|(w, _)| w == s).count())).collect();
+    let counts: Vec<(Severity, usize)> = SEVERITIES
+        .iter()
+        .map(|s| (*s, worth.iter().filter(|(w, _)| w == s).count()))
+        .collect();
     let mut list: Vec<(Severity, CallFact)> = worth
         .into_iter()
         .filter(|(s, f)| only().is_none_or(|o| o == *s) && found(f, &needle))
@@ -108,7 +126,11 @@ pub fn Detections(
     let matched = list.len();
     // The row opened: the one picked if it is in the list, else the first.
     let current: Option<(Severity, CallFact)> = picked()
-        .and_then(|(s, q)| list.iter().find(|(_, f)| f.session == s && f.seq == q).cloned())
+        .and_then(|(s, q)| {
+            list.iter()
+                .find(|(_, f)| f.session == s && f.seq == q)
+                .cloned()
+        })
         .or_else(|| list.first().cloned());
     list.truncate(shown());
     // The rows under their heading: the severity when the worst come first, else the day.
@@ -239,11 +261,20 @@ fn Hex(tone: &'static str) -> Element {
 /// One detection as a row of labelled cells; it opens beside the list, and unfolds into its
 /// session's Calls.
 #[component]
-fn Row(sev: Severity, f: CallFact, on: bool, unfolded: bool, onpick: EventHandler<()>, onfold: EventHandler<()>) -> Element {
+fn Row(
+    sev: Severity,
+    f: CallFact,
+    on: bool,
+    unfolded: bool,
+    onpick: EventHandler<()>,
+    onfold: EventHandler<()>,
+) -> Element {
     let mut state = use_context::<AppState>();
     let (tone, label) = sev.tag();
     let (act_tone, act) = action(&f);
-    let kind = detection_kind(&f).map(|k| kind_label(&k)).unwrap_or_default();
+    let kind = detection_kind(&f)
+        .map(|k| kind_label(&k))
+        .unwrap_or_default();
     let tool = f.tool.clone().unwrap_or_else(|| "도구 없음".into());
     let target = what(&f);
     let machine = machine_of_fact(&f);
@@ -341,7 +372,9 @@ fn Detail(sev: Severity, f: CallFact) -> Element {
     let mut state = use_context::<AppState>();
     let (tone, label) = sev.tag();
     let (act_tone, act) = action(&f);
-    let kind = detection_kind(&f).map(|k| kind_label(&k)).unwrap_or_else(|| "-".into());
+    let kind = detection_kind(&f)
+        .map(|k| kind_label(&k))
+        .unwrap_or_else(|| "-".into());
     let target = what(&f);
     let machine = machine_of_fact(&f);
     let tool = f.tool.clone().unwrap_or_else(|| "도구 없음".into());
@@ -460,9 +493,16 @@ mod tests {
 
     #[test]
     fn the_action_says_how_the_call_ended() {
-        let f = CallFact { decision: Some("REVIEW".into()), ran: true, ..CallFact::default() };
+        let f = CallFact {
+            decision: Some("REVIEW".into()),
+            ran: true,
+            ..CallFact::default()
+        };
         assert_eq!(action(&f).1, "확인 후 실행됨");
-        let f = CallFact { decision: Some("DENY".into()), ..CallFact::default() };
+        let f = CallFact {
+            decision: Some("DENY".into()),
+            ..CallFact::default()
+        };
         assert_eq!(action(&f).1, "막음");
     }
 

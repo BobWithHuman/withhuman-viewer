@@ -322,7 +322,9 @@ impl Neo4j<'_> {
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn secrets(&self) -> Result<Value, ApiError> {
         let rows = self.read(SECRETS, json!({})).await?;
-        Ok(Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>()))
+        Ok(Value::from(
+            rows.into_iter().map(Value::Object).collect::<Vec<_>>(),
+        ))
     }
 
     pub async fn graph(&self, session: &str) -> Result<Value, ApiError> {
@@ -601,19 +603,28 @@ mod tests {
     fn the_irreversible_match_agrees_with_the_number() {
         let matcher = Regex::new(IRREVERSIBLE_TRACE).expect("valid regex");
         let at = |trace: &str| matcher.is_match(trace);
-        assert!(at(r#"{"deviation":{"harm":0.9,"irreversible":0.94},"link":"request"}"#));
+        assert!(at(
+            r#"{"deviation":{"harm":0.9,"irreversible":0.94},"link":"request"}"#
+        ));
         assert!(at(r#"{"deviation":{"irreversible":0.5}}"#));
         assert!(at(r#"{"deviation":{"irreversible":1.0}}"#));
         assert!(at(r#"{"deviation":{"irreversible":1}}"#));
         assert!(!at(r#"{"deviation":{"irreversible":0.49}}"#));
-        assert!(!at(r#"{"deviation":{"irreversible":0.050000000000000044}}"#));
-        assert!(!at(r#"{"expected":{"unconfirmed_irreversible":0.9},"deviation":{"irreversible":0.0}}"#));
+        assert!(!at(
+            r#"{"deviation":{"irreversible":0.050000000000000044}}"#
+        ));
+        assert!(!at(
+            r#"{"expected":{"unconfirmed_irreversible":0.9},"deviation":{"irreversible":0.0}}"#
+        ));
 
-        let fixture: Value = serde_json::from_str(include_str!("../mock/fixture.json")).expect("fixture");
+        let fixture: Value =
+            serde_json::from_str(include_str!("../mock/fixture.json")).expect("fixture");
         let mut seen = 0;
         for graph in fixture["graphs"].as_object().expect("graphs").values() {
             for node in graph["nodes"].as_array().expect("nodes") {
-                let Some(text) = node["props"]["trace_json"].as_str() else { continue };
+                let Some(text) = node["props"]["trace_json"].as_str() else {
+                    continue;
+                };
                 let number = crate::model::parse_json(Some(&node["props"]["trace_json"]))["deviation"]
                     ["irreversible"]
                     .as_f64()

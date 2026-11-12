@@ -141,8 +141,7 @@ SELECT g.*, COALESCE((SELECT array_agg(seq ORDER BY "order") FROM nodes
 FROM subgraphs g WHERE g.session_id = $1 ORDER BY g.number
 "#;
 
-const NEXT_EDGES: &str =
-    "SELECT next_seq AS source, seq AS target, next_via AS via FROM nodes WHERE session_id = $1 AND next_seq IS NOT NULL";
+const NEXT_EDGES: &str = "SELECT next_seq AS source, seq AS target, next_via AS via FROM nodes WHERE session_id = $1 AND next_seq IS NOT NULL";
 
 const RESULT_EDGES: &str = r#"
 SELECT r.seq AS source, c.seq AS target FROM nodes r
@@ -202,7 +201,10 @@ pub struct Pool {
 
 impl Pool {
     async fn client(&self, s: &Settings) -> Result<Arc<Client>, ApiError> {
-        let key = format!("{}\u{1}{}\u{1}{}\u{1}{}", s.neo4j_url, s.database, s.user, s.password);
+        let key = format!(
+            "{}\u{1}{}\u{1}{}\u{1}{}",
+            s.neo4j_url, s.database, s.user, s.password
+        );
         if let Some((k, c)) = self.slot.lock().expect("pool lock").clone()
             && k == key
             && !c.is_closed()
@@ -231,7 +233,9 @@ fn config(s: &Settings, read_only: bool) -> Result<(Config, tls::Connector), Api
     let address = tls::Address::read(&s.neo4j_url);
     let mut c = Config::from_str(&address.url)
         .map_err(|e| ApiError::new(400, format!("데이터베이스 주소를 읽지 못했습니다: {e}")))?;
-    let (mode, check) = address.plan(c.get_hosts()).map_err(|e| ApiError::new(400, e))?;
+    let (mode, check) = address
+        .plan(c.get_hosts())
+        .map_err(|e| ApiError::new(400, e))?;
     c.ssl_mode(mode);
     if c.get_user().is_none() && !s.user.is_empty() {
         c.user(&s.user);
@@ -249,7 +253,9 @@ fn config(s: &Settings, read_only: bool) -> Result<(Config, tls::Connector), Api
     } else {
         "-c statement_timeout=30000"
     });
-    let tls = address.connector(check).map_err(|e| ApiError::new(400, e))?;
+    let tls = address
+        .connector(check)
+        .map_err(|e| ApiError::new(400, e))?;
     Ok((c, tls))
 }
 
@@ -282,7 +288,10 @@ fn error(e: &tokio_postgres::Error, url: &str) -> ApiError {
                     db.message()
                 ),
             ),
-            "3D000" => ApiError::new(404, format!("데이터베이스를 찾지 못했습니다 ({}).", db.message())),
+            "3D000" => ApiError::new(
+                404,
+                format!("데이터베이스를 찾지 못했습니다 ({}).", db.message()),
+            ),
             _ => ApiError::new(500, db.message().to_owned()),
         };
     }
@@ -296,13 +305,16 @@ fn error(e: &tokio_postgres::Error, url: &str) -> ApiError {
 
 /// A row as Neo4j's `properties()`: its columns that hold a value, minus `drop`.
 fn properties(row: Map<String, Value>, drop: &[&str]) -> Map<String, Value> {
-    row.into_iter().filter(|(k, v)| !v.is_null() && !drop.contains(&k.as_str())).collect()
+    row.into_iter()
+        .filter(|(k, v)| !v.is_null() && !drop.contains(&k.as_str()))
+        .collect()
 }
 
 /// A field cut out of stored JSON by [`field`], read back as the text it stands for.
 fn unescape(row: &mut Map<String, Value>, key: &str, limit: usize) {
     if let Some(Value::String(raw)) = row.get(key) {
-        let text = serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| raw.clone());
+        let text =
+            serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| raw.clone());
         row.insert(key.to_owned(), Value::String(clip(&text, limit)));
     }
 }
@@ -323,8 +335,9 @@ impl Postgres<'_> {
             match client.query_one(&wrapped, params).await {
                 Ok(row) => {
                     let text: String = row.get(0);
-                    return serde_json::from_str(&text)
-                        .map_err(|e| ApiError::new(500, format!("PostgreSQL의 답을 읽지 못했습니다: {e}")));
+                    return serde_json::from_str(&text).map_err(|e| {
+                        ApiError::new(500, format!("PostgreSQL의 답을 읽지 못했습니다: {e}"))
+                    });
                 }
                 Err(e) if e.is_closed() && tries == 0 => {
                     self.pool.forget();
@@ -337,8 +350,14 @@ impl Postgres<'_> {
 
     /// How many sessions the store holds: the settings' test.
     pub async fn count_sessions(&self) -> Result<i64, ApiError> {
-        let rows = self.rows("SELECT count(*) AS sessions FROM sessions", &[]).await?;
-        Ok(rows.first().and_then(|r| r.get("sessions")).and_then(Value::as_i64).unwrap_or(0))
+        let rows = self
+            .rows("SELECT count(*) AS sessions FROM sessions", &[])
+            .await?;
+        Ok(rows
+            .first()
+            .and_then(|r| r.get("sessions"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0))
     }
 
     /// The sessions, newest first, each with its first prompt's text rather than the Request's
@@ -349,12 +368,20 @@ impl Postgres<'_> {
         for row in &mut rows {
             let request = row
                 .remove("first_request")
-                .and_then(|v| v.as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()))
+                .and_then(|v| {
+                    v.as_str()
+                        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                })
                 .unwrap_or(Value::Null);
-            let prompt = request.get("prompt").and_then(Value::as_str).map(|p| clip(p, 300));
+            let prompt = request
+                .get("prompt")
+                .and_then(Value::as_str)
+                .map(|p| clip(p, 300));
             row.insert("prompt".into(), prompt.map_or(Value::Null, Value::String));
         }
-        Ok(Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>()))
+        Ok(Value::from(
+            rows.into_iter().map(Value::Object).collect::<Vec<_>>(),
+        ))
     }
 
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
@@ -365,7 +392,9 @@ impl Postgres<'_> {
             unescape(row, "target", 300);
             unescape(row, "tool", 200);
         }
-        Ok(Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>()))
+        Ok(Value::from(
+            rows.into_iter().map(Value::Object).collect::<Vec<_>>(),
+        ))
     }
 
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
@@ -375,15 +404,27 @@ impl Postgres<'_> {
             unescape(row, "target", 300);
             unescape(row, "tool", 200);
         }
-        Ok(Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>()))
+        Ok(Value::from(
+            rows.into_iter().map(Value::Object).collect::<Vec<_>>(),
+        ))
     }
 
     /// The engine's agent inventory, or null for an engine that keeps none yet (no such tables).
     /// A key's hash is never read.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn inventory(&self) -> Result<Value, ApiError> {
-        let found = self.rows("SELECT to_regclass('public.clients') IS NOT NULL AS ok", &[]).await?;
-        if !found.first().and_then(|r| r.get("ok")).and_then(Value::as_bool).unwrap_or(false) {
+        let found = self
+            .rows(
+                "SELECT to_regclass('public.clients') IS NOT NULL AS ok",
+                &[],
+            )
+            .await?;
+        if !found
+            .first()
+            .and_then(|r| r.get("ok"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             return Ok(Value::Null);
         }
         let all = |rows: Rows| Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>());
@@ -459,17 +500,26 @@ impl Postgres<'_> {
         let kind = row.get("kind").cloned().unwrap_or(Value::Null);
         let paragraphs = self.rows(PARAGRAPHS, &[&session, &seq]).await?;
         let tokens = self.rows(NODE_TOKENS, &[&session, &seq]).await?;
-        Ok(json!({"kind": kind, "props": properties(row, &EDGE_COLUMNS), "paragraphs": paragraphs, "tokens": tokens}))
+        Ok(
+            json!({"kind": kind, "props": properties(row, &EDGE_COLUMNS), "paragraphs": paragraphs, "tokens": tokens}),
+        )
     }
 
     /// Each session's Calls: tool, verdict and deviation, without payload or trace.
     pub async fn calls(&self, sessions: &[String]) -> Result<Value, ApiError> {
-        let mut found: Map<String, Value> = sessions.iter().map(|s| (s.clone(), Value::Array(Vec::new()))).collect();
+        let mut found: Map<String, Value> = sessions
+            .iter()
+            .map(|s| (s.clone(), Value::Array(Vec::new())))
+            .collect();
         let list: Vec<&str> = sessions.iter().map(String::as_str).collect();
         for row in self.rows(&CALLS, &[&list]).await? {
             let ran = row.get("ran").cloned().unwrap_or(Value::Bool(false));
             let props = properties(row, &["kind", "next_seq", "next_via", "ran"]);
-            let session = props.get("session_id").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let session = props
+                .get("session_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
             if let Some(Value::Array(calls)) = found.get_mut(&session) {
                 calls.push(call_row(&props, ran));
             }
@@ -488,7 +538,10 @@ impl Postgres<'_> {
             .execute("DELETE FROM sessions WHERE session_id = $1", &[&session])
             .await
             .map_err(|e| error(&e, url))? as i64;
-        let found = tx.query_one(LAST_ACTIVE, &[&session]).await.map_err(|e| error(&e, url))?;
+        let found = tx
+            .query_one(LAST_ACTIVE, &[&session])
+            .await
+            .map_err(|e| error(&e, url))?;
         let rows: i64 = found.get("rows");
         let last_at: Option<i64> = found.get("last_at");
         if deleted == 0 && rows == 0 {
@@ -497,7 +550,10 @@ impl Postgres<'_> {
         check_idle(last_at)?;
         for table in SESSION_TABLES[1..].iter().chain(EDGE_TABLES.iter()) {
             let removed = tx
-                .execute(&format!("DELETE FROM {table} WHERE session_id = $1"), &[&session])
+                .execute(
+                    &format!("DELETE FROM {table} WHERE session_id = $1"),
+                    &[&session],
+                )
                 .await
                 .map_err(|e| error(&e, url))?;
             if SESSION_TABLES.contains(table) {
@@ -534,7 +590,10 @@ mod tests {
         assert_eq!(c.get_user(), Some("withhuman_viewer"));
         s.neo4j_url = "postgres://reader@host/graph".into();
         let (c, _) = config(&s, true).unwrap();
-        assert_eq!((c.get_dbname(), c.get_user()), (Some("graph"), Some("reader")));
+        assert_eq!(
+            (c.get_dbname(), c.get_user()),
+            (Some("graph"), Some("reader"))
+        );
     }
 
     #[test]
@@ -554,7 +613,10 @@ mod tests {
         let expect = std::env::var("VIEWER_PG_EXPECT").expect("VIEWER_PG_EXPECT");
         let mut s = Settings::default();
         s.neo4j_url = url.clone();
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let got = rt.block_on(async {
             let client = match async { connect(config(&s, true)?, &url).await }.await {
                 Ok(client) => client,
@@ -586,8 +648,14 @@ mod tests {
         let mut s = Settings::default();
         s.neo4j_url = url;
         let pool = Pool::default();
-        let pg = Postgres { settings: &s, pool: &pool };
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let pg = Postgres {
+            settings: &s,
+            pool: &pool,
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let wrong = std::cell::RefCell::new(Vec::<String>::new());
         // Numbers compare by value: the store writes a float 1.0 as 1.
         let same = |what: String, a: &Value, b: &Value| {
@@ -596,7 +664,9 @@ mod tests {
                 _ => a == b,
             };
             if !equal {
-                wrong.borrow_mut().push(format!("{what}: demo {a} / pg {b}"));
+                wrong
+                    .borrow_mut()
+                    .push(format!("{what}: demo {a} / pg {b}"));
             }
         };
 
@@ -604,12 +674,31 @@ mod tests {
         let ds = demo.sessions();
         let ps = rt.block_on(pg.sessions()).unwrap();
         let by_id = |v: &Value| -> std::collections::BTreeMap<String, Value> {
-            v.as_array().unwrap().iter().map(|r| (r["id"].as_str().unwrap().to_owned(), r.clone())).collect()
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| (r["id"].as_str().unwrap().to_owned(), r.clone()))
+                .collect()
         };
         let (ds, ps) = (by_id(&ds), by_id(&ps));
-        assert_eq!(ds.keys().collect::<Vec<_>>(), ps.keys().collect::<Vec<_>>(), "the same sessions");
+        assert_eq!(
+            ds.keys().collect::<Vec<_>>(),
+            ps.keys().collect::<Vec<_>>(),
+            "the same sessions"
+        );
         for (id, d) in &ds {
-            for k in ["undecided", "risky", "from_result", "mode", "client", "cwd", "intent", "prompt", "last_at", "created_at"] {
+            for k in [
+                "undecided",
+                "risky",
+                "from_result",
+                "mode",
+                "client",
+                "cwd",
+                "intent",
+                "prompt",
+                "last_at",
+                "created_at",
+            ] {
                 same(format!("session {id} {k}"), &d[k], &ps[id][k]);
             }
             // The fixture's stored counts predate its edits: count its graph instead.
@@ -617,8 +706,13 @@ mod tests {
             let nodes = g["nodes"].as_array().unwrap();
             let calls: Vec<&Value> = nodes.iter().filter(|n| n["kind"] == "Call").collect();
             let with = |d: &str| calls.iter().filter(|n| n["props"]["decision"] == d).count();
-            for (k, n) in [("nodes", nodes.len()), ("calls", calls.len()), ("denied", with("DENY")),
-                           ("reviewed", with("REVIEW")), ("allowed", with("ALLOW"))] {
+            for (k, n) in [
+                ("nodes", nodes.len()),
+                ("calls", calls.len()),
+                ("denied", with("DENY")),
+                ("reviewed", with("REVIEW")),
+                ("allowed", with("ALLOW")),
+            ] {
                 same(format!("session {id} {k}"), &json!(n), &ps[id][k]);
             }
         }
@@ -627,37 +721,83 @@ mod tests {
             let d = demo.graph(id).unwrap();
             let p = rt.block_on(pg.graph(id)).unwrap();
             // Nodes: the same, in the same order, each fixture property the same in the store.
-            let (dn, pn) = (d["nodes"].as_array().unwrap(), p["nodes"].as_array().unwrap());
-            same(format!("graph {id} node count"), &json!(dn.len()), &json!(pn.len()));
+            let (dn, pn) = (
+                d["nodes"].as_array().unwrap(),
+                p["nodes"].as_array().unwrap(),
+            );
+            same(
+                format!("graph {id} node count"),
+                &json!(dn.len()),
+                &json!(pn.len()),
+            );
             for (a, b) in dn.iter().zip(pn) {
                 same(format!("graph {id} kind"), &a["kind"], &b["kind"]);
                 for (k, v) in a["props"].as_object().unwrap() {
-                    same(format!("graph {id} seq {} {k}", a["props"]["seq"]), v, &b["props"][k]);
+                    same(
+                        format!("graph {id} seq {} {k}", a["props"]["seq"]),
+                        v,
+                        &b["props"][k],
+                    );
                 }
             }
             // Edges as sets.
             let edges = |g: &Value| -> std::collections::BTreeSet<String> {
-                g["edges"].as_array().unwrap().iter().map(|e| {
-                    format!("{}>{} {} {} {} {}", e["source"], e["target"], e["type"], e["props"]["via"], e["props"]["kind"], e["paragraph"])
-                }).collect()
+                g["edges"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "{}>{} {} {} {} {}",
+                            e["source"],
+                            e["target"],
+                            e["type"],
+                            e["props"]["via"],
+                            e["props"]["kind"],
+                            e["paragraph"]
+                        )
+                    })
+                    .collect()
             };
             let (de, pe) = (edges(&d), edges(&p));
             for e in de.symmetric_difference(&pe) {
-                wrong.borrow_mut().push(format!("graph {id} edge only in {}: {e}", if de.contains(e) { "demo" } else { "pg" }));
+                wrong.borrow_mut().push(format!(
+                    "graph {id} edge only in {}: {e}",
+                    if de.contains(e) { "demo" } else { "pg" }
+                ));
             }
             // Subgraphs, their members as sets.
             let subs = |g: &Value| -> Vec<(Value, Vec<i64>)> {
-                g["subgraphs"].as_array().unwrap().iter().map(|x| {
-                    let mut m: Vec<i64> = x["members"].as_array().unwrap().iter().filter_map(Value::as_i64).collect();
-                    m.sort();
-                    (x["props"]["number"].clone(), m)
-                }).collect()
+                g["subgraphs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| {
+                        let mut m: Vec<i64> = x["members"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(Value::as_i64)
+                            .collect();
+                        m.sort();
+                        (x["props"]["number"].clone(), m)
+                    })
+                    .collect()
             };
             if subs(&d) != subs(&p) {
-                wrong.borrow_mut().push(format!("graph {id} subgraphs: demo {:?} / pg {:?}", subs(&d), subs(&p)));
+                wrong.borrow_mut().push(format!(
+                    "graph {id} subgraphs: demo {:?} / pg {:?}",
+                    subs(&d),
+                    subs(&p)
+                ));
             }
             let tokens = |v: Option<&Value>| -> Vec<String> {
-                let mut t: Vec<String> = v.and_then(Value::as_array).into_iter().flatten().map(Value::to_string).collect();
+                let mut t: Vec<String> = v
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(Value::to_string)
+                    .collect();
                 t.sort();
                 t
             };
@@ -673,46 +813,133 @@ mod tests {
                 }
                 let pd = rt.block_on(pg.node(id, seq)).unwrap();
                 same(format!("node {id}/{seq} kind"), &dd["kind"], &pd["kind"]);
-                same(format!("node {id}/{seq} paragraphs"), &json!(dd["paragraphs"].as_array().map_or(0, Vec::len)),
-                     &json!(pd["paragraphs"].as_array().map_or(0, Vec::len)));
+                same(
+                    format!("node {id}/{seq} paragraphs"),
+                    &json!(dd["paragraphs"].as_array().map_or(0, Vec::len)),
+                    &json!(pd["paragraphs"].as_array().map_or(0, Vec::len)),
+                );
             }
         }
 
         // Every Call's facts, by (session, seq).
         let facts = |v: Value| -> std::collections::BTreeMap<(String, i64), Value> {
-            v.as_array().unwrap().iter().map(|r| ((r["session"].as_str().unwrap().to_owned(), r["seq"].as_i64().unwrap()), r.clone())).collect()
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    (
+                        (
+                            r["session"].as_str().unwrap().to_owned(),
+                            r["seq"].as_i64().unwrap(),
+                        ),
+                        r.clone(),
+                    )
+                })
+                .collect()
         };
-        let (df, pf) = (facts(demo.call_facts()), facts(rt.block_on(pg.call_facts()).unwrap()));
-        same("call facts count".into(), &json!(df.len()), &json!(pf.len()));
+        let (df, pf) = (
+            facts(demo.call_facts()),
+            facts(rt.block_on(pg.call_facts()).unwrap()),
+        );
+        same(
+            "call facts count".into(),
+            &json!(df.len()),
+            &json!(pf.len()),
+        );
         // A fixture keeps a long payload cut short, no longer JSON: the demo reads nothing of it,
         // the store's cut still finds the fields.
         let whole = |session: &str, seq: i64| -> bool {
-            demo.graph(session).ok().and_then(|g| {
-                g["nodes"].as_array().and_then(|n| n.iter().find(|x| x["props"]["seq"] == json!(seq)).cloned())
-            }).and_then(|n| n["props"]["payload_json"].as_str().map(|p| serde_json::from_str::<Value>(p).is_ok())).unwrap_or(true)
+            demo.graph(session)
+                .ok()
+                .and_then(|g| {
+                    g["nodes"]
+                        .as_array()
+                        .and_then(|n| n.iter().find(|x| x["props"]["seq"] == json!(seq)).cloned())
+                })
+                .and_then(|n| {
+                    n["props"]["payload_json"]
+                        .as_str()
+                        .map(|p| serde_json::from_str::<Value>(p).is_ok())
+                })
+                .unwrap_or(true)
         };
         for (k, d) in &df {
             let fields: &[&str] = if whole(&k.0, k.1) {
-                &["target", "tool", "reason", "prompt", "ran", "ran_at", "at", "decision", "mode", "rule", "link",
-                  "worst", "irreversible", "client", "cwd"]
+                &[
+                    "target",
+                    "tool",
+                    "reason",
+                    "prompt",
+                    "ran",
+                    "ran_at",
+                    "at",
+                    "decision",
+                    "mode",
+                    "rule",
+                    "link",
+                    "worst",
+                    "irreversible",
+                    "client",
+                    "cwd",
+                ]
             } else {
-                &["reason", "prompt", "ran", "ran_at", "at", "decision", "mode", "rule", "link", "worst", "irreversible",
-                  "client", "cwd"]
+                &[
+                    "reason",
+                    "prompt",
+                    "ran",
+                    "ran_at",
+                    "at",
+                    "decision",
+                    "mode",
+                    "rule",
+                    "link",
+                    "worst",
+                    "irreversible",
+                    "client",
+                    "cwd",
+                ]
             };
             for f in fields.iter().copied() {
-                same(format!("fact {k:?} {f}"), &d[f], &pf.get(k).map_or(Value::Null, |p| p[f].clone()));
+                same(
+                    format!("fact {k:?} {f}"),
+                    &d[f],
+                    &pf.get(k).map_or(Value::Null, |p| p[f].clone()),
+                );
             }
         }
 
         // Every sensitive mention, by (session, seq, key, slot).
         let mentions = |v: Value| -> std::collections::BTreeMap<String, Value> {
-            v.as_array().unwrap().iter().map(|r| (format!("{} {} {} {}", r["session"], r["seq"], r["key"], r["slot"]), r.clone())).collect()
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    (
+                        format!("{} {} {} {}", r["session"], r["seq"], r["key"], r["slot"]),
+                        r.clone(),
+                    )
+                })
+                .collect()
         };
-        let (dm, pm) = (mentions(demo.secrets()), mentions(rt.block_on(pg.secrets()).unwrap()));
-        same("secret mentions".into(), &json!(dm.keys().collect::<Vec<_>>()), &json!(pm.keys().collect::<Vec<_>>()));
+        let (dm, pm) = (
+            mentions(demo.secrets()),
+            mentions(rt.block_on(pg.secrets()).unwrap()),
+        );
+        same(
+            "secret mentions".into(),
+            &json!(dm.keys().collect::<Vec<_>>()),
+            &json!(pm.keys().collect::<Vec<_>>()),
+        );
         for (k, d) in &dm {
-            for f in ["node", "kind", "category", "text", "decision", "client", "at", "tool", "target", "ran"] {
-                same(format!("secret {k} {f}"), &d[f], &pm.get(k).map_or(Value::Null, |p| p[f].clone()));
+            for f in [
+                "node", "kind", "category", "text", "decision", "client", "at", "tool", "target",
+                "ran",
+            ] {
+                same(
+                    format!("secret {k} {f}"),
+                    &d[f],
+                    &pm.get(k).map_or(Value::Null, |p| p[f].clone()),
+                );
             }
         }
 
@@ -722,27 +949,55 @@ mod tests {
         let pc = rt.block_on(pg.calls(&ids)).unwrap();
         for id in &ids {
             let g = demo.graph(id).unwrap();
-            let ran: std::collections::HashSet<i64> = g["edges"].as_array().unwrap().iter()
-                .filter(|e| e["type"] == "RESULT_OF").filter_map(|e| e["target"].as_i64()).collect();
-            let mut expected: Vec<(i64, Value)> = g["nodes"].as_array().unwrap().iter()
+            let ran: std::collections::HashSet<i64> = g["edges"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "RESULT_OF")
+                .filter_map(|e| e["target"].as_i64())
+                .collect();
+            let mut expected: Vec<(i64, Value)> = g["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
                 .filter(|n| n["kind"] == "Call")
                 .map(|n| {
                     let props = n["props"].as_object().cloned().unwrap_or_default();
                     let seq = props["seq"].as_i64().unwrap();
-                    (props["order"].as_i64().unwrap_or(0), call_row(&props, json!(ran.contains(&seq))))
+                    (
+                        props["order"].as_i64().unwrap_or(0),
+                        call_row(&props, json!(ran.contains(&seq))),
+                    )
                 })
                 .collect();
             expected.sort_by_key(|e| e.0);
             let b = pc[id].as_array().cloned().unwrap_or_default();
-            same(format!("calls {id} count"), &json!(expected.len()), &json!(b.len()));
+            same(
+                format!("calls {id} count"),
+                &json!(expected.len()),
+                &json!(b.len()),
+            );
             for ((_, x), y) in expected.iter().zip(&b) {
-                for f in ["seq", "tool_name", "decision", "ran", "worst", "link", "score"] {
+                for f in [
+                    "seq",
+                    "tool_name",
+                    "decision",
+                    "ran",
+                    "worst",
+                    "link",
+                    "score",
+                ] {
                     same(format!("calls {id} {} {f}", x["seq"]), &x[f], &y[f]);
                 }
             }
         }
         let wrong = wrong.into_inner();
-        assert!(wrong.is_empty(), "{} differences:\n{}", wrong.len(), wrong.join("\n"));
+        assert!(
+            wrong.is_empty(),
+            "{} differences:\n{}",
+            wrong.len(),
+            wrong.join("\n")
+        );
     }
 
     #[test]

@@ -71,7 +71,11 @@ fn FeaturePage(second: bool) -> Element {
 #[cfg(not(feature = "admin"))]
 #[component]
 fn FeaturePage(second: bool) -> Element {
-    let (name, tone) = if second { ("기능 B", "b") } else { ("기능 A", "a") };
+    let (name, tone) = if second {
+        ("기능 B", "b")
+    } else {
+        ("기능 A", "a")
+    };
     rsx! {
         div { class: "soon {tone}",
             span { class: "soon-mark", "{name}" }
@@ -244,7 +248,11 @@ pub fn App() -> Element {
         current: Signal::new(None),
         graph: Signal::new(Load::Loading),
         graph_of: Signal::new(None),
-        screen: Signal::new(if backend.needs_setup() { Screen::Setup } else { first_screen() }),
+        screen: Signal::new(if backend.needs_setup() {
+            Screen::Setup
+        } else {
+            first_screen()
+        }),
         sidebar: Signal::new(true),
         mode: Signal::new(Mode::Graph),
         selected: Signal::new(Selection::None),
@@ -595,10 +603,13 @@ fn TopBar() -> Element {
     };
     let (dot, source) = match (p.demo, &*state.sessions.read()) {
         (true, _) => ("demo", "데모 데이터".to_owned()),
-        (false, Load::Ready(_)) => ("ok", match p.engine {
-            crate::settings::Engine::Local => "이 맥의 엔진".to_owned(),
-            _ => p.host(),
-        }),
+        (false, Load::Ready(_)) => (
+            "ok",
+            match p.engine {
+                crate::settings::Engine::Local => "이 맥의 엔진".to_owned(),
+                _ => p.host(),
+            },
+        ),
         (false, Load::Failed(_)) => ("down", "연결 안 됨".to_owned()),
         (false, Load::Loading) => ("wait", "연결하는 중".to_owned()),
     };
@@ -816,7 +827,12 @@ fn sidebar_icon() -> Element {
 
 /// One row of the sidebar: an outline icon and its name.
 #[component]
-fn SbRow(label: String, icon: &'static str, on: bool, onclick: EventHandler<MouseEvent>) -> Element {
+fn SbRow(
+    label: String,
+    icon: &'static str,
+    on: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
     rsx! {
         button { class: if on { "sb-row on" } else { "sb-row" }, onclick: move |e| onclick.call(e),
             svg { width: "17", height: "17", view_box: "0 0 24 24",

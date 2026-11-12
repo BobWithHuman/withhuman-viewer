@@ -9,8 +9,8 @@ use dioxus::prelude::*;
 
 use super::{AppState, Load, Selection};
 use crate::flow::{
-    AMBER, Flow, GREEN, Item, Kind, LINE_COLOR, LINE_MUTED, Leg, RED, Stop, Summary,
-    TEXT_COLOR, TEXT_MUTED, Glyph, Tone, Turn,
+    AMBER, Flow, GREEN, Glyph, Item, Kind, LINE_COLOR, LINE_MUTED, Leg, RED, Stop, Summary,
+    TEXT_COLOR, TEXT_MUTED, Tone, Turn,
 };
 use crate::layout::clip;
 use crate::metro::Metro;
@@ -108,7 +108,11 @@ pub fn FlowMap() -> Element {
         // Another session opened from the list closes it.
         let now = (state.current)();
         let mut opened = opened;
-        if opened.peek().as_ref().is_some_and(|was| was.is_some() && *was != now) {
+        if opened
+            .peek()
+            .as_ref()
+            .is_some_and(|was| was.is_some() && *was != now)
+        {
             picking.set(false);
             head_open.set(None);
         }
@@ -116,7 +120,9 @@ pub fn FlowMap() -> Element {
     });
     use_effect(move || {
         if picking() {
-            document::eval("requestAnimationFrame(() => document.getElementById('session-search')?.focus())");
+            document::eval(
+                "requestAnimationFrame(() => document.getElementById('session-search')?.focus())",
+            );
         }
     });
     use_effect(|| {
@@ -231,13 +237,16 @@ pub fn FlowMap() -> Element {
         .turns
         .iter()
         .enumerate()
-        .flat_map(|(n, t)| std::iter::once(Step::Prompt(n)).chain(t.calls.iter().map(|c| Step::Call(c.seq))))
+        .flat_map(|(n, t)| {
+            std::iter::once(Step::Prompt(n)).chain(t.calls.iter().map(|c| Step::Call(c.seq)))
+        })
         .collect();
-    let now_at = move |order: &[Step], picked: Option<i64>, head: Option<usize>| match (picked, head) {
-        (Some(p), _) => order.iter().position(|&s| s == Step::Call(p)),
-        (None, Some(n)) => order.iter().position(|&s| s == Step::Prompt(n)),
-        (None, None) => None,
-    };
+    let now_at =
+        move |order: &[Step], picked: Option<i64>, head: Option<usize>| match (picked, head) {
+            (Some(p), _) => order.iter().position(|&s| s == Step::Call(p)),
+            (None, Some(n)) => order.iter().position(|&s| s == Step::Prompt(n)),
+            (None, None) => None,
+        };
     let at = now_at(&order, picked, head_open());
     let total = order.len();
     let step = {
@@ -695,7 +704,11 @@ fn TurnCard(
 /// A tool's icon, `size` px square, centred at (x, y), drawn in strokes of `color`.
 fn glyph(g: Glyph, x: f64, y: f64, size: f64, color: &str) -> Element {
     let k = size / 16.0;
-    let t = format!("translate({} {}) scale({k})", x - size / 2.0, y - size / 2.0);
+    let t = format!(
+        "translate({} {}) scale({k})",
+        x - size / 2.0,
+        y - size / 2.0
+    );
     let w = (1.9 / k).min(2.6);
     rsx! {
         g { transform: "{t}", fill: "none", stroke: "{color}", stroke_width: "{w}", stroke_linecap: "round", stroke_linejoin: "round", class: "fx-nohit",
@@ -723,7 +736,10 @@ fn glyph(g: Glyph, x: f64, y: f64, size: f64, color: &str) -> Element {
 
 /// Whether two Calls in a row read as the same: the same name, verdict, and words followed.
 fn same_call(a: &crate::flow::Call, b: &crate::flow::Call) -> bool {
-    a.title == b.title && a.blocked == b.blocked && a.warn == b.warn && a.via.is_some() == b.via.is_some()
+    a.title == b.title
+        && a.blocked == b.blocked
+        && a.warn == b.warn
+        && a.via.is_some() == b.via.is_some()
 }
 
 /// Calls in a row that read the same, as one: each first one and how many it stands for.
@@ -755,7 +771,14 @@ fn item_runs(t: &Turn) -> Vec<(usize, &Item, usize)> {
 
 /// A Call's row in a turn's card: its verdict, name (with the tool for one folded in a
 /// group), a "글" chip when it followed words read, and its time. Picking it picks the Call.
-fn call_row(c: &crate::flow::Call, key: String, picked: Option<i64>, mut state: AppState, inner: bool, times: usize) -> Element {
+fn call_row(
+    c: &crate::flow::Call,
+    key: String,
+    picked: Option<i64>,
+    mut state: AppState,
+    inner: bool,
+    times: usize,
+) -> Element {
     let seq = c.seq;
     let cls = format!(
         "fx-item call{}{}{}",
@@ -763,7 +786,13 @@ fn call_row(c: &crate::flow::Call, key: String, picked: Option<i64>, mut state: 
         if picked == Some(seq) { " picked" } else { "" },
         if inner { " inner" } else { "" }
     );
-    let icon = if c.blocked { blocked_icon(13.0) } else if c.warn { warn_icon(13.0) } else { check_icon() };
+    let icon = if c.blocked {
+        blocked_icon(13.0)
+    } else if c.warn {
+        warn_icon(13.0)
+    } else {
+        check_icon()
+    };
     rsx! {
         div {
             key: "{key}",
@@ -871,37 +900,92 @@ struct LegRow {
 }
 
 fn pick_of(n: usize, c: &crate::flow::Call) -> LegPick {
-    LegPick { turn: n, seq: Some(c.seq), text: c.title.clone(), at: hm(c.at) }
+    LegPick {
+        turn: n,
+        seq: Some(c.seq),
+        text: c.title.clone(),
+        at: hm(c.at),
+    }
 }
 
 /// The legend's kinds of station over the turns shown, those there are, in the line's order:
 /// every Call, the requests, the verdicts, the kinds of tool, the answers.
 fn legend_rows(f: &Flow, turns: &[usize], stops: &[Stop]) -> Vec<LegRow> {
-    let calls: Vec<(usize, &crate::flow::Call)> =
-        turns.iter().flat_map(|&n| f.turns[n].calls.iter().map(move |c| (n, c))).collect();
-    let mut rows = vec![LegRow { key: "all", label: "모든 호출".into(), n: calls.len(), icon: LegIcon::All, picks: Vec::new() }];
+    let calls: Vec<(usize, &crate::flow::Call)> = turns
+        .iter()
+        .flat_map(|&n| f.turns[n].calls.iter().map(move |c| (n, c)))
+        .collect();
+    let mut rows = vec![LegRow {
+        key: "all",
+        label: "모든 호출".into(),
+        n: calls.len(),
+        icon: LegIcon::All,
+        picks: Vec::new(),
+    }];
     let asks: Vec<LegPick> = turns
         .iter()
-        .map(|&n| LegPick { turn: n, seq: None, text: f.turns[n].req.clone(), at: hm(f.turns[n].asked) })
+        .map(|&n| LegPick {
+            turn: n,
+            seq: None,
+            text: f.turns[n].req.clone(),
+            at: hm(f.turns[n].asked),
+        })
         .collect();
     if !asks.is_empty() {
-        rows.push(LegRow { key: "ask", label: "사용자 요청".into(), n: asks.len(), icon: LegIcon::Swatch(Tone::Ask.color()), picks: asks });
+        rows.push(LegRow {
+            key: "ask",
+            label: "사용자 요청".into(),
+            n: asks.len(),
+            icon: LegIcon::Swatch(Tone::Ask.color()),
+            picks: asks,
+        });
     }
-    for (key, label) in [("blocked", "차단"), ("warn", "확인 요청"), ("allowed", "허용"), ("none", "판정 없음")] {
-        let picks: Vec<LegPick> = calls.iter().filter(|(_, c)| verdict(c) == key).map(|&(n, c)| pick_of(n, c)).collect();
+    for (key, label) in [
+        ("blocked", "차단"),
+        ("warn", "확인 요청"),
+        ("allowed", "허용"),
+        ("none", "판정 없음"),
+    ] {
+        let picks: Vec<LegPick> = calls
+            .iter()
+            .filter(|(_, c)| verdict(c) == key)
+            .map(|&(n, c)| pick_of(n, c))
+            .collect();
         if !picks.is_empty() {
-            rows.push(LegRow { key, label: label.into(), n: picks.len(), icon: LegIcon::Mark(key), picks });
+            rows.push(LegRow {
+                key,
+                label: label.into(),
+                n: picks.len(),
+                icon: LegIcon::Mark(key),
+                picks,
+            });
         }
     }
     for g in Glyph::ALL {
-        let picks: Vec<LegPick> = calls.iter().filter(|(_, c)| c.glyph == g).map(|&(n, c)| pick_of(n, c)).collect();
+        let picks: Vec<LegPick> = calls
+            .iter()
+            .filter(|(_, c)| c.glyph == g)
+            .map(|&(n, c)| pick_of(n, c))
+            .collect();
         if !picks.is_empty() {
-            rows.push(LegRow { key: g.name(), label: g.name().into(), n: picks.len(), icon: LegIcon::Glyph(g), picks });
+            rows.push(LegRow {
+                key: g.name(),
+                label: g.name().into(),
+                n: picks.len(),
+                icon: LegIcon::Glyph(g),
+                picks,
+            });
         }
     }
     let says = stops.iter().filter(|s| s.kind == Kind::Say).count();
     if says > 0 {
-        rows.push(LegRow { key: "say", label: "에이전트 답변".into(), n: says, icon: LegIcon::Swatch(Tone::Say.color()), picks: Vec::new() });
+        rows.push(LegRow {
+            key: "say",
+            label: "에이전트 답변".into(),
+            n: says,
+            icon: LegIcon::Swatch(Tone::Say.color()),
+            picks: Vec::new(),
+        });
     }
     rows
 }
@@ -913,9 +997,21 @@ fn light_rows(f: &Flow, turns: &[usize]) -> Vec<LegRow> {
         .map(|&(key, label)| {
             let picks: Vec<LegPick> = turns
                 .iter()
-                .flat_map(|&n| f.turns[n].calls.iter().filter(|c| lights(key, c)).map(move |c| pick_of(n, c)))
+                .flat_map(|&n| {
+                    f.turns[n]
+                        .calls
+                        .iter()
+                        .filter(|c| lights(key, c))
+                        .map(move |c| pick_of(n, c))
+                })
                 .collect();
-            LegRow { key, label: label.into(), n: picks.len(), icon: LegIcon::Light, picks }
+            LegRow {
+                key,
+                label: label.into(),
+                n: picks.len(),
+                icon: LegIcon::Light,
+                picks,
+            }
         })
         .collect()
 }
@@ -958,7 +1054,12 @@ fn eye_icon(off: bool) -> Element {
 
 /// A legend row's Calls (or requests), one picked opening it on the line.
 #[component]
-fn LegendPicks(picks: Vec<LegPick>, flow: Arc<Flow>, turn: Signal<usize>, detail: Signal<bool>) -> Element {
+fn LegendPicks(
+    picks: Vec<LegPick>,
+    flow: Arc<Flow>,
+    turn: Signal<usize>,
+    detail: Signal<bool>,
+) -> Element {
     let mut state = use_context::<AppState>();
     let mut detail = detail;
     let picked = match (state.selected)() {
@@ -1017,7 +1118,10 @@ fn LineMap(
     let mut unfolded = use_signal(|| None::<&'static str>);
     // What the map brings into view stays clear of the legend.
     use_effect(move || {
-        document::eval(&format!("window.fxLeft = {};", if legend() { LEGEND_W } else { 0.0 }));
+        document::eval(&format!(
+            "window.fxLeft = {};",
+            if legend() { LEGEND_W } else { 0.0 }
+        ));
     });
     let f = &flow;
     // The groups opened by hand into their Calls, by (turn, item).
@@ -1061,16 +1165,15 @@ fn LineMap(
             .cloned()
     });
     let target_at = picked
-        .and_then(|seq| {
-            line.stops
-                .iter()
-                .find(|s| s.is(seq) && s.turn == t)
-        })
+        .and_then(|seq| line.stops.iter().find(|s| s.is(seq) && s.turn == t))
         .or(grouped.as_ref())
         .map(|s| (s.x, s.y));
     // A turn or a Call picked is brought into view by the page's own mover (pan.js).
     let mark_at = line.marks.iter().find(|m| m.turn == t).map(|m| {
-        let (x, y, w) = m.zones.first().map_or((m.x, m.y - 206.0, 0.0), |z| (z.0, z.1, z.2));
+        let (x, y, w) = m
+            .zones
+            .first()
+            .map_or((m.x, m.y - 206.0, 0.0), |z| (z.0, z.1, z.2));
         (x, y, w, m.rev)
     });
     let lkey = (line.width as u64) << 20 ^ line.height as u64;
@@ -1081,7 +1184,9 @@ fn LineMap(
     {
         let mut framed = framed;
         framed.set(Some((t, picked, lkey)));
-        let (tx, ty) = target_at.map_or(("null".to_owned(), "null".to_owned()), |(x, y)| (x.to_string(), y.to_string()));
+        let (tx, ty) = target_at.map_or(("null".to_owned(), "null".to_owned()), |(x, y)| {
+            (x.to_string(), y.to_string())
+        });
         document::eval(&format!(
             "{PAN_JS}\nrequestAnimationFrame(() => fxMap.frame({mx}, {my}, {tx}, {ty}, {rev}, {mw}));"
         ));
@@ -1120,25 +1225,44 @@ fn LineMap(
         }
     }
     // The Calls on the way back, the one picked with them: in colour while the rest is grey.
-    let chain: HashSet<i64> = trace.iter().flat_map(|&(c, f)| [c, f]).chain(picked.filter(|_| tracing)).collect();
+    let chain: HashSet<i64> = trace
+        .iter()
+        .flat_map(|&(c, f)| [c, f])
+        .chain(picked.filter(|_| tracing))
+        .collect();
     // A quote under a station on the way back, or about two of them.
     let on_chain = |b: &crate::flow::BranchLabel| {
         b.about.iter().any(|q| chain.contains(q))
             || (b.about.is_empty()
-                && line.stops.iter().any(|s| (s.x - b.x).abs() < 0.5 && (s.y - b.y).abs() < 0.5 && s.seq.is_some_and(|q| chain.contains(&q))))
+                && line.stops.iter().any(|s| {
+                    (s.x - b.x).abs() < 0.5
+                        && (s.y - b.y).abs() < 0.5
+                        && s.seq.is_some_and(|q| chain.contains(&q))
+                }))
     };
     // The whole way back brought into view, its far end and the Call picked both.
     let boxed = use_signal(|| None::<(Option<i64>, u64)>);
     if tracing && h > 0.0 && *boxed.peek() != Some((picked, lkey)) {
-        let pts: Vec<(f64, f64)> = line.stops.iter().filter(|s| s.seq.is_some_and(|q| chain.contains(&q))).map(|s| (s.x, s.y)).collect();
+        let pts: Vec<(f64, f64)> = line
+            .stops
+            .iter()
+            .filter(|s| s.seq.is_some_and(|q| chain.contains(&q)))
+            .map(|s| (s.x, s.y))
+            .collect();
         if !pts.is_empty() {
             let mut boxed = boxed;
             boxed.set(Some((picked, lkey)));
-            let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
-            let (y0, y1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
+            let (x0, x1) = pts
+                .iter()
+                .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.0), b.max(p.0)));
+            let (y0, y1) = pts
+                .iter()
+                .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p.1), b.max(p.1)));
             // Room for the names over the stations and the quote boxes under them.
             let (x0, y0, x1, y1) = (x0 - 160.0, y0 - 110.0, x1 + 260.0, y1 + 170.0);
-            document::eval(&format!("{PAN_JS}\nrequestAnimationFrame(() => fxMap.box({x0}, {y0}, {x1}, {y1}));"));
+            document::eval(&format!(
+                "{PAN_JS}\nrequestAnimationFrame(() => fxMap.box({x0}, {y0}, {x1}, {y1}));"
+            ));
         }
     } else if !tracing && boxed.peek().is_some() {
         let mut boxed = boxed;
@@ -1149,12 +1273,19 @@ fn LineMap(
     let mut quote_y: HashMap<usize, f64> = HashMap::new();
     let mut placed: Vec<(f64, f64, f64)> = Vec::new();
     for (bi, b) in line.branch_labels.iter().enumerate() {
-        let shown = if tracing { on_chain(b) } else { b.about.is_empty() || picked.is_some_and(|p| b.about.contains(&p)) };
+        let shown = if tracing {
+            on_chain(b)
+        } else {
+            b.about.is_empty() || picked.is_some_and(|p| b.about.contains(&p))
+        };
         if !shown {
             continue;
         }
         let mut y = b.qy;
-        while placed.iter().any(|&(x0, x1, py)| (py - y).abs() < 58.0 && x0 < b.qx + b.qw && x1 > b.qx) {
+        while placed
+            .iter()
+            .any(|&(x0, x1, py)| (py - y).abs() < 58.0 && x0 < b.qx + b.qw && x1 > b.qx)
+        {
             y += 62.0;
         }
         placed.push((b.qx, b.qx + b.qw, y));
@@ -1164,11 +1295,7 @@ fn LineMap(
         line.stops
             .iter()
             .find(|s| s.is(seq) && s.turn == t && s.kind != Kind::Transfer)
-            .or_else(|| {
-                line.stops
-                    .iter()
-                    .find(|s| s.is(seq) && s.turn == t)
-            })
+            .or_else(|| line.stops.iter().find(|s| s.is(seq) && s.turn == t))
             .cloned()
             .or(grouped.clone())
     });
@@ -1721,7 +1848,15 @@ fn arrow_head(d: &str) -> String {
     let (Some(&y), Some(&x)) = (nums.last(), nums.get(nums.len().saturating_sub(2))) else {
         return String::new();
     };
-    format!("M{} {} L{} {} L{} {}z", x - 5.0, y + 7.0, x + 5.0, y + 7.0, x, y - 1.0)
+    format!(
+        "M{} {} L{} {} L{} {}z",
+        x - 5.0,
+        y + 7.0,
+        x + 5.0,
+        y + 7.0,
+        x,
+        y - 1.0
+    )
 }
 
 /// A pin left of its point, its tip pointing right at it.
@@ -1774,7 +1909,13 @@ fn LineStop(
     let mini = s.kind == Kind::Mini;
     let minor = s.kind == Kind::Tick || mini;
     let up = s.up == Some(true);
-    let gap = if s.kind == Kind::Transfer { 32.0 } else if mini { 14.0 } else { 26.0 };
+    let gap = if s.kind == Kind::Transfer {
+        32.0
+    } else if mini {
+        14.0
+    } else {
+        26.0
+    };
     // A small station's two lines sit closer: its tool, then what it did.
     let step = if mini { 14.0 } else { 16.0 };
     // A name moved a tier out stands that much further from the line.
@@ -1784,7 +1925,11 @@ fn LineStop(
     } else {
         s.y + gap + 8.0 + lift
     };
-    let sy = if up { s.y - gap - lift } else { s.y + gap + 8.0 + step + lift };
+    let sy = if up {
+        s.y - gap - lift
+    } else {
+        s.y + gap + 8.0 + step + lift
+    };
     let (x, y) = (s.x, s.y);
     let fill = match s.kind {
         _ if dim => DIM_COLOR,

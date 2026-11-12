@@ -567,8 +567,19 @@ pub struct McpRefusal {
 #[cfg_attr(not(feature = "admin"), allow(dead_code))]
 pub enum McpChange {
     /// How far a tool is let through: `allow`, `review` or `deny`.
-    Level { server: String, tool: String, level: String },
+    Level {
+        server: String,
+        tool: String,
+        level: String,
+    },
     /// A request approved, with the level for each tool offered and whom they are for, or
     /// rejected; with the answer to the developer.
-    Decide { id: String, approve: bool, actor: String, answer: String, levels: Vec<(String, String)>, scope: Vec<String> },
+    Decide {
+        id: String,
+        approve: bool,
+        actor: String,
+        answer: String,
+        levels: Vec<(String, String)>,
+        scope: Vec<String>,
+    },
 }

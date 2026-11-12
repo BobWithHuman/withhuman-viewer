@@ -23,10 +23,20 @@ fn attention(graph: &Value) -> Value {
     let risky = calls
         .iter()
         .filter(|c| c.get("decision").and_then(Value::as_str) == Some("ALLOW"))
-        .filter(|c| trace(c)["deviation"]["irreversible"].as_f64().is_some_and(|p| p >= IRREVERSIBLE))
+        .filter(|c| {
+            trace(c)["deviation"]["irreversible"]
+                .as_f64()
+                .is_some_and(|p| p >= IRREVERSIBLE)
+        })
         .count();
-    let undecided = calls.iter().filter(|c| c.get("decision").is_none_or(Value::is_null)).count();
-    let from_result = calls.iter().filter(|c| trace(c)["link"] == "segment").count();
+    let undecided = calls
+        .iter()
+        .filter(|c| c.get("decision").is_none_or(Value::is_null))
+        .count();
+    let from_result = calls
+        .iter()
+        .filter(|c| trace(c)["link"] == "segment")
+        .count();
     let mode = calls
         .iter()
         .filter(|c| c.get("decision_mode").is_some_and(Value::is_string))
@@ -69,7 +79,11 @@ impl Demo {
             eprintln!("데모 데이터 형식이 잘못됐습니다: {e}");
             json!({"sessions": [], "graphs": {}, "nodes": {}, "calls": {}})
         });
-        Self { data, inventory: None, mcp: None }
+        Self {
+            data,
+            inventory: None,
+            mcp: None,
+        }
     }
 
     /// The stored sessions, each with the counts the sessions query adds since the fixture was
@@ -110,12 +124,14 @@ impl Demo {
                     Some((p["seq"].as_i64()?, p["observed_at"].as_i64()))
                 })
                 .collect();
-            let mut ran: std::collections::HashMap<i64, Option<i64>> = std::collections::HashMap::new();
+            let mut ran: std::collections::HashMap<i64, Option<i64>> =
+                std::collections::HashMap::new();
             for e in graph["edges"].as_array().into_iter().flatten() {
                 if e["type"] != "RESULT_OF" {
                     continue;
                 }
-                let (Some(result), Some(call)) = (e["source"].as_i64(), e["target"].as_i64()) else {
+                let (Some(result), Some(call)) = (e["source"].as_i64(), e["target"].as_i64())
+                else {
                     continue;
                 };
                 let at = seen.get(&result).copied().flatten();
@@ -138,7 +154,9 @@ impl Demo {
                 if node["kind"] != "Call" {
                     continue;
                 }
-                let Some(c) = node["props"].as_object() else { continue };
+                let Some(c) = node["props"].as_object() else {
+                    continue;
+                };
                 let trace = parse_json(c.get("trace_json"));
                 let payload = parse_json(c.get("payload_json"));
                 let text = |v: &Value| v.as_str().map(str::to_owned);
@@ -197,11 +215,15 @@ impl Demo {
                     continue;
                 }
                 let seq = t["seq"].as_i64().unwrap_or_default();
-                let node = nodes.iter().find(|n| n["props"]["seq"].as_i64() == Some(seq));
+                let node = nodes
+                    .iter()
+                    .find(|n| n["props"]["seq"].as_i64() == Some(seq));
                 let props = node.map(|n| &n["props"]);
                 let payload = parse_json(props.and_then(|p| p.get("payload_json")));
                 let input = &payload["tool_input"];
-                let target = ["command", "url", "file_path"].iter().find_map(|k| input[k].as_str());
+                let target = ["command", "url", "file_path"]
+                    .iter()
+                    .find_map(|k| input[k].as_str());
                 out.push(json!({
                     "session": session,
                     "seq": seq,
@@ -236,7 +258,9 @@ impl Demo {
 
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     fn made_inventory(&self, now: i64) -> crate::model::Inventory {
-        use crate::model::{ApiKey, Device, DeviceProject, Inventory, KeyEvent, Person, SessionRun};
+        use crate::model::{
+            ApiKey, Device, DeviceProject, Inventory, KeyEvent, Person, SessionRun,
+        };
         const MIN: i64 = 60_000;
         const DAY: i64 = 24 * 60 * MIN;
         let person = |client: &str| match client {
@@ -245,7 +269,10 @@ impl Demo {
             _ => None,
         };
         let mut sessions: Vec<SessionRun> = Vec::new();
-        let list = self.data["sessions"].as_array().cloned().unwrap_or_default();
+        let list = self.data["sessions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let newest = list.iter().filter_map(|s| s["created_at"].as_i64()).max();
         for s in &list {
             let id = s["id"].as_str().unwrap_or_default().to_owned();
@@ -262,8 +289,16 @@ impl Demo {
                 model: Some("claude-sonnet".into()),
                 created_at: created,
                 last_seen_at: if running { Some(now - 2 * MIN) } else { last },
-                ended_at: if running { None } else { last.map(|l| l + 1_000) },
-                end_reason: if running { None } else { Some("prompt_input_exit".into()) },
+                ended_at: if running {
+                    None
+                } else {
+                    last.map(|l| l + 1_000)
+                },
+                end_reason: if running {
+                    None
+                } else {
+                    Some("prompt_input_exit".into())
+                },
             });
         }
         // Two sessions whose hooks sent no ID (an app launched outside a shell, a container).
@@ -294,7 +329,10 @@ impl Demo {
         };
         let device = |id: &str, host: &str, os: &str, user: &str, registered: Option<i64>| Device {
             client_id: id.into(),
-            team: id.split_once('/').map(|(t, _)| t.to_owned()).or(Some("lab".into())),
+            team: id
+                .split_once('/')
+                .map(|(t, _)| t.to_owned())
+                .or(Some("lab".into())),
             hostname: Some(host.into()),
             os: Some(os.into()),
             os_user: Some(host.replace("dev-", "")),
@@ -307,9 +345,27 @@ impl Demo {
             last_seen: seen(id),
         };
         let clients = vec![
-            device("claude-code-mock", "dev-mac-07", "macOS 15", "dev.kim@example.com", Some(now - 30 * DAY)),
-            device("personal-mock", "dev-mac-02", "macOS 14", "dev.lee@example.com", Some(now - 21 * DAY)),
-            device("lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4", "dev-win-11", "Windows 11", "dev.park@example.com", Some(now - 9 * DAY)),
+            device(
+                "claude-code-mock",
+                "dev-mac-07",
+                "macOS 15",
+                "dev.kim@example.com",
+                Some(now - 30 * DAY),
+            ),
+            device(
+                "personal-mock",
+                "dev-mac-02",
+                "macOS 14",
+                "dev.lee@example.com",
+                Some(now - 21 * DAY),
+            ),
+            device(
+                "lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4",
+                "dev-win-11",
+                "Windows 11",
+                "dev.park@example.com",
+                Some(now - 9 * DAY),
+            ),
             Device {
                 client_id: "repoguard-codex-main/s14".into(),
                 first_seen: Some(now - 4 * DAY),
@@ -326,10 +382,22 @@ impl Demo {
             updated_at: Some(at),
         };
         let projects = vec![
-            project("claude-code-mock", "/Users/dev/src/payments-service", now - 30 * DAY),
+            project(
+                "claude-code-mock",
+                "/Users/dev/src/payments-service",
+                now - 30 * DAY,
+            ),
             project("claude-code-mock", "/Users/dev/src/infra", now - 12 * DAY),
-            project("personal-mock", "/Users/dev/src/payments-service", now - 21 * DAY),
-            project("lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4", "C:/work/billing-api", now - 9 * DAY),
+            project(
+                "personal-mock",
+                "/Users/dev/src/payments-service",
+                now - 21 * DAY,
+            ),
+            project(
+                "lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4",
+                "C:/work/billing-api",
+                now - 9 * DAY,
+            ),
         ];
         let users = ["dev.kim", "dev.lee", "dev.park", "ci-bot"]
             .iter()
@@ -351,7 +419,12 @@ impl Demo {
         let mut keys = vec![
             key("k-7f3a", "dev.kim", now - 30 * DAY, Some(now - 2 * MIN)),
             key("k-21c9", "dev.lee", now - 21 * DAY, seen("personal-mock")),
-            key("k-9e04", "dev.park", now - 9 * DAY, Some(now - DAY - 2 * 60 * MIN)),
+            key(
+                "k-9e04",
+                "dev.park",
+                now - 9 * DAY,
+                Some(now - DAY - 2 * 60 * MIN),
+            ),
             key("k-c1b0", "ci-bot", now - 14 * DAY, Some(now - 6 * 60 * MIN)),
         ];
         let stopped = now - DAY - 60 * MIN;
@@ -363,7 +436,12 @@ impl Demo {
             k.last_denied_at = Some(stopped + 55 * MIN);
             k.denied_count = Some(2);
         }
-        let event = |kind: &str, user: &str, key: &str, at: i64, actor: Option<&str>, reason: Option<&str>| KeyEvent {
+        let event = |kind: &str,
+                     user: &str,
+                     key: &str,
+                     at: i64,
+                     actor: Option<&str>,
+                     reason: Option<&str>| KeyEvent {
             kind: kind.into(),
             actor: actor.map(str::to_owned),
             reason: reason.map(str::to_owned),
@@ -377,29 +455,62 @@ impl Demo {
             .iter()
             .map(|k| {
                 let user = k.user_email.trim_end_matches("@example.com").to_owned();
-                event("issued", &user, &k.key_id, k.created_at.unwrap_or(now), Some("security-admin"), None)
+                event(
+                    "issued",
+                    &user,
+                    &k.key_id,
+                    k.created_at.unwrap_or(now),
+                    Some("security-admin"),
+                    None,
+                )
             })
             .collect();
-        events.push(event("revoked", "dev.park", "k-9e04", stopped, Some("security-admin"),
-            Some("사용자가 승인했지만 main 브랜치 강제 푸시였음")));
-        for (i, at) in [stopped + 40 * MIN, stopped + 55 * MIN].into_iter().enumerate() {
+        events.push(event(
+            "revoked",
+            "dev.park",
+            "k-9e04",
+            stopped,
+            Some("security-admin"),
+            Some("사용자가 승인했지만 main 브랜치 강제 푸시였음"),
+        ));
+        for (i, at) in [stopped + 40 * MIN, stopped + 55 * MIN]
+            .into_iter()
+            .enumerate()
+        {
             let mut e = event("denied", "dev.park", "k-9e04", at, None, None);
             e.client_id = Some("lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4".into());
             e.session_id = Some(format!("demo-denied-{i}"));
             events.push(e);
         }
         events.sort_by_key(|e| std::cmp::Reverse(e.at));
-        Inventory { clients, projects, users, keys, events, sessions }
+        Inventory {
+            clients,
+            projects,
+            users,
+            keys,
+            events,
+            sessions,
+        }
     }
 
     /// The demo's key actions, so the pages can be tried: issue a key, revoke one, stop a person.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn issue_key(&mut self, now: i64, email: &str, actor: &str, note: &str) -> (String, String) {
+    pub fn issue_key(
+        &mut self,
+        now: i64,
+        email: &str,
+        actor: &str,
+        note: &str,
+    ) -> (String, String) {
         let inventory = self.inventory.get_or_insert_with(Default::default);
         let key_id = format!("k-{:04x}", (now / 1000) % 0xffff);
         let secret = format!("whk_demo_{:x}", now);
         if !inventory.users.iter().any(|u| u.email == email) {
-            inventory.users.push(crate::model::Person { email: email.into(), created_at: Some(now), kind: Some("person".into()) });
+            inventory.users.push(crate::model::Person {
+                email: email.into(),
+                created_at: Some(now),
+                kind: Some("person".into()),
+            });
         }
         inventory.keys.push(crate::model::ApiKey {
             key_id: key_id.clone(),
@@ -409,19 +520,29 @@ impl Demo {
             note: Some(note.into()).filter(|n: &String| !n.is_empty()),
             ..Default::default()
         });
-        inventory.events.insert(0, crate::model::KeyEvent {
-            kind: "issued".into(),
-            actor: Some(actor.into()),
-            user_email: Some(email.into()),
-            key_id: Some(key_id.clone()),
-            at: Some(now),
-            ..Default::default()
-        });
+        inventory.events.insert(
+            0,
+            crate::model::KeyEvent {
+                kind: "issued".into(),
+                actor: Some(actor.into()),
+                user_email: Some(email.into()),
+                key_id: Some(key_id.clone()),
+                at: Some(now),
+                ..Default::default()
+            },
+        );
         (key_id, secret)
     }
 
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn revoke(&mut self, now: i64, key_id: Option<&str>, email: Option<&str>, actor: &str, reason: &str) -> usize {
+    pub fn revoke(
+        &mut self,
+        now: i64,
+        key_id: Option<&str>,
+        email: Option<&str>,
+        actor: &str,
+        reason: &str,
+    ) -> usize {
         let inventory = self.inventory.get_or_insert_with(Default::default);
         let mut done = Vec::new();
         for k in inventory.keys.iter_mut().filter(|k| k.revoked_at.is_none()) {
@@ -433,15 +554,18 @@ impl Demo {
             }
         }
         for (key, user) in &done {
-            inventory.events.insert(0, crate::model::KeyEvent {
-                kind: "revoked".into(),
-                actor: Some(actor.into()),
-                reason: Some(reason.into()),
-                user_email: Some(user.clone()),
-                key_id: Some(key.clone()),
-                at: Some(now),
-                ..Default::default()
-            });
+            inventory.events.insert(
+                0,
+                crate::model::KeyEvent {
+                    kind: "revoked".into(),
+                    actor: Some(actor.into()),
+                    reason: Some(reason.into()),
+                    user_email: Some(user.clone()),
+                    key_id: Some(key.clone()),
+                    at: Some(now),
+                    ..Default::default()
+                },
+            );
         }
         done.len()
     }

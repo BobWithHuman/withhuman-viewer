@@ -41,13 +41,21 @@ impl Check {
 
 /// Every machine with Calls, checked against the setup and the allowlists; the machines that
 /// break the most first.
-pub(super) fn checks(facts: &[CallFact], p: &Posture, mcp: &[String], hosts: &[String]) -> Vec<Check> {
+pub(super) fn checks(
+    facts: &[CallFact],
+    p: &Posture,
+    mcp: &[String],
+    hosts: &[String],
+) -> Vec<Check> {
     let listed = |list: &[String], v: &str| list.iter().any(|a| a.eq_ignore_ascii_case(v));
     let mut by: std::collections::BTreeMap<String, Check> = std::collections::BTreeMap::new();
     let mut latest: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     for f in facts {
         let name = machine_of_fact(f);
-        let c = by.entry(name.clone()).or_insert_with(|| Check { name: name.clone(), ..Check::default() });
+        let c = by.entry(name.clone()).or_insert_with(|| Check {
+            name: name.clone(),
+            ..Check::default()
+        });
         c.calls += 1;
         c.last = c.last.max(f.at);
         if let (Some(mode), Some(at)) = (&f.mode, f.at)
@@ -75,13 +83,25 @@ pub(super) fn checks(facts: &[CallFact], p: &Posture, mcp: &[String], hosts: &[S
             c.safeguard.push(f.clone());
         }
     }
-    let mark = |on: bool, broken: bool| Some(if !on { Mark::Off } else if broken { Mark::Broken } else { Mark::Kept });
+    let mark = |on: bool, broken: bool| {
+        Some(if !on {
+            Mark::Off
+        } else if broken {
+            Mark::Broken
+        } else {
+            Mark::Kept
+        })
+    };
     let mut list: Vec<Check> = by
         .into_values()
         .map(|mut c| {
             c.marks = [
                 mark(p.enforce, c.mode.as_deref() != Some("enforce")),
-                Some(if c.undecided.len() > p.undecided as usize { Mark::Broken } else { Mark::Kept }),
+                Some(if c.undecided.len() > p.undecided as usize {
+                    Mark::Broken
+                } else {
+                    Mark::Kept
+                }),
                 mark(p.mcp_listed && !mcp.is_empty(), !c.off_mcp.is_empty()),
                 mark(p.hosts_listed && !hosts.is_empty(), !c.off_hosts.is_empty()),
                 mark(p.no_safeguard, !c.safeguard.is_empty()),
@@ -125,18 +145,47 @@ mod tests {
         let rules = Posture::default();
         let list = checks(&facts, &rules, &["github".into()], &[]);
         let a = list.iter().find(|c| c.name == "a").unwrap();
-        assert_eq!(a.marks[0], Some(Mark::Kept), "its latest decision was enforced");
-        assert_eq!(a.marks[1], Some(Mark::Broken), "one undecided Call, none allowed");
+        assert_eq!(
+            a.marks[0],
+            Some(Mark::Kept),
+            "its latest decision was enforced"
+        );
+        assert_eq!(
+            a.marks[1],
+            Some(Mark::Broken),
+            "one undecided Call, none allowed"
+        );
         assert_eq!(a.marks[2], Some(Mark::Broken), "slack is not on the list");
-        assert_eq!(a.marks[3], Some(Mark::Off), "the host rule is off by default");
+        assert_eq!(
+            a.marks[3],
+            Some(Mark::Off),
+            "the host rule is off by default"
+        );
         let b = list.iter().find(|c| c.name == "b").unwrap();
         assert_eq!(b.marks[4], Some(Mark::Broken));
         assert!(!list.iter().find(|c| c.name == "c").unwrap().failing());
-        assert_eq!(list.last().unwrap().name, "c", "the machine that kept everything last");
+        assert_eq!(
+            list.last().unwrap().name,
+            "c",
+            "the machine that kept everything last"
+        );
         // An empty allowlist checks nothing.
-        assert_eq!(checks(&facts, &rules, &[], &[])[0].marks[2], Some(Mark::Off));
+        assert_eq!(
+            checks(&facts, &rules, &[], &[])[0].marks[2],
+            Some(Mark::Off)
+        );
         // One undecided Call allowed.
-        let loose = Posture { undecided: 1, ..Posture::default() };
-        assert_eq!(checks(&facts, &loose, &[], &[]).iter().find(|c| c.name == "a").unwrap().marks[1], Some(Mark::Kept));
+        let loose = Posture {
+            undecided: 1,
+            ..Posture::default()
+        };
+        assert_eq!(
+            checks(&facts, &loose, &[], &[])
+                .iter()
+                .find(|c| c.name == "a")
+                .unwrap()
+                .marks[1],
+            Some(Mark::Kept)
+        );
     }
 }

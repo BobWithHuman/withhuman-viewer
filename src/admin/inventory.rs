@@ -82,7 +82,9 @@ fn device_rows(inv: &Inventory, now: i64, window: i64) -> Vec<DeviceRow> {
         .map(|d| {
             let runs = by.get(d.client_id.as_str()).cloned().unwrap_or_default();
             let is_running = runs.iter().any(|r| running(r, now, window));
-            let last = d.last_seen.max(runs.iter().filter_map(|r| r.last_seen_at).max());
+            let last = d
+                .last_seen
+                .max(runs.iter().filter_map(|r| r.last_seen_at).max());
             let latest = runs.iter().max_by_key(|r| r.last_seen_at.or(r.created_at));
             let state = if d.registered_at.is_none() {
                 State::Unregistered
@@ -99,7 +101,10 @@ fn device_rows(inv: &Inventory, now: i64, window: i64) -> Vec<DeviceRow> {
                 sessions: runs.len(),
                 last,
                 permission_mode: latest.and_then(|r| r.permission_mode.clone()),
-                user: d.user_email.clone().or_else(|| latest.and_then(|r| r.user_email.clone())),
+                user: d
+                    .user_email
+                    .clone()
+                    .or_else(|| latest.and_then(|r| r.user_email.clone())),
                 device: d.clone(),
             }
         })
@@ -138,11 +143,25 @@ fn person_rows(inv: &Inventory) -> Vec<PersonRow> {
         .into_iter()
         .map(|email| {
             let keys: Vec<_> = inv.keys.iter().filter(|k| k.user_email == email).collect();
-            let runs: Vec<_> = inv.sessions.iter().filter(|r| r.user_email.as_deref() == Some(&email)).collect();
-            let mut devices: HashSet<&str> = runs.iter().filter_map(|r| r.client_id.as_deref()).collect();
-            devices.extend(inv.clients.iter().filter(|c| c.user_email.as_deref() == Some(&email)).map(|c| c.client_id.as_str()));
+            let runs: Vec<_> = inv
+                .sessions
+                .iter()
+                .filter(|r| r.user_email.as_deref() == Some(&email))
+                .collect();
+            let mut devices: HashSet<&str> =
+                runs.iter().filter_map(|r| r.client_id.as_deref()).collect();
+            devices.extend(
+                inv.clients
+                    .iter()
+                    .filter(|c| c.user_email.as_deref() == Some(&email))
+                    .map(|c| c.client_id.as_str()),
+            );
             PersonRow {
-                kind: inv.users.iter().find(|u| u.email == email).and_then(|u| u.kind.clone()),
+                kind: inv
+                    .users
+                    .iter()
+                    .find(|u| u.email == email)
+                    .and_then(|u| u.kind.clone()),
                 devices: devices.len(),
                 sessions: runs.len(),
                 active_keys: keys.iter().filter(|k| k.revoked_at.is_none()).count(),
@@ -162,9 +181,16 @@ fn person_rows(inv: &Inventory) -> Vec<PersonRow> {
 #[derive(Clone, Debug, PartialEq)]
 enum Ask {
     Issue(String),
-    RevokeKey { key_id: String, email: String },
+    RevokeKey {
+        key_id: String,
+        email: String,
+    },
     StopPerson(String),
-    Issued { email: String, key_id: String, key: String },
+    Issued {
+        email: String,
+        key_id: String,
+        key: String,
+    },
     Admin,
 }
 
@@ -196,11 +222,12 @@ pub fn InventoryPage() -> Element {
         Load::Ready(list) => list.iter().map(|s| (s.id.clone(), s.clone())).collect(),
         _ => HashMap::new(),
     };
-    let (inv, failed, loaded): (Option<Inventory>, Option<String>, Option<i64>) = match &*found.read() {
-        Some((Ok(i), at)) => (i.clone(), None, Some(*at)),
-        Some((Err(e), at)) => (None, Some(e.clone()), Some(*at)),
-        None => (None, None, None),
-    };
+    let (inv, failed, loaded): (Option<Inventory>, Option<String>, Option<i64>) =
+        match &*found.read() {
+            Some((Ok(i), at)) => (i.clone(), None, Some(*at)),
+            Some((Err(e), at)) => (None, Some(e.clone()), Some(*at)),
+            None => (None, None, None),
+        };
     let loading = found.read().is_none();
     let at = clock(loaded);
     let source = p.store();
@@ -254,19 +281,42 @@ pub fn InventoryPage() -> Element {
 
     let devices = device_rows(&inv, now, window());
     let people = person_rows(&inv);
-    let registered: Vec<&DeviceRow> = devices.iter().filter(|d| d.state != State::Unregistered).collect();
+    let registered: Vec<&DeviceRow> = devices
+        .iter()
+        .filter(|d| d.state != State::Unregistered)
+        .collect();
     let unregistered = devices.len() - registered.len();
     let protected_running = devices.iter().filter(|d| d.running).count();
-    let running_sessions = inv.sessions.iter().filter(|r| running(r, now, window())).count();
-    let installed_only = registered.iter().filter(|d| d.state == State::InstalledOnly).count();
+    let running_sessions = inv
+        .sessions
+        .iter()
+        .filter(|r| running(r, now, window()))
+        .count();
+    let installed_only = registered
+        .iter()
+        .filter(|d| d.state == State::InstalledOnly)
+        .count();
     let idle = registered.iter().filter(|d| d.state == State::Idle).count();
-    let no_id: Vec<&SessionRun> = inv.sessions.iter().filter(|r| r.client_id.is_none()).collect();
+    let no_id: Vec<&SessionRun> = inv
+        .sessions
+        .iter()
+        .filter(|r| r.client_id.is_none())
+        .collect();
     let host: HashMap<&str, String> = inv
         .clients
         .iter()
-        .map(|c| (c.client_id.as_str(), c.hostname.clone().unwrap_or_else(|| c.client_id.clone())))
+        .map(|c| {
+            (
+                c.client_id.as_str(),
+                c.hostname.clone().unwrap_or_else(|| c.client_id.clone()),
+            )
+        })
         .collect();
-    let shown_devices: Vec<DeviceRow> = devices.iter().filter(|d| all() || d.state != State::Unregistered).cloned().collect();
+    let shown_devices: Vec<DeviceRow> = devices
+        .iter()
+        .filter(|d| all() || d.state != State::Unregistered)
+        .cloned()
+        .collect();
     let device = picked_device()
         .and_then(|id| devices.iter().find(|d| d.device.client_id == id).cloned())
         .or_else(|| shown_devices.first().cloned());
@@ -274,7 +324,9 @@ pub fn InventoryPage() -> Element {
         .and_then(|e| people.iter().find(|p| p.email == e).cloned())
         .or_else(|| people.first().cloned());
     let mut runs: Vec<SessionRun> = inv.sessions.clone();
-    runs.sort_by_key(|r| std::cmp::Reverse((running(r, now, window()), r.last_seen_at.or(r.created_at))));
+    runs.sort_by_key(|r| {
+        std::cmp::Reverse((running(r, now, window()), r.last_seen_at.or(r.created_at)))
+    });
 
     rsx! {
         div { class: "home admin inventory",
@@ -439,14 +491,26 @@ pub fn InventoryPage() -> Element {
 
 /// One session as the inventory lists it; it opens on the route map when the graph has it.
 #[component]
-fn RunRow(run: SessionRun, host: Option<String>, title: Option<Session>, is_running: bool) -> Element {
+fn RunRow(
+    run: SessionRun,
+    host: Option<String>,
+    title: Option<Session>,
+    is_running: bool,
+) -> Element {
     let mut state = use_context::<AppState>();
     let id = run.session_id.clone();
     let opens = title.is_some();
-    let what = title.as_ref().map_or_else(|| run.session_id.chars().take(8).collect::<String>(), |s| {
-        let folder = s.folder();
-        if folder.is_empty() { s.title().to_owned() } else { format!("{folder} · {}", s.title()) }
-    });
+    let what = title.as_ref().map_or_else(
+        || run.session_id.chars().take(8).collect::<String>(),
+        |s| {
+            let folder = s.folder();
+            if folder.is_empty() {
+                s.title().to_owned()
+            } else {
+                format!("{folder} · {}", s.title())
+            }
+        },
+    );
     let source = match run.start_source.as_deref() {
         Some("startup") => "새로 시작",
         Some("resume") => "이어 하기",
@@ -456,13 +520,17 @@ fn RunRow(run: SessionRun, host: Option<String>, title: Option<Session>, is_runn
         _ => "–",
     };
     let ended = match (run.ended_at, run.end_reason.as_deref()) {
-        (Some(t), r) => format!("{} · {}", clock(Some(t)), match r {
-            Some("prompt_input_exit") => "종료",
-            Some("logout") => "로그아웃",
-            Some("clear") => "지움",
-            Some("resume") => "이어 하기로",
-            _ => "끝남",
-        }),
+        (Some(t), r) => format!(
+            "{} · {}",
+            clock(Some(t)),
+            match r {
+                Some("prompt_input_exit") => "종료",
+                Some("logout") => "로그아웃",
+                Some("clear") => "지움",
+                Some("resume") => "이어 하기로",
+                _ => "끝남",
+            }
+        ),
         (None, _) if is_running => "–".into(),
         (None, _) => "신호 끊김".into(),
     };
@@ -492,12 +560,27 @@ fn RunRow(run: SessionRun, host: Option<String>, title: Option<Session>, is_runn
 
 /// A machine told: what it said at install, its projects, its latest sessions, its person.
 #[component]
-fn DeviceDetail(row: DeviceRow, inv: Inventory, titles: HashMap<String, Session>, ask: Signal<Option<Ask>>) -> Element {
+fn DeviceDetail(
+    row: DeviceRow,
+    inv: Inventory,
+    titles: HashMap<String, Session>,
+    ask: Signal<Option<Ask>>,
+) -> Element {
     let mut state = use_context::<AppState>();
     let mut ask = ask;
     let d = row.device.clone();
-    let projects: Vec<_> = inv.projects.iter().filter(|p| p.client_id == d.client_id).cloned().collect();
-    let mut runs: Vec<SessionRun> = inv.sessions.iter().filter(|r| r.client_id.as_deref() == Some(&d.client_id)).cloned().collect();
+    let projects: Vec<_> = inv
+        .projects
+        .iter()
+        .filter(|p| p.client_id == d.client_id)
+        .cloned()
+        .collect();
+    let mut runs: Vec<SessionRun> = inv
+        .sessions
+        .iter()
+        .filter(|r| r.client_id.as_deref() == Some(&d.client_id))
+        .cloned()
+        .collect();
     runs.sort_by_key(|r| std::cmp::Reverse(r.last_seen_at.or(r.created_at)));
     runs.truncate(8);
     let text = |v: &Option<String>| v.clone().unwrap_or_else(|| "–".into());
@@ -554,9 +637,20 @@ fn DeviceDetail(row: DeviceRow, inv: Inventory, titles: HashMap<String, Session>
 #[component]
 fn PersonDetail(row: PersonRow, inv: Inventory, ask: Signal<Option<Ask>>) -> Element {
     let mut ask = ask;
-    let mut keys: Vec<_> = inv.keys.iter().filter(|k| k.user_email == row.email).cloned().collect();
+    let mut keys: Vec<_> = inv
+        .keys
+        .iter()
+        .filter(|k| k.user_email == row.email)
+        .cloned()
+        .collect();
     keys.sort_by_key(|k| (k.revoked_at.is_some(), std::cmp::Reverse(k.created_at)));
-    let events: Vec<_> = inv.events.iter().filter(|e| e.user_email.as_deref() == Some(&row.email)).take(8).cloned().collect();
+    let events: Vec<_> = inv
+        .events
+        .iter()
+        .filter(|e| e.user_email.as_deref() == Some(&row.email))
+        .take(8)
+        .cloned()
+        .collect();
     let email = row.email.clone();
     let issue_for = row.email.clone();
     rsx! {
@@ -631,7 +725,12 @@ fn me() -> String {
 /// The dialog over the page: a key to issue, a key or a person to stop, a key shown once, the
 /// admin API's connection.
 #[component]
-fn Dialog(ask: Ask, ask_signal: Signal<Option<Ask>>, note: Signal<Option<(bool, String)>>, bump: Signal<u32>) -> Element {
+fn Dialog(
+    ask: Ask,
+    ask_signal: Signal<Option<Ask>>,
+    note: Signal<Option<(bool, String)>>,
+    bump: Signal<u32>,
+) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let mut ask_signal = ask_signal;
@@ -697,9 +796,21 @@ fn Dialog(ask: Ask, ask_signal: Signal<Option<Ask>>, note: Signal<Option<(bool, 
         },
         other => {
             let (title, about, needs_reason) = match &other {
-                Ask::Issue(_) => ("키 발급", "사용자에게 엔진 키를 새로 발급합니다. 키는 발급 직후 한 번만 보입니다.", false),
-                Ask::RevokeKey { .. } => ("키 회수", "이 키로 오는 도구 호출을 엔진이 막습니다. 되돌리려면 새 키를 발급해야 합니다.", true),
-                _ => ("사용자 멈추기", "이 사용자의 키를 모두 회수합니다. 그 사람의 에이전트가 하는 도구 호출을 엔진이 막고, 거부된 호출은 감사의 킬스위치 기록에 남습니다.", true),
+                Ask::Issue(_) => (
+                    "키 발급",
+                    "사용자에게 엔진 키를 새로 발급합니다. 키는 발급 직후 한 번만 보입니다.",
+                    false,
+                ),
+                Ask::RevokeKey { .. } => (
+                    "키 회수",
+                    "이 키로 오는 도구 호출을 엔진이 막습니다. 되돌리려면 새 키를 발급해야 합니다.",
+                    true,
+                ),
+                _ => (
+                    "사용자 멈추기",
+                    "이 사용자의 키를 모두 회수합니다. 그 사람의 에이전트가 하는 도구 호출을 엔진이 막고, 거부된 호출은 감사의 킬스위치 기록에 남습니다.",
+                    true,
+                ),
             };
             let target = match &other {
                 Ask::RevokeKey { key_id, email } => format!("{email} · {key_id}"),
@@ -794,7 +905,12 @@ mod tests {
             ..Device::default()
         };
         let inv = Inventory {
-            clients: vec![device("a", true), device("b", true), device("c", true), device("bench/x", false)],
+            clients: vec![
+                device("a", true),
+                device("b", true),
+                device("c", true),
+                device("bench/x", false),
+            ],
             sessions: vec![
                 run(Some("a"), Some("kim"), now - 2 * MIN, None),
                 run(Some("b"), Some("lee"), now - 60 * MIN, None),
@@ -803,12 +919,26 @@ mod tests {
             ..Inventory::default()
         };
         let rows = device_rows(&inv, now, 10 * MIN);
-        let state = |id: &str| rows.iter().find(|r| r.device.client_id == id).unwrap().state;
+        let state = |id: &str| {
+            rows.iter()
+                .find(|r| r.device.client_id == id)
+                .unwrap()
+                .state
+        };
         assert_eq!(state("a"), State::Running);
-        assert_eq!(state("b"), State::Idle, "heard from, but not within the window");
+        assert_eq!(
+            state("b"),
+            State::Idle,
+            "heard from, but not within the window"
+        );
         assert_eq!(state("c"), State::InstalledOnly);
         assert_eq!(state("bench/x"), State::Unregistered);
-        assert!(rows.iter().find(|r| r.device.client_id == "bench/x").unwrap().running);
+        assert!(
+            rows.iter()
+                .find(|r| r.device.client_id == "bench/x")
+                .unwrap()
+                .running
+        );
         assert_eq!(rows[0].device.client_id, "a", "running first");
     }
 
@@ -822,8 +952,16 @@ mod tests {
             ..ApiKey::default()
         };
         let inv = Inventory {
-            keys: vec![key("k1", "kim", false), key("k2", "park", true), key("k3", "lee", true), key("k4", "lee", false)],
-            sessions: vec![run(Some("a"), Some("kim"), 10, None), run(Some("b"), Some("kim"), 20, None)],
+            keys: vec![
+                key("k1", "kim", false),
+                key("k2", "park", true),
+                key("k3", "lee", true),
+                key("k4", "lee", false),
+            ],
+            sessions: vec![
+                run(Some("a"), Some("kim"), 10, None),
+                run(Some("b"), Some("kim"), 20, None),
+            ],
             ..Inventory::default()
         };
         let rows = person_rows(&inv);

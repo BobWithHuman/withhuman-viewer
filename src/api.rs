@@ -73,9 +73,19 @@ impl Backend {
             Ok(self.demo.lock().expect("demo lock").sessions())
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres { settings: &settings, pool: &self.pg }.sessions().await
+                crate::pg::Postgres {
+                    settings: &settings,
+                    pool: &self.pg,
+                }
+                .sessions()
+                .await
             } else {
-                Neo4j { client: &self.client, settings: &settings }.sessions().await
+                Neo4j {
+                    client: &self.client,
+                    settings: &settings,
+                }
+                .sessions()
+                .await
             }
         };
         typed(value)
@@ -87,9 +97,19 @@ impl Backend {
             self.demo.lock().expect("demo lock").graph(session)
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres { settings: &settings, pool: &self.pg }.graph(session).await
+                crate::pg::Postgres {
+                    settings: &settings,
+                    pool: &self.pg,
+                }
+                .graph(session)
+                .await
             } else {
-                Neo4j { client: &self.client, settings: &settings }.graph(session).await
+                Neo4j {
+                    client: &self.client,
+                    settings: &settings,
+                }
+                .graph(session)
+                .await
             }
         };
         typed(value)
@@ -101,9 +121,19 @@ impl Backend {
             Ok(self.demo.lock().expect("demo lock").node(session, seq))
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres { settings: &settings, pool: &self.pg }.node(session, seq).await
+                crate::pg::Postgres {
+                    settings: &settings,
+                    pool: &self.pg,
+                }
+                .node(session, seq)
+                .await
             } else {
-                Neo4j { client: &self.client, settings: &settings }.node(session, seq).await
+                Neo4j {
+                    client: &self.client,
+                    settings: &settings,
+                }
+                .node(session, seq)
+                .await
             }
         };
         typed(value)
@@ -117,9 +147,19 @@ impl Backend {
             Ok(self.demo.lock().expect("demo lock").call_facts())
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres { settings: &settings, pool: &self.pg }.call_facts().await
+                crate::pg::Postgres {
+                    settings: &settings,
+                    pool: &self.pg,
+                }
+                .call_facts()
+                .await
             } else {
-                Neo4j { client: &self.client, settings: &settings }.call_facts().await
+                Neo4j {
+                    client: &self.client,
+                    settings: &settings,
+                }
+                .call_facts()
+                .await
             }
         };
         typed(value)
@@ -133,9 +173,19 @@ impl Backend {
             Ok(self.demo.lock().expect("demo lock").secrets())
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres { settings: &settings, pool: &self.pg }.secrets().await
+                crate::pg::Postgres {
+                    settings: &settings,
+                    pool: &self.pg,
+                }
+                .secrets()
+                .await
             } else {
-                Neo4j { client: &self.client, settings: &settings }.secrets().await
+                Neo4j {
+                    client: &self.client,
+                    settings: &settings,
+                }
+                .secrets()
+                .await
             }
         };
         typed(value)
@@ -147,12 +197,19 @@ impl Backend {
     pub async fn inventory(&self) -> Result<Option<crate::model::Inventory>, String> {
         let settings = self.current();
         if settings.demo {
-            return Ok(Some(self.demo.lock().expect("demo lock").inventory(now_ms())));
+            return Ok(Some(
+                self.demo.lock().expect("demo lock").inventory(now_ms()),
+            ));
         }
         if !crate::pg::is_postgres(&settings) {
             return Ok(None);
         }
-        let value = crate::pg::Postgres { settings: &settings, pool: &self.pg }.inventory().await;
+        let value = crate::pg::Postgres {
+            settings: &settings,
+            pool: &self.pg,
+        }
+        .inventory()
+        .await;
         match value {
             Ok(Value::Null) => Ok(None),
             other => typed(other).map(Some),
@@ -171,27 +228,64 @@ impl Backend {
 
     /// Issues a key to a person: its id, and the key itself, shown this once.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn issue_key(&self, email: &str, actor: &str, note: &str) -> Result<(String, String), String> {
+    pub async fn issue_key(
+        &self,
+        email: &str,
+        actor: &str,
+        note: &str,
+    ) -> Result<(String, String), String> {
         if self.current().demo {
-            return Ok(self.demo.lock().expect("demo lock").issue_key(now_ms(), email, actor, note));
+            return Ok(self.demo.lock().expect("demo lock").issue_key(
+                now_ms(),
+                email,
+                actor,
+                note,
+            ));
         }
         let answer = self
-            .admin(&["v1", "admin", "users", email, "keys"], json!({"actor": actor, "note": note}))
+            .admin(
+                &["v1", "admin", "users", email, "keys"],
+                json!({"actor": actor, "note": note}),
+            )
             .await?;
-        let text = |k: &str| answer.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+        let text = |k: &str| {
+            answer
+                .get(k)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         Ok((text("key_id"), text("key")))
     }
 
     /// Revokes one key, or every key of a person (the person's kill switch): how many were revoked.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn revoke(&self, key_id: Option<&str>, email: Option<&str>, actor: &str, reason: &str) -> Result<usize, String> {
+    pub async fn revoke(
+        &self,
+        key_id: Option<&str>,
+        email: Option<&str>,
+        actor: &str,
+        reason: &str,
+    ) -> Result<usize, String> {
         if self.current().demo {
-            return Ok(self.demo.lock().expect("demo lock").revoke(now_ms(), key_id, email, actor, reason));
+            return Ok(self.demo.lock().expect("demo lock").revoke(
+                now_ms(),
+                key_id,
+                email,
+                actor,
+                reason,
+            ));
         }
         let body = json!({"actor": actor, "reason": reason});
         let answer = match (key_id, email) {
-            (Some(id), _) => self.admin(&["v1", "admin", "keys", id, "revoke"], body).await?,
-            (None, Some(e)) => self.admin(&["v1", "admin", "users", e, "revoke"], body).await?,
+            (Some(id), _) => {
+                self.admin(&["v1", "admin", "keys", id, "revoke"], body)
+                    .await?
+            }
+            (None, Some(e)) => {
+                self.admin(&["v1", "admin", "users", e, "revoke"], body)
+                    .await?
+            }
             (None, None) => return Ok(0),
         };
         Ok(answer.as_array().map_or(1, Vec::len))
@@ -212,7 +306,10 @@ impl Backend {
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn mcp_change(&self, change: crate::model::McpChange) -> Result<(), String> {
         if self.current().demo {
-            self.demo.lock().expect("demo lock").mcp_change(now_ms(), &change);
+            self.demo
+                .lock()
+                .expect("demo lock")
+                .mcp_change(now_ms(), &change);
             return Ok(());
         }
         Err("게이트웨이에 MCP 허용 목록을 바꾸는 API가 아직 없습니다.".into())
@@ -224,7 +321,8 @@ impl Backend {
         let token = settings
             .admin_token()
             .ok_or("엔진 관리 토큰이 없습니다. 인벤토리의 '관리 API 연결'에서 넣어 주세요.")?;
-        let mut url = reqwest::Url::parse(&settings.engine_api).map_err(|e| format!("엔진 관리 API 주소를 읽지 못했습니다: {e}"))?;
+        let mut url = reqwest::Url::parse(&settings.engine_api)
+            .map_err(|e| format!("엔진 관리 API 주소를 읽지 못했습니다: {e}"))?;
         url.path_segments_mut()
             .map_err(|_| "엔진 관리 API 주소가 올바르지 않습니다.".to_owned())?
             .pop_if_empty()
@@ -236,7 +334,12 @@ impl Backend {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("엔진 관리 API({})에 닿지 않습니다: {e}", settings.engine_api))?;
+            .map_err(|e| {
+                format!(
+                    "엔진 관리 API({})에 닿지 않습니다: {e}",
+                    settings.engine_api
+                )
+            })?;
         let status = response.status().as_u16();
         let answer: Value = response.json().await.unwrap_or(Value::Null);
         match status {
@@ -260,9 +363,19 @@ impl Backend {
             Ok(self.demo.lock().expect("demo lock").calls(sessions))
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres { settings: &settings, pool: &self.pg }.calls(sessions).await
+                crate::pg::Postgres {
+                    settings: &settings,
+                    pool: &self.pg,
+                }
+                .calls(sessions)
+                .await
             } else {
-                Neo4j { client: &self.client, settings: &settings }.calls(sessions).await
+                Neo4j {
+                    client: &self.client,
+                    settings: &settings,
+                }
+                .calls(sessions)
+                .await
             }
         };
         typed(value)
@@ -275,9 +388,19 @@ impl Backend {
             self.demo.lock().expect("demo lock").delete(session)
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres { settings: &settings, pool: &self.pg }.delete_session(session).await
+                crate::pg::Postgres {
+                    settings: &settings,
+                    pool: &self.pg,
+                }
+                .delete_session(session)
+                .await
             } else {
-                Neo4j { client: &self.client, settings: &settings }.delete_session(session).await
+                Neo4j {
+                    client: &self.client,
+                    settings: &settings,
+                }
+                .delete_session(session)
+                .await
             }
         };
         value
@@ -306,7 +429,9 @@ impl Backend {
         if std::env::var("VIEWER_ONBOARD").is_ok_and(|v| v == "1") {
             return true;
         }
-        if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") || std::env::var("VIEWER_DB").is_ok() {
+        if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1")
+            || std::env::var("VIEWER_DB").is_ok()
+        {
             return false;
         }
         !self.settings.lock().expect("settings lock").jev_saved
@@ -353,7 +478,9 @@ impl Backend {
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
-        Err(format!("엔진은 떴지만 Neo4j가 2분 안에 응답하지 않았습니다. ({last})"))
+        Err(format!(
+            "엔진은 떴지만 Neo4j가 2분 안에 응답하지 않았습니다. ({last})"
+        ))
     }
 
     /// Ends the first launch's setup: keeps the Jev key in the keychain and the connection
@@ -398,11 +525,17 @@ impl Backend {
         let started = Instant::now();
         if crate::pg::is_postgres(&candidate) {
             let pool = crate::pg::Pool::default();
-            let sessions = crate::pg::Postgres { settings: &candidate, pool: &pool }
-                .count_sessions()
-                .await
-                .map_err(|e| e.error)?;
-            return Ok(Probe { sessions, ms: started.elapsed().as_millis() });
+            let sessions = crate::pg::Postgres {
+                settings: &candidate,
+                pool: &pool,
+            }
+            .count_sessions()
+            .await
+            .map_err(|e| e.error)?;
+            return Ok(Probe {
+                sessions,
+                ms: started.elapsed().as_millis(),
+            });
         }
         let db = Neo4j {
             client: &self.client,

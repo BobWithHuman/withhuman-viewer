@@ -177,16 +177,23 @@ impl Filter {
         Self {
             days: self.days,
             machine: self.machine.clone(),
-            ..Self { days: None, ..Self::default() }
+            ..Self {
+                days: None,
+                ..Self::default()
+            }
         }
     }
 
     fn keeps(&self, f: &CallFact, now: i64) -> bool {
         let eq = |want: &Option<String>, have: &str| want.as_deref().is_none_or(|w| w == have);
-        self.since(now).is_none_or(|t| f.at.is_some_and(|at| at >= t))
+        self.since(now)
+            .is_none_or(|t| f.at.is_some_and(|at| at >= t))
             && eq(&self.machine, &machine_of_fact(f))
             && eq(&self.decision, decision_key(f))
-            && self.kind.as_ref().is_none_or(|k| kind_of(f).as_ref() == Some(k))
+            && self
+                .kind
+                .as_ref()
+                .is_none_or(|k| kind_of(f).as_ref() == Some(k))
             && eq(&self.tool, f.tool.as_deref().unwrap_or(""))
             && eq(&self.source, source_of(f))
             && eq(&self.folder, &folder_of(f.cwd.as_deref()))
@@ -233,7 +240,11 @@ impl Risk {
 /// What the engine does with its decisions, from the mode of the latest one.
 fn mode_line(mode: Option<&str>) -> (&'static str, &'static str, &'static str) {
     match mode {
-        Some("enforce") => ("on", "차단 중", "엔진이 판정대로 도구 호출을 막고 있습니다."),
+        Some("enforce") => (
+            "on",
+            "차단 중",
+            "엔진이 판정대로 도구 호출을 막고 있습니다.",
+        ),
         Some("shadow") => (
             "warn",
             "시범 운영 중",
@@ -244,7 +255,11 @@ fn mode_line(mode: Option<&str>) -> (&'static str, &'static str, &'static str) {
             "기록만 하는 중",
             "호출을 막지 않고, 판정은 실행 뒤에 계산합니다.",
         ),
-        _ => ("off", "판정 기록 없음", "아직 엔진이 판정한 호출이 없습니다."),
+        _ => (
+            "off",
+            "판정 기록 없음",
+            "아직 엔진이 판정한 호출이 없습니다.",
+        ),
     }
 }
 
@@ -304,7 +319,11 @@ pub(super) fn machines(sessions: &[Session]) -> Vec<Machine> {
     // The machines with the most to look at first (stopped or hard to undo, then undecided),
     // then the most recently active.
     list.sort_by(|a, b| {
-        (b.denied + b.risky, b.undecided, b.last_at).cmp(&(a.denied + a.risky, a.undecided, a.last_at))
+        (b.denied + b.risky, b.undecided, b.last_at).cmp(&(
+            a.denied + a.risky,
+            a.undecided,
+            a.last_at,
+        ))
     });
     list
 }
@@ -333,7 +352,10 @@ fn coverage(facts: &[CallFact]) -> Coverage {
             entry.1 = true;
         }
     }
-    let mut c = Coverage { active: by.len(), ..Coverage::default() };
+    let mut c = Coverage {
+        active: by.len(),
+        ..Coverage::default()
+    };
     for (latest, undecided) in by.values() {
         match latest.as_ref().map(|(_, m)| m.as_str()) {
             Some("enforce") => c.blocking += 1,
@@ -374,7 +396,11 @@ impl Axis {
             .map_or_else(|| Local::now().date_naive(), |t| t.date_naive());
         Self {
             hourly,
-            n: if hourly { 24 } else { days.unwrap_or(30).clamp(1, 30) as usize },
+            n: if hourly {
+                24
+            } else {
+                days.unwrap_or(30).clamp(1, 30) as usize
+            },
             today,
             this_hour: now - now.rem_euclid(HOUR),
         }
@@ -386,9 +412,14 @@ impl Axis {
             .map(|i| {
                 if self.hourly {
                     let start = self.this_hour - (self.n - 1 - i) as i64 * HOUR;
-                    Local.timestamp_millis_opt(start).single().map_or(String::new(), |t| format!("{}시", t.hour()))
+                    Local
+                        .timestamp_millis_opt(start)
+                        .single()
+                        .map_or(String::new(), |t| format!("{}시", t.hour()))
                 } else {
-                    (first_day + Duration::days(i as i64)).format("%-m/%-d").to_string()
+                    (first_day + Duration::days(i as i64))
+                        .format("%-m/%-d")
+                        .to_string()
                 }
             })
             .collect()
@@ -402,7 +433,9 @@ impl Axis {
             let day = Local.timestamp_millis_opt(at).single()?.date_naive();
             (self.today - day).num_days()
         };
-        (0..self.n as i64).contains(&back).then(|| self.n - 1 - back as usize)
+        (0..self.n as i64)
+            .contains(&back)
+            .then(|| self.n - 1 - back as usize)
     }
 }
 
@@ -412,10 +445,17 @@ fn trend(facts: &[CallFact], days: Option<i64>, now: i64) -> Vec<Bucket> {
     let mut buckets: Vec<Bucket> = axis
         .labels()
         .into_iter()
-        .map(|label| Bucket { label, denied: 0, reviewed: 0, risky: 0 })
+        .map(|label| Bucket {
+            label,
+            denied: 0,
+            reviewed: 0,
+            risky: 0,
+        })
         .collect();
     for f in facts {
-        let Some(i) = f.at.and_then(|at| axis.index(at)) else { continue };
+        let Some(i) = f.at.and_then(|at| axis.index(at)) else {
+            continue;
+        };
         let b = &mut buckets[i];
         match f.decision.as_deref() {
             Some("DENY") => b.denied += 1,
@@ -433,7 +473,8 @@ pub(super) const ALLOWED_IRREVERSIBLE: &str = "allowed_irreversible";
 
 pub(super) fn detection_kind(f: &CallFact) -> Option<String> {
     kind_of(f).or_else(|| {
-        (f.decision.as_deref() == Some("ALLOW") && f.irreversible).then(|| ALLOWED_IRREVERSIBLE.into())
+        (f.decision.as_deref() == Some("ALLOW") && f.irreversible)
+            .then(|| ALLOWED_IRREVERSIBLE.into())
     })
 }
 
@@ -455,7 +496,11 @@ pub(super) fn kind_color(kind: &str) -> &'static str {
 
 /// The Calls worth a look by kind over the period: the axis's labels, each bucket's counts by
 /// kind, and the kinds seen, the most first.
-type ByKind = (Vec<String>, Vec<BTreeMap<String, usize>>, Vec<(String, usize)>);
+type ByKind = (
+    Vec<String>,
+    Vec<BTreeMap<String, usize>>,
+    Vec<(String, usize)>,
+);
 
 fn by_kind(facts: &[CallFact], days: Option<i64>, now: i64) -> ByKind {
     let axis = Axis::new(days, now);
@@ -463,7 +508,9 @@ fn by_kind(facts: &[CallFact], days: Option<i64>, now: i64) -> ByKind {
     let mut buckets = vec![BTreeMap::new(); labels.len()];
     let mut kept = Vec::new();
     for f in facts {
-        let (Some(kind), Some(i)) = (detection_kind(f), f.at.and_then(|at| axis.index(at))) else { continue };
+        let (Some(kind), Some(i)) = (detection_kind(f), f.at.and_then(|at| axis.index(at))) else {
+            continue;
+        };
         *buckets[i].entry(kind.clone()).or_default() += 1;
         kept.push(kind);
     }
@@ -491,7 +538,10 @@ impl Severity {
             "ALLOW" if f.irreversible => Severity::After,
             _ => return None,
         };
-        let worst = matches!(kind_of(f).as_deref(), Some("exfiltration" | "hijacked_goal"));
+        let worst = matches!(
+            kind_of(f).as_deref(),
+            Some("exfiltration" | "hijacked_goal")
+        );
         if grade_of(f) == Grade::ThreeOne || (s == Severity::High && worst) {
             return Some(Severity::Critical);
         }
@@ -529,7 +579,13 @@ pub(super) enum Tab {
 }
 
 impl Tab {
-    const ALL: [Tab; 5] = [Tab::Overview, Tab::Detections, Tab::Machines, Tab::Sessions, Tab::Engine];
+    const ALL: [Tab; 5] = [
+        Tab::Overview,
+        Tab::Detections,
+        Tab::Machines,
+        Tab::Sessions,
+        Tab::Engine,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -577,13 +633,31 @@ pub fn Main() -> Element {
         None => (Vec::new(), None),
     };
     let base_filter = f.base();
-    let base: Vec<CallFact> = all_facts.iter().filter(|x| base_filter.keeps(x, now)).cloned().collect();
+    let base: Vec<CallFact> = all_facts
+        .iter()
+        .filter(|x| base_filter.keeps(x, now))
+        .cloned()
+        .collect();
     let facts: Vec<CallFact> = base.iter().filter(|x| f.keeps(x, now)).cloned().collect();
     let with_calls: HashSet<&str> = facts.iter().map(|x| x.session.as_str()).collect();
-    let sessions: Vec<Session> = every.iter().filter(|s| f.keeps_session(s, now, &with_calls)).cloned().collect();
+    let sessions: Vec<Session> = every
+        .iter()
+        .filter(|s| f.keeps_session(s, now, &with_calls))
+        .cloned()
+        .collect();
     // The machines over the period alone, so the list keeps every machine to pick from.
-    let period = Filter { days: f.days, ..Filter { days: None, ..Filter::default() } };
-    let in_period: Vec<Session> = every.iter().filter(|s| period.keeps_session(s, now, &HashSet::new())).cloned().collect();
+    let period = Filter {
+        days: f.days,
+        ..Filter {
+            days: None,
+            ..Filter::default()
+        }
+    };
+    let in_period: Vec<Session> = every
+        .iter()
+        .filter(|s| period.keeps_session(s, now, &HashSet::new()))
+        .cloned()
+        .collect();
     let all_machines = machines(&every);
 
     // The newest decision in view tells the engine's mode.
@@ -604,10 +678,18 @@ pub fn Main() -> Element {
     };
 
     // The filter's choices, from the period's Calls.
-    let tools: Vec<String> = counted(base.iter().filter_map(|x| x.tool.clone())).into_iter().map(|(k, _)| k).collect();
-    let kinds: Vec<String> = counted(base.iter().filter_map(kind_of)).into_iter().map(|(k, _)| k).collect();
+    let tools: Vec<String> = counted(base.iter().filter_map(|x| x.tool.clone()))
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    let kinds: Vec<String> = counted(base.iter().filter_map(kind_of))
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
     let folders: Vec<String> = counted(
-        base.iter().map(|x| folder_of(x.cwd.as_deref())).filter(|x| !x.is_empty()),
+        base.iter()
+            .map(|x| folder_of(x.cwd.as_deref()))
+            .filter(|x| !x.is_empty()),
     )
     .into_iter()
     .map(|(k, _)| k)
@@ -788,7 +870,10 @@ pub(super) fn period_label(days: Option<i64>) -> String {
 /// A prompt as a card shows it, on one line: the query cuts it at its first quote and leaves
 /// JSON's escapes, so those are undone here.
 fn prompt_line(p: &str) -> String {
-    let p = p.trim_end_matches('\\').replace("\\n", " ").replace("\\t", " ");
+    let p = p
+        .trim_end_matches('\\')
+        .replace("\\n", " ")
+        .replace("\\t", " ");
     p.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -802,15 +887,22 @@ fn stopping_prompts(facts: &[CallFact]) -> Vec<(String, usize, (String, i64))> {
     }
     let mut by: BTreeMap<String, Stops> = BTreeMap::new();
     for f in facts.iter().filter(|f| decision_key(f) == "DENY") {
-        let text = f.prompt.as_deref().map(prompt_line).filter(|p| !p.is_empty()).unwrap_or_else(|| "(프롬프트를 찾지 못함)".into());
+        let text = f
+            .prompt
+            .as_deref()
+            .map(prompt_line)
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| "(프롬프트를 찾지 못함)".into());
         let e = by.entry(text).or_insert(Stops { n: 0, latest: f });
         e.n += 1;
         if (f.at, f.seq) >= (e.latest.at, e.latest.seq) {
             e.latest = f;
         }
     }
-    let mut list: Vec<(String, usize, (String, i64))> =
-        by.into_iter().map(|(text, s)| (text, s.n, (s.latest.session.clone(), s.latest.seq))).collect();
+    let mut list: Vec<(String, usize, (String, i64))> = by
+        .into_iter()
+        .map(|(text, s)| (text, s.n, (s.latest.session.clone(), s.latest.seq)))
+        .collect();
     list.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     list
 }
@@ -822,7 +914,11 @@ fn hard_to_undo(f: &CallFact) -> bool {
 
 /// The Calls a person let run after the engine asked, the hardest to undo first, then the newest.
 fn approved_calls(facts: &[CallFact]) -> Vec<CallFact> {
-    let mut list: Vec<CallFact> = facts.iter().filter(|f| decision_key(f) == "REVIEW" && f.ran).cloned().collect();
+    let mut list: Vec<CallFact> = facts
+        .iter()
+        .filter(|f| decision_key(f) == "REVIEW" && f.ran)
+        .cloned()
+        .collect();
     list.sort_by_key(|f| std::cmp::Reverse((hard_to_undo(f), f.at, f.seq)));
     list
 }
@@ -864,20 +960,29 @@ fn Overview(
     let at = clock(refreshed);
     let count = |d: &str| facts.iter().filter(|f| decision_key(f) == d).count();
     let (denied, reviewed) = (count("DENY"), count("REVIEW"));
-    let approved_n = facts.iter().filter(|f| decision_key(f) == "REVIEW" && f.ran).count();
+    let approved_n = facts
+        .iter()
+        .filter(|f| decision_key(f) == "REVIEW" && f.ran)
+        .count();
     let prompts = stopping_prompts(&facts);
     let prompt_total: usize = prompts.iter().map(|p| p.1).sum();
     let approved = approved_calls(&facts);
     let mut to_approvals = use_context::<super::ToApprovals>().0;
     let buckets = trend(&facts, days, now);
     let (labels, kind_buckets, kinds) = by_kind(&facts, days, now);
-    let mut recent: Vec<(Severity, CallFact)> =
-        facts.iter().filter_map(|f| Severity::of(f).map(|s| (s, f.clone()))).collect();
+    let mut recent: Vec<(Severity, CallFact)> = facts
+        .iter()
+        .filter_map(|f| Severity::of(f).map(|s| (s, f.clone())))
+        .collect();
     recent.sort_by_key(|(_, f)| std::cmp::Reverse((f.at, f.seq)));
     let recent_total = recent.len();
     recent.truncate(RECENT);
     let picked_kind = filter().kind;
-    let none = if loading { "불러오는 중…" } else { "데이터 없음" };
+    let none = if loading {
+        "불러오는 중…"
+    } else {
+        "데이터 없음"
+    };
 
     rsx! {
         div { class: "cs-grid",
@@ -1067,12 +1172,21 @@ fn pick_kind(mut filter: Signal<Filter>, kind: &str) {
         return;
     }
     let mut w = filter.write();
-    w.kind = if w.kind.as_deref() == Some(kind) { None } else { Some(kind.to_owned()) };
+    w.kind = if w.kind.as_deref() == Some(kind) {
+        None
+    } else {
+        Some(kind.to_owned())
+    };
 }
 
 /// A dashboard card: its title, what it counts over, what it shows, and when it was read.
 #[component]
-pub(super) fn Card(title: &'static str, note: Option<String>, stamp: String, children: Element) -> Element {
+pub(super) fn Card(
+    title: &'static str,
+    note: Option<String>,
+    stamp: String,
+    children: Element,
+) -> Element {
     rsx! {
         section { class: "cs-card",
             div { class: "cs-card-head",
@@ -1106,12 +1220,26 @@ fn Line(buckets: Vec<Bucket>) -> Element {
     let (w, h, left, right, top, bottom) = (480.0, 330.0, 26.0, 18.0, 10.0, 24.0);
     let plot_w = w - left - right;
     let plot_h = h - top - bottom;
-    let values: Vec<usize> = buckets.iter().map(|b| b.denied + b.reviewed + b.risky).collect();
+    let values: Vec<usize> = buckets
+        .iter()
+        .map(|b| b.denied + b.reviewed + b.risky)
+        .collect();
     let n = values.len().max(1);
     let (top_v, step) = scale(values.iter().copied().max().unwrap_or(0));
-    let x = move |i: usize| if n == 1 { left + plot_w / 2.0 } else { left + plot_w * i as f64 / (n - 1) as f64 };
+    let x = move |i: usize| {
+        if n == 1 {
+            left + plot_w / 2.0
+        } else {
+            left + plot_w * i as f64 / (n - 1) as f64
+        }
+    };
     let y = move |v: usize| top + plot_h - v as f64 / top_v as f64 * plot_h;
-    let points: String = values.iter().enumerate().map(|(i, v)| format!("{:.1},{:.1}", x(i), y(*v))).collect::<Vec<_>>().join(" ");
+    let points: String = values
+        .iter()
+        .enumerate()
+        .map(|(i, v)| format!("{:.1},{:.1}", x(i), y(*v)))
+        .collect::<Vec<_>>()
+        .join(" ");
     let every = n.div_ceil(8);
     let ticks: Vec<usize> = (0..=top_v).step_by(step).collect();
     rsx! {
@@ -1149,7 +1277,11 @@ fn Stack(
     let plot_w = w - left - right;
     let plot_h = h - top - bottom;
     let n = labels.len().max(1);
-    let max = buckets.iter().map(|b| b.values().sum::<usize>()).max().unwrap_or(0);
+    let max = buckets
+        .iter()
+        .map(|b| b.values().sum::<usize>())
+        .max()
+        .unwrap_or(0);
     let (top_v, step) = scale(max);
     let y = move |v: usize| top + plot_h - v as f64 / top_v as f64 * plot_h;
     let slot = plot_w / n as f64;
@@ -1214,7 +1346,13 @@ fn Stack(
 /// The sessions worth a look, in four kinds.
 #[component]
 fn Sessions(sessions: Vec<Session>, loading: bool) -> Element {
-    let pick = |f: fn(&Session) -> bool| sessions.iter().filter(|s| f(s)).cloned().collect::<Vec<_>>();
+    let pick = |f: fn(&Session) -> bool| {
+        sessions
+            .iter()
+            .filter(|s| f(s))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     let groups = [
         (
             "차단이 있었던 세션",
@@ -1262,7 +1400,10 @@ fn Engine(base: Vec<CallFact>, loading: bool) -> Element {
     let mut by: BTreeMap<String, Row> = BTreeMap::new();
     for f in &base {
         let name = machine_of_fact(f);
-        let e = by.entry(name.clone()).or_insert_with(|| Row { name, ..Row::default() });
+        let e = by.entry(name.clone()).or_insert_with(|| Row {
+            name,
+            ..Row::default()
+        });
         e.calls += 1;
         if f.decision.is_none() {
             e.undecided += 1;
@@ -1341,7 +1482,12 @@ fn Engine(base: Vec<CallFact>, loading: bool) -> Element {
 
 /// Every machine, the riskiest first, found by name; a row looks at that machine alone.
 #[component]
-fn Machines(machines: Vec<Machine>, current: Option<String>, loading: bool, onpick: EventHandler<String>) -> Element {
+fn Machines(
+    machines: Vec<Machine>,
+    current: Option<String>,
+    loading: bool,
+    onpick: EventHandler<String>,
+) -> Element {
     let mut query = use_signal(String::new);
     let mut all = use_signal(|| false);
     let needle = query().trim().to_lowercase();
@@ -1351,7 +1497,10 @@ fn Machines(machines: Vec<Machine>, current: Option<String>, loading: bool, onpi
         .cloned()
         .collect();
     let total = found.len();
-    let shown: Vec<Machine> = found.into_iter().take(if all() { usize::MAX } else { MACHINES_SHOWN }).collect();
+    let shown: Vec<Machine> = found
+        .into_iter()
+        .take(if all() { usize::MAX } else { MACHINES_SHOWN })
+        .collect();
     rsx! {
         div { class: "admin-body",
             section { class: "home-group",
@@ -1414,10 +1563,18 @@ fn Machines(machines: Vec<Machine>, current: Option<String>, loading: bool, onpi
 
 /// A kind of session worth a look: what it means, then the first few rows and all on demand.
 #[component]
-fn Group(title: &'static str, about: &'static str, sessions: Vec<Session>, loading: bool) -> Element {
+fn Group(
+    title: &'static str,
+    about: &'static str,
+    sessions: Vec<Session>,
+    loading: bool,
+) -> Element {
     let mut all = use_signal(|| false);
     let total = sessions.len();
-    let shown: Vec<Session> = sessions.into_iter().take(if all() { usize::MAX } else { SHOWN }).collect();
+    let shown: Vec<Session> = sessions
+        .into_iter()
+        .take(if all() { usize::MAX } else { SHOWN })
+        .collect();
     rsx! {
         section { class: "home-group",
             div { class: "home-group-head",
@@ -1492,7 +1649,13 @@ pub(super) fn SessionRow(s: Session) -> Element {
 mod tests {
     use super::*;
 
-    fn session(client: Option<&str>, denied: i64, risky: i64, undecided: i64, last_at: i64) -> Session {
+    fn session(
+        client: Option<&str>,
+        denied: i64,
+        risky: i64,
+        undecided: i64,
+        last_at: i64,
+    ) -> Session {
         Session {
             id: format!("{client:?}-{last_at}"),
             client: client.map(str::to_owned),
@@ -1520,7 +1683,13 @@ mod tests {
         assert_eq!(Risk::of(&session(None, 1, 0, 0, 0)), Risk::High);
         assert_eq!(Risk::of(&session(None, 0, 1, 0, 0)), Risk::High);
         assert_eq!(Risk::of(&session(None, 0, 0, 2, 0)), Risk::Watch);
-        assert_eq!(Risk::of(&Session { from_result: 1, ..Session::default() }), Risk::Watch);
+        assert_eq!(
+            Risk::of(&Session {
+                from_result: 1,
+                ..Session::default()
+            }),
+            Risk::Watch
+        );
         assert_eq!(Risk::of(&Session::default()), Risk::Low);
     }
 
@@ -1548,7 +1717,15 @@ mod tests {
             fact("c", 40, None, None),
             fact("c", 50, Some("ALLOW"), Some("enforce")),
         ]);
-        assert_eq!(c, Coverage { active: 3, blocking: 2, watching: 1, undecided: 1 });
+        assert_eq!(
+            c,
+            Coverage {
+                active: 3,
+                blocking: 2,
+                watching: 1,
+                undecided: 1
+            }
+        );
     }
 
     #[test]
@@ -1568,8 +1745,15 @@ mod tests {
         f.machine = Some("b".into());
         assert!(!f.keeps(&new, now));
         // A session counts only when one of its Calls is kept, once the Calls are narrowed.
-        let mut f = Filter { days: None, ..Filter::default() };
-        let s = Session { id: "x".into(), last_at: Some(now), ..Session::default() };
+        let mut f = Filter {
+            days: None,
+            ..Filter::default()
+        };
+        let s = Session {
+            id: "x".into(),
+            last_at: Some(now),
+            ..Session::default()
+        };
         assert!(f.keeps_session(&s, now, &HashSet::new()));
         f.tool = Some("Bash".into());
         assert!(!f.keeps_session(&s, now, &HashSet::new()));
@@ -1587,12 +1771,19 @@ mod tests {
         f.worst = Some("none".into());
         assert_eq!(kind_of(&f).as_deref(), Some("other"));
         f.decision = Some("ALLOW".into());
-        assert_eq!(kind_of(&f), None, "an allowed Call broke nothing worth a bar");
+        assert_eq!(
+            kind_of(&f),
+            None,
+            "an allowed Call broke nothing worth a bar"
+        );
     }
 
     #[test]
     fn the_trend_puts_each_decision_on_its_day() {
-        let now = Local.with_ymd_and_hms(2026, 11, 10, 12, 0, 0).unwrap().timestamp_millis();
+        let now = Local
+            .with_ymd_and_hms(2026, 11, 10, 12, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         let mut risky = fact("a", now - DAY, Some("ALLOW"), None);
         risky.irreversible = true;
         let facts = [
@@ -1607,7 +1798,11 @@ mod tests {
         assert_eq!(b[6].label, "11/10");
         assert_eq!((b[6].denied, b[6].reviewed, b[6].risky), (1, 0, 0));
         assert_eq!((b[5].denied, b[5].reviewed, b[5].risky), (0, 1, 1));
-        assert_eq!(b.iter().map(|x| x.denied).sum::<usize>(), 1, "nine days back is outside");
+        assert_eq!(
+            b.iter().map(|x| x.denied).sum::<usize>(),
+            1,
+            "nine days back is outside"
+        );
         let hours = trend(&facts, Some(1), now);
         assert_eq!(hours.len(), 24);
         assert_eq!(hours[23].denied, 1);
@@ -1632,7 +1827,11 @@ mod tests {
         let mut f = fact("a", 0, Some("REVIEW"), None);
         f.tool = Some("Bash".into());
         f.target = Some("rm -rf data/backups".into());
-        assert_eq!(Severity::of(&f), Some(Severity::Critical), "3-1 by the draft rules");
+        assert_eq!(
+            Severity::of(&f),
+            Some(Severity::Critical),
+            "3-1 by the draft rules"
+        );
         let mut f = fact("a", 0, Some("ALLOW"), None);
         assert_eq!(Severity::of(&f), None);
         assert_eq!(detection_kind(&f), None);
@@ -1643,7 +1842,10 @@ mod tests {
 
     #[test]
     fn by_kind_stacks_each_day() {
-        let now = Local.with_ymd_and_hms(2026, 11, 10, 12, 0, 0).unwrap().timestamp_millis();
+        let now = Local
+            .with_ymd_and_hms(2026, 11, 10, 12, 0, 0)
+            .unwrap()
+            .timestamp_millis();
         let mut a = fact("a", now, Some("DENY"), None);
         a.worst = Some("exfiltration".into());
         let mut b = fact("a", now - DAY, Some("ALLOW"), None);
@@ -1657,7 +1859,10 @@ mod tests {
 
     #[test]
     fn prompts_are_read_on_one_line_and_counted_by_stops() {
-        assert_eq!(prompt_line("고쳐줘\\n그리고 \\t돌려줘\\"), "고쳐줘 그리고 돌려줘");
+        assert_eq!(
+            prompt_line("고쳐줘\\n그리고 \\t돌려줘\\"),
+            "고쳐줘 그리고 돌려줘"
+        );
         let stop = |prompt: Option<&str>, at: i64, seq: i64| CallFact {
             prompt: prompt.map(str::to_owned),
             seq,
@@ -1670,7 +1875,11 @@ mod tests {
             stop(None, 5, 9),
             fact("a", 40, Some("ALLOW"), None),
         ]);
-        assert_eq!(list[0], ("배포해줘".to_owned(), 2, ("a-s".to_owned(), 7)), "the latest stop opens");
+        assert_eq!(
+            list[0],
+            ("배포해줘".to_owned(), 2, ("a-s".to_owned(), 7)),
+            "the latest stop opens"
+        );
         assert_eq!(list.len(), 3);
         assert!(list.iter().any(|p| p.0 == "(프롬프트를 찾지 못함)"));
     }
@@ -1690,7 +1899,11 @@ mod tests {
             asked(20, true, "cat README.md"),
         ]);
         let targets: Vec<&str> = list.iter().filter_map(|f| f.target.as_deref()).collect();
-        assert_eq!(targets, ["git push --force origin main", "ls", "cat README.md"], "not run is not approved");
+        assert_eq!(
+            targets,
+            ["git push --force origin main", "ls", "cat README.md"],
+            "not run is not approved"
+        );
     }
 
     #[test]

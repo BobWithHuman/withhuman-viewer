@@ -26,11 +26,11 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 pub use audit::Audit;
-pub use main_page::Main;
 pub use inventory::InventoryPage;
+pub use main_page::Main;
 pub use mcp::Mcp;
-pub use secrets::Secrets;
 pub use policy::Policy;
+pub use secrets::Secrets;
 
 use crate::api::Backend;
 use crate::model::CallFact;
@@ -39,7 +39,10 @@ use crate::ui::AppState;
 /// Every Call the security team's pages count, read once for all of them, and when they were
 /// last read.
 #[derive(Clone, Copy)]
-pub struct Facts(pub Signal<Option<Result<Vec<CallFact>, String>>>, pub Signal<Option<i64>>);
+pub struct Facts(
+    pub Signal<Option<Result<Vec<CallFact>, String>>>,
+    pub Signal<Option<i64>>,
+);
 
 /// The main page sending the security team to 감사's approvals: `Some(None)` opens the tab,
 /// `Some(Some((session, seq)))` opens it with that Call's row marked. 감사 takes it and lets go.

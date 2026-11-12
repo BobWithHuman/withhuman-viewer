@@ -149,8 +149,14 @@ impl Station {
             // Claude Code loading a tool before it uses it: `select:WebFetch,Read`.
             ("ToolSearch", _) => match self.what.strip_prefix("select:") {
                 Some(names) => {
-                    let names: Vec<&str> = names.split(',').map(str::trim).filter(|n| !n.is_empty()).collect();
-                    let first = names.first().map_or("", |n| mcp_parts(n).map_or(*n, |(_, op)| op));
+                    let names: Vec<&str> = names
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|n| !n.is_empty())
+                        .collect();
+                    let first = names
+                        .first()
+                        .map_or("", |n| mcp_parts(n).map_or(*n, |(_, op)| op));
                     match names.len() {
                         0 => "도구 불러오기".into(),
                         1 => format!("{} 도구 불러오기", short(first, 16)),
@@ -447,7 +453,11 @@ fn inline_script(command: &str) -> Option<(&'static str, &str)> {
     }
     // `-c` gives python and the shells code; `-e` gives it to node, ruby and perl (python's
     // `-e` is pip's "editable", not code).
-    let flag = if matches!(lang, "python" | "sh") { " -c " } else { " -e " };
+    let flag = if matches!(lang, "python" | "sh") {
+        " -c "
+    } else {
+        " -e "
+    };
     let i = command.find(flag)?;
     let rest = command[i + 4..].trim_start();
     let q = rest.chars().next()?;
@@ -470,9 +480,12 @@ fn script_name(lang: &str, code: &str) -> String {
             let p = part.trim();
             let looks = !p.contains(char::is_whitespace)
                 && !p.contains(['{', '}', '%', '\\'])
-                && (p.contains('/') || p.rsplit_once('.').is_some_and(|(a, e)| {
-                    !a.is_empty() && (1..=5).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric())
-                }));
+                && (p.contains('/')
+                    || p.rsplit_once('.').is_some_and(|(a, e)| {
+                        !a.is_empty()
+                            && (1..=5).contains(&e.len())
+                            && e.chars().all(|c| c.is_ascii_alphanumeric())
+                    }));
             if looks && found.is_none_or(|f| p.len() > f.len()) {
                 found = Some(p);
             }
@@ -480,14 +493,29 @@ fn script_name(lang: &str, code: &str) -> String {
     }
     if let Some(p) = found {
         let name = file_name(p.trim_end_matches('/'));
-        return format!("{lang} · {}", clip_file(if name.is_empty() { p } else { name }, 22));
+        return format!(
+            "{lang} · {}",
+            clip_file(if name.is_empty() { p } else { name }, 22)
+        );
     }
     // Else its first call that says something: not an import, not a builtin every script
     // makes.
     let skip = ["import ", "from ", "require(", "#", "//", "use "];
     const PLAIN: [&str; 14] = [
-        "print", "range", "len", "open", "str", "int", "float", "list", "dict", "set", "sorted",
-        "enumerate", "zip", "require",
+        "print",
+        "range",
+        "len",
+        "open",
+        "str",
+        "int",
+        "float",
+        "list",
+        "dict",
+        "set",
+        "sorted",
+        "enumerate",
+        "zip",
+        "require",
     ];
     let call = code
         .lines()
@@ -532,9 +560,12 @@ fn main_part(command: &str) -> &str {
         let first = rest.split_whitespace().next().unwrap_or("");
         // A heading printed before the work (`echo "=== 결과 ===" && wc -l x`) is passed over
         // too, but not a line written into a file.
-        let cut_at = ["&&", ";", "\n"].iter().filter_map(|sep| rest.find(sep)).min();
-        let heading = ["echo", "printf"].contains(&first)
-            && cut_at.is_some_and(|i| !rest[..i].contains('>'));
+        let cut_at = ["&&", ";", "\n"]
+            .iter()
+            .filter_map(|sep| rest.find(sep))
+            .min();
+        let heading =
+            ["echo", "printf"].contains(&first) && cut_at.is_some_and(|i| !rest[..i].contains('>'));
         if !SETUP.contains(&first) && !heading {
             return if rest.is_empty() { command } else { rest };
         }
@@ -624,7 +655,8 @@ pub fn clip_file(name: &str, n: usize) -> String {
     // `batch_20261103_1506.jsonl` is `batch_….jsonl`.
     let chars: Vec<char> = name.chars().collect();
     if let Some(i) = (3..keep.min(chars.len())).find(|&i| {
-        chars[i].is_ascii_digit() && chars[i..].iter().take_while(|c| c.is_ascii_digit()).count() >= 3
+        chars[i].is_ascii_digit()
+            && chars[i..].iter().take_while(|c| c.is_ascii_digit()).count() >= 3
     }) {
         keep = i;
     }
@@ -645,11 +677,18 @@ pub fn command_label(command: &str) -> String {
             .or_else(|| main.split_once(" do "))
             .map(|(_, b)| b)
             .unwrap_or("");
-        let body = body.rsplit_once("done").map_or(body, |(b, _)| b).trim_end_matches([';', ' ', '\n']);
+        let body = body
+            .rsplit_once("done")
+            .map_or(body, |(b, _)| b)
+            .trim_end_matches([';', ' ', '\n']);
         if !body.trim().is_empty() {
             return format!("{} 반복", command_label(body));
         }
-        return if *head == "for " { "반복 실행".into() } else { "반복 대기".into() };
+        return if *head == "for " {
+            "반복 실행".into()
+        } else {
+            "반복 대기".into()
+        };
     }
     if let Some((lang, code)) = inline_script(main) {
         return script_name(lang, code);
@@ -679,13 +718,20 @@ pub fn command_label(command: &str) -> String {
             continue;
         }
         if w.contains(['>', '<']) {
-            skip_next = w.trim_start_matches(|c: char| c.is_ascii_digit()).trim_matches(['>', '<', '&']).is_empty()
+            skip_next = w
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .trim_matches(['>', '<', '&'])
+                .is_empty()
                 && !w.ends_with('1');
             continue;
         }
         rest.push(w);
     }
-    let args: Vec<&str> = rest.iter().copied().filter(|w| !w.starts_with('-')).collect();
+    let args: Vec<&str> = rest
+        .iter()
+        .copied()
+        .filter(|w| !w.starts_with('-'))
+        .collect();
     // A word as an object: a path by its file name, cut alike everywhere.
     let obj = |w: &str| {
         let w = w.trim_end_matches('/');
@@ -707,7 +753,9 @@ pub fn command_label(command: &str) -> String {
         },
         "ls" | "tree" => on("목록 보기", first.filter(|w| w != ".")),
         "grep" | "rg" | "egrep" => {
-            let pat = args.first().map(|p| short_word(p.trim_matches(['"', '\'']), 14));
+            let pat = args
+                .first()
+                .map(|p| short_word(p.trim_matches(['"', '\'']), 14));
             match (pat, args.get(1).map(|w| obj(w))) {
                 (Some(p), Some(f)) => format!("{f}에서 ‘{p}’ 찾기"),
                 (Some(p), None) => format!("‘{p}’ 찾기"),
@@ -717,29 +765,49 @@ pub fn command_label(command: &str) -> String {
         "ps" | "pgrep" | "top" => "실행 중인 작업 확인".into(),
         "kill" | "pkill" | "killall" => "작업 멈추기".into(),
         "pip" | "pip3" | "npm" | "yarn" | "pnpm" | "brew" | "apt" | "apt-get" | "cargo" | "uv"
-            if rest.first().is_some_and(|w| ["install", "add", "i"].contains(w)) =>
+            if rest
+                .first()
+                .is_some_and(|w| ["install", "add", "i"].contains(w)) =>
         {
-            on("설치", args.get(1).filter(|w| !w.starts_with('.')).map(|w| short_word(w, 16)))
+            on(
+                "설치",
+                args.get(1)
+                    .filter(|w| !w.starts_with('.'))
+                    .map(|w| short_word(w, 16)),
+            )
         }
         "python" | "python3" if rest.first() == Some(&"-m") => {
             // A module run as a program: pip installing, pytest testing, else the module.
             let module = args.first().copied().unwrap_or("");
             match module {
-                "pip" | "pip3" | "uv" if args.get(1) == Some(&"install") => {
-                    on("설치", args.get(2).filter(|w| !w.starts_with('.')).map(|w| short_word(w, 16)))
-                }
-                "pip" | "pip3" => format!("pip {}", args.get(1).copied().unwrap_or("")).trim_end().to_owned(),
+                "pip" | "pip3" | "uv" if args.get(1) == Some(&"install") => on(
+                    "설치",
+                    args.get(2)
+                        .filter(|w| !w.starts_with('.'))
+                        .map(|w| short_word(w, 16)),
+                ),
+                "pip" | "pip3" => format!("pip {}", args.get(1).copied().unwrap_or(""))
+                    .trim_end()
+                    .to_owned(),
                 "pytest" | "unittest" => "테스트 실행".into(),
                 "" => "python 실행".into(),
                 m => format!("{} 실행", short_word(m, 16)),
             }
         }
-        "which" | "type" | "command" => on("있는지 확인", args.iter().rev().find(|w| **w != "-v").map(|w| short_word(w, 16))),
+        "which" | "type" | "command" => on(
+            "있는지 확인",
+            args.iter()
+                .rev()
+                .find(|w| **w != "-v")
+                .map(|w| short_word(w, 16)),
+        ),
         "pytest" => "테스트 실행".into(),
         "python" | "python3" | "node" | "ruby" | "bash" | "sh" | "zsh" | "deno" | "bun" => {
             match args.first() {
                 Some(w) if w.contains('.') || w.contains('/') => format!("{} 실행", obj(w)),
-                Some(w) if *w == "-m" || rest.first() == Some(&"-m") => on("실행", args.first().map(|w| short_word(w, 16))),
+                Some(w) if *w == "-m" || rest.first() == Some(&"-m") => {
+                    on("실행", args.first().map(|w| short_word(w, 16)))
+                }
                 _ => format!("{program} 실행"),
             }
         }
@@ -752,16 +820,35 @@ pub fn command_label(command: &str) -> String {
         "cd" | "pushd" => on("로 이동", first).replace(" 로", "로"),
         "sleep" => "기다리기".into(),
         "curl" | "wget" => match args.iter().find(|w| w.contains("://")) {
-            Some(u) => format!("{} 요청", u.split("://").nth(1).unwrap_or(u).split('/').next().unwrap_or(u)),
+            Some(u) => format!(
+                "{} 요청",
+                u.split("://")
+                    .nth(1)
+                    .unwrap_or(u)
+                    .split('/')
+                    .next()
+                    .unwrap_or(u)
+            ),
             None => "웹 요청".into(),
         },
         "echo" | "printf" => match part.split_once('>') {
-            Some((_, to)) => on("에 쓰기", shell_words(to).first().map(|w| obj(w))).replace(" 에", "에"),
+            Some((_, to)) => {
+                on("에 쓰기", shell_words(to).first().map(|w| obj(w))).replace(" 에", "에")
+            }
             None => "출력".into(),
         },
         "git" | "gh" | "docker" | "kubectl" | "make" | "npm" | "cargo" | "go" => {
-            let sub: Vec<&str> = rest.iter().copied().filter(|w| !w.starts_with('-')).take(2).collect();
-            [program].into_iter().chain(sub).collect::<Vec<_>>().join(" ")
+            let sub: Vec<&str> = rest
+                .iter()
+                .copied()
+                .filter(|w| !w.starts_with('-'))
+                .take(2)
+                .collect();
+            [program]
+                .into_iter()
+                .chain(sub)
+                .collect::<Vec<_>>()
+                .join(" ")
         }
         _ => command_name(command),
     }
@@ -860,7 +947,8 @@ fn traced(model: &Model, trace: &Value) -> Option<(Source, bool)> {
         .and_then(telling_line);
     // A tool that failed, or output that says something went wrong (a command echoing itself
     // and then failing still exits cleanly).
-    let error = node.is_some_and(|n| n.kind == "Error") || telling.as_ref().is_some_and(|(_, bad)| *bad);
+    let error =
+        node.is_some_and(|n| n.kind == "Error") || telling.as_ref().is_some_and(|(_, bad)| *bad);
     let quote = telling.map(|(l, _)| {
         if l.chars().count() > 70 {
             format!("{}…", l.chars().take(69).collect::<String>())
@@ -886,8 +974,23 @@ fn traced(model: &Model, trace: &Value) -> Option<(Source, bool)> {
 /// anything; and whether it reports something wrong.
 pub fn telling_line(text: &str) -> Option<(String, bool)> {
     const BAD: [&str; 18] = [
-        "error", "not found", "no such", "no module", "failed", "failure", "denied", "cannot",
-        "can't", "unknown", "invalid", "fatal", "traceback", "exception", "없", "실패", "오류",
+        "error",
+        "not found",
+        "no such",
+        "no module",
+        "failed",
+        "failure",
+        "denied",
+        "cannot",
+        "can't",
+        "unknown",
+        "invalid",
+        "fatal",
+        "traceback",
+        "exception",
+        "없",
+        "실패",
+        "오류",
         "찾을 수",
     ];
     let lines: Vec<&str> = text
@@ -909,7 +1012,9 @@ pub fn telling_line(text: &str) -> Option<(String, bool)> {
     // A path the line begins with is its program's name: "/usr/…/python3: No module named x"
     // is "python3: No module named x".
     let tidy = |l: &str| match l.split_once(": ") {
-        Some((head, rest)) if head.contains('/') && !head.contains(' ') => format!("{}: {rest}", file_name(head)),
+        Some((head, rest)) if head.contains('/') && !head.contains(' ') => {
+            format!("{}: {rest}", file_name(head))
+        }
         _ => l.to_owned(),
     };
     match bad {
@@ -1573,8 +1678,14 @@ mod tests {
     fn a_file_name_is_cut_in_its_middle_keeping_its_kind() {
         use super::clip_file;
         assert_eq!(clip_file("config.yaml", 22), "config.yaml");
-        assert_eq!(clip_file("diagnostic_payload_backup.json", 22), "diagnostic_paylo….json");
-        assert_eq!(clip_file("a_very_long_name_without_a_kind", 10), "a_very_lo…");
+        assert_eq!(
+            clip_file("diagnostic_payload_backup.json", 22),
+            "diagnostic_paylo….json"
+        );
+        assert_eq!(
+            clip_file("a_very_long_name_without_a_kind", 10),
+            "a_very_lo…"
+        );
     }
 
     #[test]
@@ -1798,17 +1909,27 @@ mod tests {
     #[test]
     fn the_telling_line_is_the_one_that_says_what_went_wrong() {
         assert_eq!(
-            telling_line("python -m compileall -q infuse\nmake: python: No such file or directory\nmake: *** [test] Error 1"),
+            telling_line(
+                "python -m compileall -q infuse\nmake: python: No such file or directory\nmake: *** [test] Error 1"
+            ),
             Some(("make: python: No such file or directory".to_owned(), true))
         );
         assert_eq!(
             telling_line("Exit code 1\nUnknown JSON field: \"stars\"\nAvailable fields:"),
             Some(("Unknown JSON field: \"stars\"".to_owned(), true))
         );
-        assert_eq!(telling_line("---\n'infuse'에 복제합니다..."), Some(("'infuse'에 복제합니다...".to_owned(), false)));
-        assert_eq!(telling_line("{\n  \"name\": \"linear\","), Some(("\"name\": \"linear\",".to_owned(), false)));
         assert_eq!(
-            telling_line("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3: No module named pytest"),
+            telling_line("---\n'infuse'에 복제합니다..."),
+            Some(("'infuse'에 복제합니다...".to_owned(), false))
+        );
+        assert_eq!(
+            telling_line("{\n  \"name\": \"linear\","),
+            Some(("\"name\": \"linear\",".to_owned(), false))
+        );
+        assert_eq!(
+            telling_line(
+                "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3: No module named pytest"
+            ),
             Some(("python3: No module named pytest".to_owned(), true))
         );
     }
@@ -1835,31 +1956,68 @@ mod tests {
         );
         assert_eq!(command_name("git ls-files"), "git ls-files");
         // Setting up is passed over for the work it leads to.
-        assert_eq!(command_label("tail -5 /r/batch_20261103_1506.jsonl"), "batch_….jsonl 내용 보기");
-        assert_eq!(command_label("wc -l /r/batch_20261103_1506.jsonl"), "batch_….jsonl 줄 세기");
+        assert_eq!(
+            command_label("tail -5 /r/batch_20261103_1506.jsonl"),
+            "batch_….jsonl 내용 보기"
+        );
+        assert_eq!(
+            command_label("wc -l /r/batch_20261103_1506.jsonl"),
+            "batch_….jsonl 줄 세기"
+        );
         assert_eq!(command_label("ps aux | grep infuse"), "실행 중인 작업 확인");
-        assert_eq!(command_label("find results -name '*.json'"), "results에서 파일 찾기");
-        assert_eq!(command_label("grep -n \"overwrite\" /tmp/infuse/cli.py | head"), "cli.py에서 ‘overwrite’ 찾기");
-        assert_eq!(command_label("cd /tmp/infuse && python3 run_all.py --n 20"), "run_all.py 실행");
+        assert_eq!(
+            command_label("find results -name '*.json'"),
+            "results에서 파일 찾기"
+        );
+        assert_eq!(
+            command_label("grep -n \"overwrite\" /tmp/infuse/cli.py | head"),
+            "cli.py에서 ‘overwrite’ 찾기"
+        );
+        assert_eq!(
+            command_label("cd /tmp/infuse && python3 run_all.py --n 20"),
+            "run_all.py 실행"
+        );
         assert_eq!(command_label("pip install -e ."), "설치");
         assert_eq!(command_label("rm -rf data/backups"), "backups 삭제");
         assert_eq!(command_label("git status"), "git status");
         assert_eq!(command_label("make test"), "make test");
-        assert_eq!(command_label("cd /tmp/x && python3 -m pip install -e \".[dev]\" -q 2>&1 | tail"), "설치");
+        assert_eq!(
+            command_label("cd /tmp/x && python3 -m pip install -e \".[dev]\" -q 2>&1 | tail"),
+            "설치"
+        );
         assert_eq!(command_label("python3 -m pip install -e . -q"), "설치");
-        assert_eq!(command_label("python3 -m pip install requests"), "requests 설치");
-        assert_eq!(command_label("cd /tmp/x && python3 -m pytest tests -q --co 2>&1 | head"), "테스트 실행");
-        assert_eq!(command_label("which pip3 && python3 -m pip install --upgrade pip -q"), "pip3 있는지 확인");
-        assert_eq!(command_label("cat results/run.log 2>/dev/null"), "run.log 내용 보기");
+        assert_eq!(
+            command_label("python3 -m pip install requests"),
+            "requests 설치"
+        );
+        assert_eq!(
+            command_label("cd /tmp/x && python3 -m pytest tests -q --co 2>&1 | head"),
+            "테스트 실행"
+        );
+        assert_eq!(
+            command_label("which pip3 && python3 -m pip install --upgrade pip -q"),
+            "pip3 있는지 확인"
+        );
+        assert_eq!(
+            command_label("cat results/run.log 2>/dev/null"),
+            "run.log 내용 보기"
+        );
         assert_eq!(command_label("ls -la out > list.txt"), "out 목록 보기");
         // A heading printed first is passed over; a loop is what it does, again.
         assert_eq!(
-            command_label("echo \"=== 요약 ===\" && wc -l /r/batch_20261103_1518.jsonl && echo \"\""),
+            command_label(
+                "echo \"=== 요약 ===\" && wc -l /r/batch_20261103_1518.jsonl && echo \"\""
+            ),
             "batch_….jsonl 줄 세기"
         );
-        assert_eq!(command_label("echo hi > note.txt && cat note.txt"), "note.txt에 쓰기");
         assert_eq!(
-            command_label("for i in 2 7; do echo \"== $i ==\" && cat /r/$i/a.manifest.json | grep -o x; done"),
+            command_label("echo hi > note.txt && cat note.txt"),
+            "note.txt에 쓰기"
+        );
+        assert_eq!(
+            command_label(
+                "for i in 2 7; do echo \"== $i ==\" && cat /r/$i/a.manifest.json | grep -o x; done"
+            ),
             "a.manifest.json 내용 보기 반복"
         );
         assert_eq!(
@@ -1867,23 +2025,32 @@ mod tests {
             "x.manifest.json에서 ‘attack_name’ 찾기"
         );
         assert_eq!(
-            command_name("cd /tmp/infuse && export KEY=\"x\" && python3 /a/infuse_claude.py --condition y"),
+            command_name(
+                "cd /tmp/infuse && export KEY=\"x\" && python3 /a/infuse_claude.py --condition y"
+            ),
             "infuse_claude.py"
         );
         assert_eq!(command_name("# check the token\ncd ~/t\nls -la"), "ls -la");
         assert_eq!(command_name("cd infuse"), "cd infuse");
         // A script given inline is named by what it works on.
         assert_eq!(
-            command_name("python3 -c \"\nimport json\nt=json.load(open('/tmp/r/task_1_attack1.traj.json'))\nprint(t)\""),
+            command_name(
+                "python3 -c \"\nimport json\nt=json.load(open('/tmp/r/task_1_attack1.traj.json'))\nprint(t)\""
+            ),
             "python · task_1_attack1.t….json"
         );
         assert_eq!(
             command_name("python3 -c \"import json,sys\nfor a in range(3):\n    print(a)\""),
             "python 스크립트 3줄"
         );
-        assert_eq!(command_name("node -e 'console.log(process.version)'"), "node · console.log");
         assert_eq!(
-            command_name("python3 - <<'EOF'\nfrom pathlib import Path\nPath('out/report.md').write_text('x')\nEOF"),
+            command_name("node -e 'console.log(process.version)'"),
+            "node · console.log"
+        );
+        assert_eq!(
+            command_name(
+                "python3 - <<'EOF'\nfrom pathlib import Path\nPath('out/report.md').write_text('x')\nEOF"
+            ),
             "python · report.md"
         );
     }

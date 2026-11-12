@@ -54,7 +54,10 @@ pub fn shrink(mut state: AppState) {
         let size = size.to_logical::<f64>(scale);
         window.set_min_inner_size(Some(LogicalSize::new(w, h)));
         window.set_inner_size(LogicalSize::new(w, h));
-        window.set_outer_position(LogicalPosition::new(at.x + (size.width - w) / 2.0, at.y + (size.height - h) / 2.0));
+        window.set_outer_position(LogicalPosition::new(
+            at.x + (size.width - w) / 2.0,
+            at.y + (size.height - h) / 2.0,
+        ));
     }
     window.set_resizable(false);
     state.screen.set(Screen::Setup);
@@ -74,8 +77,19 @@ pub fn Setup() -> Element {
     });
     let mut key = use_signal(String::new);
     let mut key_status = use_signal(|| Status::Idle);
-    let mut engine = use_signal(|| if found.is_some() { Engine::Local } else { Engine::Server });
-    let mut dir = use_signal(|| found.as_ref().map(|d| d.display().to_string()).unwrap_or_default());
+    let mut engine = use_signal(|| {
+        if found.is_some() {
+            Engine::Local
+        } else {
+            Engine::Server
+        }
+    });
+    let mut dir = use_signal(|| {
+        found
+            .as_ref()
+            .map(|d| d.display().to_string())
+            .unwrap_or_default()
+    });
     let current = state.public.peek().clone();
     let mut url = use_signal(|| current.neo4j_url.clone());
     let mut database = use_signal(|| current.database.clone());
@@ -118,7 +132,12 @@ pub fn Setup() -> Element {
     };
     let finish = {
         let backend = backend.clone();
-        move |change: Change, kind: Engine, folder: Option<String>| match backend.finish_setup(&key(), change, kind, folder) {
+        move |change: Change, kind: Engine, folder: Option<String>| match backend.finish_setup(
+            &key(),
+            change,
+            kind,
+            folder,
+        ) {
             Ok(next) => {
                 state.public.set(next);
                 state.current.set(None);
@@ -145,7 +164,10 @@ pub fn Setup() -> Element {
                 match engine() {
                     Engine::Local => {
                         let folder = dir();
-                        match backend.start_local(PathBuf::from(&folder), key(), log).await {
+                        match backend
+                            .start_local(PathBuf::from(&folder), key(), log)
+                            .await
+                        {
                             Ok(change) => finish(change, Engine::Local, Some(folder)),
                             Err(e) => run.set(Status::Err(e)),
                         }

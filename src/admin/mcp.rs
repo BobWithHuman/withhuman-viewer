@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use dioxus::prelude::*;
 
-use super::main_page::{Card, Empty, clock, decision_label, now_ms, period_label, stamp, DAY_MS};
+use super::main_page::{Card, DAY_MS, Empty, clock, decision_label, now_ms, period_label, stamp};
 use crate::api::Backend;
 use crate::model::{McpCatalog, McpChange, McpRefusal, McpRequest, McpTool, McpUse};
 use crate::ui::AppState;
@@ -39,7 +39,11 @@ const NOTE_STAYS: Duration = Duration::from_secs(8);
 /// What a tool does to the world, in the order the board names them.
 const NATURES: [&str; 4] = ["read", "write", "delete", "send"];
 /// How far a tool is let through, in the order of the board's columns, and what each means.
-const LEVELS: [(&str, &str); 3] = [("allow", "그대로 통과"), ("review", "부를 때마다 사람이 확인"), ("deny", "게이트웨이가 막음")];
+const LEVELS: [(&str, &str); 3] = [
+    ("allow", "그대로 통과"),
+    ("review", "부를 때마다 사람이 확인"),
+    ("deny", "게이트웨이가 막음"),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tab {
@@ -62,7 +66,10 @@ fn lit(light: Option<Light>, q: &str, r: &Row) -> bool {
         Some(Light::Nature(n)) => r.tool.nature == n,
         Some(Light::Idle) => r.idle,
     };
-    named && (q.is_empty() || r.tool.name.to_lowercase().contains(q) || r.server.to_lowercase().contains(q))
+    named
+        && (q.is_empty()
+            || r.tool.name.to_lowercase().contains(q)
+            || r.server.to_lowercase().contains(q))
 }
 
 /// A change asked of the allowlist: what to say once it is made, and the change that takes it
@@ -93,11 +100,25 @@ struct Held {
 
 /// A tool moved to another level; taken back, it returns to the one it had.
 fn move_to(server: &str, tool: &str, from: &str, to: &str) -> Ask {
-    let level = |level: &str| McpChange::Level { server: server.into(), tool: tool.into(), level: level.into() };
+    let level = |level: &str| McpChange::Level {
+        server: server.into(),
+        tool: tool.into(),
+        level: level.into(),
+    };
     Ask {
         change: level(to),
-        done: format!("{server} · {tool} 판정을 {}에서 {}으로 바꿨습니다.", level_label(from), level_label(to)),
-        undo: Some((level(from), format!("{server} · {tool} 판정을 {}으로 되돌렸습니다.", level_label(from)))),
+        done: format!(
+            "{server} · {tool} 판정을 {}에서 {}으로 바꿨습니다.",
+            level_label(from),
+            level_label(to)
+        ),
+        undo: Some((
+            level(from),
+            format!(
+                "{server} · {tool} 판정을 {}으로 되돌렸습니다.",
+                level_label(from)
+            ),
+        )),
     }
 }
 
@@ -231,17 +252,26 @@ fn days_lit(days: Option<i64>) -> usize {
 fn rows(c: &McpCatalog, since: Option<i64>, now: i64) -> Vec<Row> {
     let mut out = Vec::new();
     for s in &c.servers {
-        let basis = s.request.as_ref().and_then(|id| c.requests.iter().find(|r| &r.id == id)).cloned();
+        let basis = s
+            .request
+            .as_ref()
+            .and_then(|id| c.requests.iter().find(|r| &r.id == id))
+            .cloned();
         let mut tools: Vec<Row> = s
             .tools
             .iter()
             .map(|t| {
-                let in_period: Vec<_> = t.calls.iter().filter(|u| since.is_none_or(|since| u.at >= since)).collect();
+                let in_period: Vec<_> = t
+                    .calls
+                    .iter()
+                    .filter(|u| since.is_none_or(|since| u.at >= since))
+                    .collect();
                 let mut by: BTreeMap<(String, String), usize> = BTreeMap::new();
                 for u in &in_period {
                     *by.entry((u.user.clone(), u.client.clone())).or_default() += 1;
                 }
-                let mut users: Vec<(String, String, usize)> = by.into_iter().map(|((u, m), n)| (u, m, n)).collect();
+                let mut users: Vec<(String, String, usize)> =
+                    by.into_iter().map(|((u, m), n)| (u, m, n)).collect();
                 users.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
                 let last = t.calls.iter().map(|u| u.at).max();
                 let tried = c
@@ -273,21 +303,35 @@ fn rows(c: &McpCatalog, since: Option<i64>, now: i64) -> Vec<Row> {
 
 /// The letter a person goes by on the board: `dev.kim@…` is K.
 fn initial(user: &str) -> String {
-    short(user).rsplit('.').next().and_then(|s| s.chars().next()).map(|c| c.to_uppercase().collect()).unwrap_or_default()
+    short(user)
+        .rsplit('.')
+        .next()
+        .and_then(|s| s.chars().next())
+        .map(|c| c.to_uppercase().collect())
+        .unwrap_or_default()
 }
 
 /// One of five tints for a person, the same wherever they show.
 fn tint(user: &str) -> usize {
-    short(user).bytes().fold(3usize, |a, b| a.wrapping_mul(37).wrapping_add(b as usize)) % 5
+    short(user)
+        .bytes()
+        .fold(3usize, |a, b| a.wrapping_mul(37).wrapping_add(b as usize))
+        % 5
 }
 
 /// What a tool does to the world, drawn: an eye reads, a pencil writes, a bin deletes, a paper
 /// plane sends out.
 fn glyph(nature: &str) -> Element {
     let d = match nature {
-        "read" => "M1.6 8c1.5-2.9 3.7-4.4 6.4-4.4s4.9 1.5 6.4 4.4c-1.5 2.9-3.7 4.4-6.4 4.4S3.1 10.9 1.6 8z M9.9 8a1.9 1.9 0 1 1-3.8 0 1.9 1.9 0 0 1 3.8 0z",
-        "write" => "M3 13l.5-2.7 7.4-7.4a1.3 1.3 0 0 1 1.8 0l.4.4a1.3 1.3 0 0 1 0 1.8l-7.4 7.4L3 13z M9.8 4l2.2 2.2",
-        "delete" => "M2.8 4.3h10.4 M6.2 4.3V2.9h3.6v1.4 M4 4.3l.7 8.9h6.6l.7-8.9 M6.7 6.8v4 M9.3 6.8v4",
+        "read" => {
+            "M1.6 8c1.5-2.9 3.7-4.4 6.4-4.4s4.9 1.5 6.4 4.4c-1.5 2.9-3.7 4.4-6.4 4.4S3.1 10.9 1.6 8z M9.9 8a1.9 1.9 0 1 1-3.8 0 1.9 1.9 0 0 1 3.8 0z"
+        }
+        "write" => {
+            "M3 13l.5-2.7 7.4-7.4a1.3 1.3 0 0 1 1.8 0l.4.4a1.3 1.3 0 0 1 0 1.8l-7.4 7.4L3 13z M9.8 4l2.2 2.2"
+        }
+        "delete" => {
+            "M2.8 4.3h10.4 M6.2 4.3V2.9h3.6v1.4 M4 4.3l.7 8.9h6.6l.7-8.9 M6.7 6.8v4 M9.3 6.8v4"
+        }
         "send" => "M14 2L2 6.6l4.9 2.5L9.4 14 14 2z M14 2L6.9 9.1",
         _ => "M8 3.5v5.5 M8 12v.5",
     };
@@ -343,7 +387,12 @@ fn teams(c: &McpCatalog) -> Vec<String> {
     let mut t: BTreeSet<String> = BTreeSet::new();
     for s in &c.servers {
         for tool in &s.tools {
-            t.extend(tool.scope.iter().filter(|x| !people.contains(x.as_str())).cloned());
+            t.extend(
+                tool.scope
+                    .iter()
+                    .filter(|x| !people.contains(x.as_str()))
+                    .cloned(),
+            );
         }
     }
     t.into_iter().collect()
@@ -354,8 +403,7 @@ fn me() -> String {
 }
 
 /// Brings the picked chip into view once the board has been drawn, for a jump from another tab.
-const SHOW_PICKED_JS: &str =
-    "setTimeout(() => document.querySelector('.mb-chip.on')?.scrollIntoView({ block: 'center' }), 120);";
+const SHOW_PICKED_JS: &str = "setTimeout(() => document.querySelector('.mb-chip.on')?.scrollIntoView({ block: 'center' }), 120);";
 
 /// A chip carries its name when it is dragged, so the webview takes the drag for a move.
 const DRAG_JS: &str = r#"
@@ -416,17 +464,29 @@ pub fn Mcp() -> Element {
             spawn(async move {
                 match backend.mcp_change(a.change).await {
                     Ok(()) => {
-                        note.set(Some(Note { bad: false, text: a.done, undo: a.undo, at: now_ms() }));
+                        note.set(Some(Note {
+                            bad: false,
+                            text: a.done,
+                            undo: a.undo,
+                            at: now_ms(),
+                        }));
                         bump += 1;
                     }
-                    Err(e) => note.set(Some(Note { bad: true, text: e, undo: None, at: now_ms() })),
+                    Err(e) => note.set(Some(Note {
+                        bad: true,
+                        text: e,
+                        undo: None,
+                        at: now_ms(),
+                    })),
                 }
             });
         }
     });
     // What went well leaves by itself; what went wrong stays until it is closed.
     use_effect(move || {
-        let Some(shown) = note().filter(|n| !n.bad) else { return };
+        let Some(shown) = note().filter(|n| !n.bad) else {
+            return;
+        };
         spawn(async move {
             tokio::time::sleep(NOTE_STAYS).await;
             if note.peek().as_ref().is_some_and(|n| n.at == shown.at) {
@@ -498,12 +558,40 @@ pub fn Mcp() -> Element {
     let let_through = all_rows.len() - level_n("deny");
     let requests = requests_in_order(&c);
     let waiting: Vec<&McpRequest> = requests.iter().filter(|r| r.status == "pending").collect();
-    let decided_in = |s: &str| requests.iter().filter(|r| r.status == s && since.is_none_or(|t| r.decided_at.is_some_and(|d| d >= t))).count();
-    let refused: Vec<McpRefusal> = c.refused.iter().filter(|r| since.is_none_or(|t| r.last_at >= t)).cloned().collect();
+    let decided_in = |s: &str| {
+        requests
+            .iter()
+            .filter(|r| r.status == s && since.is_none_or(|t| r.decided_at.is_some_and(|d| d >= t)))
+            .count()
+    };
+    let refused: Vec<McpRefusal> = c
+        .refused
+        .iter()
+        .filter(|r| since.is_none_or(|t| r.last_at >= t))
+        .cloned()
+        .collect();
     let refused_n: i64 = refused.iter().map(|r| r.count).sum();
-    let count_of = |k: &str| refused.iter().filter(|r| r.reason == k).map(|r| r.count).sum::<i64>();
-    let people_of = |k: Option<&str>| refused.iter().filter(|r| k.is_none_or(|k| r.reason == k)).map(|r| r.user.as_str()).collect::<BTreeSet<_>>().len();
-    let why_max = WHYS.iter().map(|w| count_of(w.key)).max().unwrap_or(0).max(1);
+    let count_of = |k: &str| {
+        refused
+            .iter()
+            .filter(|r| r.reason == k)
+            .map(|r| r.count)
+            .sum::<i64>()
+    };
+    let people_of = |k: Option<&str>| {
+        refused
+            .iter()
+            .filter(|r| k.is_none_or(|k| r.reason == k))
+            .map(|r| r.user.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+    };
+    let why_max = WHYS
+        .iter()
+        .map(|w| count_of(w.key))
+        .max()
+        .unwrap_or(0)
+        .max(1);
 
     let q = query().trim().to_lowercase();
     let lights_on = light().is_some() || !q.is_empty();
@@ -513,11 +601,26 @@ pub fn Mcp() -> Element {
     let span_lit = days_lit(days());
     let holding = held();
     let aim = over();
-    let current: Option<Row> = picked().and_then(|(s, t)| all_rows.iter().find(|r| r.server == s && r.tool.name == t).cloned());
+    let current: Option<Row> = picked().and_then(|(s, t)| {
+        all_rows
+            .iter()
+            .find(|r| r.server == s && r.tool.name == t)
+            .cloned()
+    });
     let current_place = current
         .as_ref()
         .and_then(|r| c.servers.iter().find(|s| s.name == r.server))
-        .map(|s| format!("{} · {}", if s.transport == "local" { "로컬" } else { "원격" }, s.endpoint))
+        .map(|s| {
+            format!(
+                "{} · {}",
+                if s.transport == "local" {
+                    "로컬"
+                } else {
+                    "원격"
+                },
+                s.endpoint
+            )
+        })
         .unwrap_or_default();
     let current_request: Option<McpRequest> = picked_request()
         .and_then(|id| requests.iter().find(|r| r.id == id).cloned())
@@ -910,14 +1013,35 @@ pub fn Mcp() -> Element {
 /// A tool on the board: what it does to the world, its name, who called it, and how often,
 /// drawn as a bar against the busiest tool. Picked, it opens the panel; dragged, it is held.
 #[component]
-fn Chip(r: Row, most: usize, on: bool, dim: bool, lifted: bool, onpick: EventHandler<(String, String)>, ongrab: EventHandler<Option<Held>>) -> Element {
+fn Chip(
+    r: Row,
+    most: usize,
+    on: bool,
+    dim: bool,
+    lifted: bool,
+    onpick: EventHandler<(String, String)>,
+    ongrab: EventHandler<Option<Held>>,
+) -> Element {
     let t = &r.tool;
     let key = (r.server.clone(), t.name.clone());
     let key_too = key.clone();
-    let grab = Held { server: r.server.clone(), tool: t.name.clone(), level: t.level.clone() };
-    let width = if r.calls == 0 { 0.0 } else { (r.calls as f64 / most.max(1) as f64 * 100.0).max(3.0) };
+    let grab = Held {
+        server: r.server.clone(),
+        tool: t.name.clone(),
+        level: t.level.clone(),
+    };
+    let width = if r.calls == 0 {
+        0.0
+    } else {
+        (r.calls as f64 / most.max(1) as f64 * 100.0).max(3.0)
+    };
     let mut class = format!("mb-chip {} {}", t.nature, t.level);
-    for (yes, name) in [(on, " on"), (dim, " dim"), (lifted, " lifted"), (r.idle, " idle")] {
+    for (yes, name) in [
+        (on, " on"),
+        (dim, " dim"),
+        (lifted, " lifted"),
+        (r.idle, " idle"),
+    ] {
         if yes {
             class.push_str(name);
         }
@@ -1120,7 +1244,12 @@ fn RequestRow(r: McpRequest, on: bool, onpick: EventHandler<String>) -> Element 
 /// A request told whole: who asked, from where, for what and why; the tools the server offers,
 /// each given a level, and whom they are for; then approved or rejected with an answer.
 #[component]
-fn RequestDetail(r: McpRequest, teams: Vec<String>, ondecide: EventHandler<(McpChange, String)>, onrefused: EventHandler<()>) -> Element {
+fn RequestDetail(
+    r: McpRequest,
+    teams: Vec<String>,
+    ondecide: EventHandler<(McpChange, String)>,
+    onrefused: EventHandler<()>,
+) -> Element {
     let waiting = r.status == "pending";
     let mut levels = use_signal(|| {
         r.offered
@@ -1148,7 +1277,14 @@ fn RequestDetail(r: McpRequest, teams: Vec<String>, ondecide: EventHandler<(McpC
                 s => vec![s.to_owned()],
             };
             (
-                McpChange::Decide { id: id.clone(), approve, actor: me(), answer: answer(), levels: levels(), scope },
+                McpChange::Decide {
+                    id: id.clone(),
+                    approve,
+                    actor: me(),
+                    answer: answer(),
+                    levels: levels(),
+                    scope,
+                },
                 if approve {
                     format!("{who}의 {server} 요청을 승인했습니다. 허용 목록에 반영됩니다.")
                 } else {
@@ -1269,10 +1405,20 @@ fn RequestDetail(r: McpRequest, teams: Vec<String>, ondecide: EventHandler<(McpC
 }
 
 #[component]
-fn RefusedRow(r: McpRefusal, status: Option<String>, known: bool, onrequest: EventHandler<String>, onopen: EventHandler<(String, String)>) -> Element {
+fn RefusedRow(
+    r: McpRefusal,
+    status: Option<String>,
+    known: bool,
+    onrequest: EventHandler<String>,
+    onopen: EventHandler<(String, String)>,
+) -> Element {
     let tool = r.tool.clone().unwrap_or_default();
     let open = (r.server.clone(), tool.clone());
-    let span_note = if r.count > 1 { format!("{} ~ {}", stamp(Some(r.first_at)), stamp(Some(r.last_at))) } else { String::new() };
+    let span_note = if r.count > 1 {
+        format!("{} ~ {}", stamp(Some(r.first_at)), stamp(Some(r.last_at)))
+    } else {
+        String::new()
+    };
     let request = r.request.clone();
     rsx! {
         div { class: "mt-tr refused",
@@ -1311,14 +1457,26 @@ mod tests {
             nature: "read".into(),
             calls: ages
                 .iter()
-                .map(|a| McpUse { at: NOW - a, user: "a@x".into(), client: "m".into(), ..McpUse::default() })
+                .map(|a| McpUse {
+                    at: NOW - a,
+                    user: "a@x".into(),
+                    client: "m".into(),
+                    ..McpUse::default()
+                })
                 .collect(),
             ..McpTool::default()
         }
     }
 
     fn catalog(tools: Vec<McpTool>) -> McpCatalog {
-        McpCatalog { servers: vec![McpServer { name: "s".into(), tools, ..McpServer::default() }], ..McpCatalog::default() }
+        McpCatalog {
+            servers: vec![McpServer {
+                name: "s".into(),
+                tools,
+                ..McpServer::default()
+            }],
+            ..McpCatalog::default()
+        }
     }
 
     #[test]
@@ -1330,16 +1488,29 @@ mod tests {
             tool("denied", "deny", &[]),
         ]);
         let r = rows(&c, Some(NOW - 7 * DAY_MS), NOW);
-        let idle: Vec<&str> = r.iter().filter(|r| r.idle).map(|r| r.tool.name.as_str()).collect();
+        let idle: Vec<&str> = r
+            .iter()
+            .filter(|r| r.idle)
+            .map(|r| r.tool.name.as_str())
+            .collect();
         assert_eq!(idle, ["stale", "never"]);
         assert_eq!(r.first().unwrap().tool.name, "used", "the most used first");
         assert_eq!(r.last().unwrap().tool.name, "denied", "denied last");
-        assert_eq!(r.iter().find(|r| r.tool.name == "stale").unwrap().calls, 0, "counted over the period");
+        assert_eq!(
+            r.iter().find(|r| r.tool.name == "stale").unwrap().calls,
+            0,
+            "counted over the period"
+        );
     }
 
     #[test]
     fn refusals_again_and_again_within_the_hour_are_marked() {
-        let r = |count, span| McpRefusal { count, first_at: NOW - span, last_at: NOW, ..McpRefusal::default() };
+        let r = |count, span| McpRefusal {
+            count,
+            first_at: NOW - span,
+            last_at: NOW,
+            ..McpRefusal::default()
+        };
         assert!(repeated(&r(9, 9 * 60_000)));
         assert!(!repeated(&r(9, 3 * HOUR_MS)));
         assert!(!repeated(&r(2, 60_000)));
@@ -1347,9 +1518,19 @@ mod tests {
 
     #[test]
     fn waiting_requests_come_first() {
-        let r = |id: &str, at, status: &str| McpRequest { id: id.into(), at, status: status.into(), ..McpRequest::default() };
+        let r = |id: &str, at, status: &str| McpRequest {
+            id: id.into(),
+            at,
+            status: status.into(),
+            ..McpRequest::default()
+        };
         let c = McpCatalog {
-            requests: vec![r("a", 3, "approved"), r("b", 1, "pending"), r("c", 2, "pending"), r("d", 4, "rejected")],
+            requests: vec![
+                r("a", 3, "approved"),
+                r("b", 1, "pending"),
+                r("c", 2, "pending"),
+                r("d", 4, "rejected"),
+            ],
             ..McpCatalog::default()
         };
         let ids: Vec<String> = requests_in_order(&c).into_iter().map(|r| r.id).collect();

@@ -212,7 +212,10 @@ impl Settings {
 
     pub fn apply(&self, change: Change) -> Result<Self, String> {
         let url = change.neo4j_url.trim().trim_end_matches('/').to_owned();
-        if !["http://", "https://", "postgres://", "postgresql://"].iter().any(|s| url.starts_with(s)) {
+        if !["http://", "https://", "postgres://", "postgresql://"]
+            .iter()
+            .any(|s| url.starts_with(s))
+        {
             return Err("주소는 postgres://(엔진의 PostgreSQL) 또는 http://(예전 엔진의 Neo4j)로 시작해야 합니다.".into());
         }
         if change.database.trim().is_empty() || change.user.trim().is_empty() {
@@ -346,28 +349,53 @@ mod tests {
             password: None,
             demo: false,
         };
-        assert!(Settings::default().apply(change("postgres://127.0.0.1:5432/withhuman")).is_ok());
-        assert!(Settings::default().apply(change("http://127.0.0.1:7474")).is_ok());
+        assert!(
+            Settings::default()
+                .apply(change("postgres://127.0.0.1:5432/withhuman"))
+                .is_ok()
+        );
+        assert!(
+            Settings::default()
+                .apply(change("http://127.0.0.1:7474"))
+                .is_ok()
+        );
         assert!(Settings::default().apply(change("127.0.0.1:5432")).is_err());
         assert!(Settings::default().with_admin("ftp://x", None).is_err());
-        let next = Settings::default().with_admin("http://engine:3000/", None).unwrap();
-        assert_eq!((next.engine_api.as_str(), next.admin_token_saved), ("http://engine:3000", false));
+        let next = Settings::default()
+            .with_admin("http://engine:3000/", None)
+            .unwrap();
+        assert_eq!(
+            (next.engine_api.as_str(), next.admin_token_saved),
+            ("http://engine:3000", false)
+        );
     }
 
     #[test]
     fn the_pages_name_the_store_without_its_credentials() {
-        let mut s = Settings::default().pointed_at("postgres://viewer:pw@db.internal:5433/withhuman");
-        assert_eq!(s.password, "pw", "taken from the address, so no keychain prompt");
+        let mut s =
+            Settings::default().pointed_at("postgres://viewer:pw@db.internal:5433/withhuman");
+        assert_eq!(
+            s.password, "pw",
+            "taken from the address, so no keychain prompt"
+        );
         assert!(!s.demo && s.jev_saved);
         let p = s.public(std::path::Path::new("/tmp/x"));
         assert_eq!(p.store(), "PostgreSQL · db.internal:5433/withhuman");
         assert_eq!(p.host(), "db.internal:5433/withhuman");
         s.neo4j_url = "http://127.0.0.1:7474".into();
-        assert_eq!(s.public(std::path::Path::new("/tmp/x")).store(), "Neo4j · http://127.0.0.1:7474");
+        assert_eq!(
+            s.public(std::path::Path::new("/tmp/x")).store(),
+            "Neo4j · http://127.0.0.1:7474"
+        );
         // The encryption's options are neither shown nor in the way of the password.
-        let s = Settings::default().pointed_at("postgres://viewer:pw@db.example.com/wh?sslmode=verify-full&sslrootcert=/x/ca.pem");
+        let s = Settings::default().pointed_at(
+            "postgres://viewer:pw@db.example.com/wh?sslmode=verify-full&sslrootcert=/x/ca.pem",
+        );
         assert_eq!(s.password, "pw");
-        assert_eq!(s.public(std::path::Path::new("/tmp/x")).store(), "PostgreSQL · db.example.com/wh");
+        assert_eq!(
+            s.public(std::path::Path::new("/tmp/x")).store(),
+            "PostgreSQL · db.example.com/wh"
+        );
     }
 
     #[test]
