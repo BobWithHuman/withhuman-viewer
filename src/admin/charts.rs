@@ -1,6 +1,6 @@
 //! The charts the security team's dashboards share, drawn as inline SVG or plain boxes: bars
-//! stacked over time, a sparkline, a week's hours as a grid, a flow across three columns, and a
-//! bar of shares with its legend. Each mark says its numbers in a tooltip.
+//! stacked over time, a sparkline, a week's hours as a grid, a ring of shares, and a bar of
+//! shares with its legend. Each mark says its numbers in a tooltip.
 
 use dioxus::prelude::*;
 
@@ -140,94 +140,38 @@ pub(super) fn heat(cells: &[[usize; 24]; 7], unit: &str) -> Element {
     }
 }
 
-/// A stop in a flow: its name and colour.
-pub(super) type Stop = (&'static str, &'static str);
-
-/// What went from where to where across three columns: each item names its stop in each column.
-/// A stop is as tall as the items through it; a band between two stops is as thick as the items
-/// they share. The first bands wear the middle stop's colour, the second the last stop's.
-pub(super) fn flow(columns: [&[Stop]; 3], items: &[[usize; 3]], unit: &str) -> Element {
-    let (w, h, pad, node, gap) = (760.0, 236.0, 132.0, 9.0, 12.0);
-    let total = items.len();
+/// Shares of a whole as a ring, the whole's count in its middle.
+pub(super) fn donut(parts: &[(&'static str, &'static str, usize)], unit: &str) -> Element {
+    let total: usize = parts.iter().map(|p| p.2).sum();
     if total == 0 {
         return rsx! {};
     }
-    let xs = [pad, (w - node) / 2.0, w - pad - node];
-    let count = |col: usize, stop: usize| items.iter().filter(|it| it[col] == stop).count();
-    // The stops that have any, top to bottom, each with where it starts and how tall it is.
-    let most = (0..3)
-        .map(|c| (0..columns[c].len()).filter(|s| count(c, *s) > 0).count())
-        .max()
-        .unwrap_or(1);
-    let unit_h = (h - 8.0 - gap * (most.max(1) - 1) as f64) / total as f64;
-    let place = |c: usize| -> Vec<(usize, f64, f64)> {
-        let shown: Vec<usize> = (0..columns[c].len()).filter(|s| count(c, *s) > 0).collect();
-        let used = total as f64 * unit_h + gap * (shown.len().max(1) - 1) as f64;
-        let mut y = 4.0 + (h - 8.0 - used) / 2.0;
-        shown
-            .into_iter()
-            .map(|s| {
-                let tall = count(c, s) as f64 * unit_h;
-                let at = (s, y, tall);
-                y += tall + gap;
-                at
-            })
-            .collect()
-    };
-    let placed = [place(0), place(1), place(2)];
-    let mut bands: Vec<(String, &'static str, String)> = Vec::new();
-    for c in 0..2 {
-        // How far down each stop its bands have got, leaving on the right and arriving on the left.
-        let mut out: Vec<f64> = placed[c].iter().map(|p| p.1).collect();
-        let mut into: Vec<f64> = placed[c + 1].iter().map(|p| p.1).collect();
-        for (i, (a, _, _)) in placed[c].iter().enumerate() {
-            for (j, (b, _, _)) in placed[c + 1].iter().enumerate() {
-                let n = items
-                    .iter()
-                    .filter(|it| it[c] == *a && it[c + 1] == *b)
-                    .count();
-                if n == 0 {
-                    continue;
-                }
-                let thick = n as f64 * unit_h;
-                let (x0, x1) = (xs[c] + node, xs[c + 1]);
-                let mid = (x0 + x1) / 2.0;
-                let (y0, y1) = (out[i], into[j]);
-                out[i] += thick;
-                into[j] += thick;
-                let d = format!(
-                    "M{x0:.1},{y0:.1} C{mid:.1},{y0:.1} {mid:.1},{y1:.1} {x1:.1},{y1:.1} L{x1:.1},{:.1} C{mid:.1},{:.1} {mid:.1},{:.1} {x0:.1},{:.1} Z",
-                    y1 + thick,
-                    y1 + thick,
-                    y0 + thick,
-                    y0 + thick
-                );
-                let title = format!("{} → {}: {n}{unit}", columns[c][*a].0, columns[c + 1][*b].0);
-                bands.push((d, columns[c + 1][*b].1, title));
-            }
-        }
-    }
+    let (r, width) = (38.0, 15.0);
+    let around = 2.0 * std::f64::consts::PI * r;
+    let shown: Vec<(&'static str, &'static str, usize)> =
+        parts.iter().copied().filter(|p| p.2 > 0).collect();
+    // A hair of the card between parts, when there is more than one.
+    let gap = if shown.len() > 1 { 1.6 } else { 0.0 };
+    let mut start = 0.0;
+    let arcs: Vec<(&'static str, &'static str, usize, f64, f64)> = shown
+        .into_iter()
+        .map(|(label, color, n)| {
+            let long = n as f64 / total as f64 * around;
+            let arc = (label, color, n, start, (long - gap).max(0.5));
+            start += long;
+            arc
+        })
+        .collect();
     rsx! {
-        svg { class: "cs-chart vz-flow", view_box: "0 0 {w} {h}",
-            for (i, (d, color, title)) in bands.into_iter().enumerate() {
-                path { key: "band-{i}", class: "vz-band", d: "{d}", fill: "{color}", title { "{title}" } }
-            }
-            for c in 0..3 {
-                for (s, y, tall) in placed[c].iter().copied() {
-                    g { key: "stop-{c}-{s}",
-                        title { "{columns[c][s].0}: {count(c, s)}{unit}" }
-                        rect { x: "{xs[c]}", y: "{y:.1}", width: "{node}", height: "{tall.max(1.5):.1}", rx: "2", fill: "{columns[c][s].1}" }
-                        text {
-                            x: if c == 2 { format!("{:.1}", xs[c] + node + 8.0) } else { format!("{:.1}", xs[c] - 8.0) },
-                            y: "{y + tall / 2.0 + 3.5:.1}",
-                            text_anchor: if c == 2 { "start" } else { "end" },
-                            class: "name",
-                            "{columns[c][s].0}"
-                            tspan { class: "n", dx: "6", "{count(c, s)}" }
-                        }
-                    }
+        svg { class: "vz-ring", view_box: "0 0 100 100",
+            for (label, color, n, from, long) in arcs {
+                circle { key: "{label}", cx: "50", cy: "50", r: "{r}", fill: "none", stroke: "{color}", stroke_width: "{width}",
+                    stroke_dasharray: "{long:.2} {around - long:.2}", stroke_dashoffset: "{-from:.2}", transform: "rotate(-90 50 50)",
+                    title { "{label} {n}{unit} ({n as f64 / total as f64 * 100.0:.0}%)" }
                 }
             }
+            text { x: "50", y: "55", text_anchor: "middle", class: "total", "{total}" }
+            text { x: "50", y: "66", text_anchor: "middle", class: "unit", "{unit}" }
         }
     }
 }

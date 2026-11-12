@@ -3297,15 +3297,36 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .stack span { min-width: 2px; }
 .vz-rank .n { text-align: right; font-size: 11.5px; color: #c9c9cd; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vz-rank .n.bad { color: #ff8b8b; font-weight: 600; } .vz-rank .n.warn { color: #f2c26b; }
-.vz-flow .vz-band { opacity: .32; transition: opacity .12s; }
-.vz-flow .vz-band:hover { opacity: .7; }
-.vz-flow .name { fill: #dcdce0; font-size: 11px; } .vz-flow .name .n { fill: #8b8b90; font-size: 10.5px; }
+.vz-ring { display: block; height: 100%; max-height: 168px; aspect-ratio: 1; }
+.vz-ring .total { fill: #f2f2f4; font: 300 22px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+.vz-ring .unit { fill: #8b8b90; font-size: 8px; }
 .vz-heat rect.zero { fill: #2a2a2d; } .vz-heat rect.on { fill: #6cc6ec; }
 .vz-spark { display: block; width: 100%; height: 34px; }
 
-/* 민감 정보: the flow and the values over time, between the four cards and the table. */
-.cs-row.split.secrets-viz { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
-.cs-row.split.secrets-viz .cs-card { height: 300px; }
+/* 민감 정보: four cards that are also choices, the picked one's rows beneath them. */
+.sx-card { cursor: pointer; box-shadow: inset 0 2px 0 transparent; transition: background .12s; }
+.sx-card:hover { background: #262629; }
+.sx-card.on, .sx-card.on:hover { background: #25272d; box-shadow: inset 0 2px 0 #6aa5ff; }
+.sx-card .cs-stamp { display: flex; justify-content: space-between; }
+.sx-on { color: #8fb8ff; }
+.sx-ring { flex: 1; min-height: 0; display: flex; align-items: center; gap: 16px; }
+.sx-ring .keys { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sx-ring .keys button { height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 3px; background: none;
+  font-size: 12px; color: #dcdce0; text-align: left; cursor: pointer; }
+.sx-ring .keys button:hover:not(:disabled) { background: var(--cs-row); }
+.sx-ring .keys button.on, .sx-ring .keys button.on:hover:not(:disabled) { background: #2f3b55; color: #fff; }
+.sx-ring .keys i { flex: none; width: 9px; height: 9px; border-radius: 2px; }
+.sx-ring .keys span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-ring .keys strong { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--cs-text); }
+.cs-big.warn { color: #f2c26b; }
+.cs-sub .one-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.secrets .vz-rank code.name { font: 11.5px ui-monospace, "SF Mono", Menlo, monospace; color: #dcdce0; }
+.secrets .vz-rank .fill { background: #8f8cf6; }
+.secrets .cs-row.split.secrets-split .cs-card { height: 460px; }
+.secrets-tr.tries { grid-template-columns: 96px minmax(0, 1.6fr) minmax(0, 1fr) 40px minmax(0, 1.2fr) 130px; }
+.secrets-tr.srcs { grid-template-columns: minmax(0, 2fr) 76px 40px minmax(0, 1fr) 44px 130px; }
+.cs-list-row.sx-value { grid-template-columns: minmax(0, 1fr) auto auto auto; background: var(--cs-row); border-bottom-color: #1c1c1e; padding: 0 8px; }
+.cs-list-row.sx-value:hover:not(:disabled) { background: #333337; }
 
 /* 인벤토리: the fleet a mark each, an agent's mark, a session's dot, the kill switch set apart. */
 .cs-sub.tight { margin-top: 6px; }
@@ -3372,3 +3393,4 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .name i { display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; }
 .vz-rank .fill { display: block; height: 100%; min-width: 3px; border-radius: 4px; }
 button.vz-rank:disabled { cursor: default; opacity: 1; }
+.cs-list-row.sx-value .meta { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
