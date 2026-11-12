@@ -146,12 +146,12 @@ pub(super) fn donut(parts: &[(&'static str, &'static str, usize)], unit: &str) -
     if total == 0 {
         return rsx! {};
     }
-    let (r, width) = (37.0, 17.0);
+    let (r, width) = (38.0, 15.0);
     let around = 2.0 * std::f64::consts::PI * r;
     let shown: Vec<(&'static str, &'static str, usize)> =
         parts.iter().copied().filter(|p| p.2 > 0).collect();
     // A hair of the card between parts, when there is more than one.
-    let gap = if shown.len() > 1 { 2.2 } else { 0.0 };
+    let gap = if shown.len() > 1 { 1.6 } else { 0.0 };
     let mut start = 0.0;
     let arcs: Vec<(&'static str, &'static str, usize, f64, f64)> = shown
         .into_iter()

@@ -3297,190 +3297,36 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .stack span { min-width: 2px; }
 .vz-rank .n { text-align: right; font-size: 11.5px; color: #c9c9cd; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vz-rank .n.bad { color: #ff8b8b; font-weight: 600; } .vz-rank .n.warn { color: #f2c26b; }
-.vz-ring { flex: none; display: block; height: 100%; max-height: 132px; aspect-ratio: 1; }
-.vz-ring circle { stroke-linecap: butt; }
-.vz-ring .total { fill: #f4f5f7; font: 600 24px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.03em; }
-.vz-ring .unit { fill: #8a8f98; font-size: 8.5px; }
+.vz-ring { display: block; height: 100%; max-height: 168px; aspect-ratio: 1; }
+.vz-ring .total { fill: #f2f2f4; font: 300 22px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+.vz-ring .unit { fill: #8b8b90; font-size: 8px; }
 .vz-heat rect.zero { fill: #2a2a2d; } .vz-heat rect.on { fill: #6cc6ec; }
 .vz-spark { display: block; width: 100%; height: 34px; }
 
-/* 민감 정보, drawn as a reporting page in a light workspace: a white surface, hairline cards,
-   one blue with its tints for the marks, red and amber only where something left or was held.
-   Four cards that are also choices, the picked one's rows in a ruled table beneath, and the row
-   opened beside it as blocks joined by a line. The window's bar and rail go light with it. */
-.app:has(.home.admin.secrets) { color-scheme: light; background: #fbfbfb; }
-.app:has(.home.admin.secrets) .app-main { background: #fbfbfb; }
-.app:has(.home.admin.secrets) .topbar { background: #f6f6f7; border-bottom: 1px solid #e6e7ea; }
-.app:has(.home.admin.secrets) .tb-logo { color: #1c1d1f; }
-.app:has(.home.admin.secrets) .tb-seg { background: #ececee; }
-.app:has(.home.admin.secrets) .tb-seg button { color: #5c5e63; }
-.app:has(.home.admin.secrets) .tb-seg button svg { color: #8b8d93; }
-.app:has(.home.admin.secrets) .tb-seg button:hover:not(:disabled) { background: rgba(0, 0, 0, .04); }
-.app:has(.home.admin.secrets) .tb-seg button.on, .app:has(.home.admin.secrets) .tb-seg button.on:hover:not(:disabled) { background: #fff; color: #1c1d1f;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 0 0 1px rgba(0, 0, 0, .04); }
-.app:has(.home.admin.secrets) .tb-seg button.on svg { color: #266df0; }
-.app:has(.home.admin.secrets) .tb-status { background: none; color: #5c5e63; }
-.app:has(.home.admin.secrets) .tb-btn { background: #fff; color: #1c1d1f; box-shadow: 0 0 0 1px #e0e1e5; }
-.app:has(.home.admin.secrets) .tb-btn::before { display: none; }
-.app:has(.home.admin.secrets) .tb-btn { padding-left: 12px; }
-.app:has(.home.admin.secrets) .tb-btn:hover:not(:disabled) { background: #f4f4f6; }
-.app:has(.home.admin.secrets) .rail { background: #f6f6f7; border-right: 1px solid #e6e7ea; color: #6b6e75; }
-.app:has(.home.admin.secrets) .rail button:hover:not(:disabled) { background: rgba(0, 0, 0, .05); color: #1c1d1f; }
-.app:has(.home.admin.secrets) .rail button.product.on { background: #fff; color: #266df0; box-shadow: 0 0 0 1px #e0e1e5; }
-.app:has(.home.admin.secrets) .rail button.demo { color: #b7791f; }
-.app:has(.home.admin.secrets) .rail .sep { background: #e0e1e5; }
-.app:has(.home.admin.secrets) .rail .rail-head.line { background: #fff; border-bottom: 1px solid #e6e7ea; }
-
-.home.admin.secrets { background: #fbfbfb; color: #1c1d1f; --cs-card: #fff; --cs-row: #f6f6f7; --cs-line: #e6e7ea; --cs-mute: #8b8d93; --cs-text: #1c1d1f;
-  --at-sub: #5c5e63; --at-blue: #266df0; --at-blue-2: #9ebcff; --at-blue-3: #e8efff; --at-red: #e5484d; --at-amber: #f5a623; }
-.secrets .cs-head { height: 48px; padding: 0 24px; background: #fff; border-bottom: 1px solid var(--cs-line); font-size: 13px; color: var(--at-sub); }
-.secrets .cs-crumb strong { font-size: 14px; }
-.secrets .cs-crumb .sep { display: none; }
-.secrets .cs-src .dot.demo { background: var(--at-amber); }
-.at-fresh { font-size: 12px; color: var(--cs-mute); font-variant-numeric: tabular-nums; }
-.at-seg { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: #f1f1f3; }
-.at-seg button { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: none; font-size: 12.5px; color: var(--at-sub); }
-.at-seg button:hover:not(:disabled) { background: rgba(0, 0, 0, .04); }
-.at-seg button.on, .at-seg button.on:hover:not(:disabled) { background: #fff; color: #1c1d1f; font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 0 0 1px rgba(0, 0, 0, .04); }
-
-.secrets .cs-grid { padding: 20px 24px 24px; gap: 16px; }
-.secrets .cs-row { gap: 16px; }
-.secrets .cs-card { padding: 16px 18px; border: 1px solid var(--cs-line); border-radius: 12px; box-shadow: 0 1px 2px rgba(16, 24, 40, .03); }
-.secrets .cs-row.four .cs-card { height: 244px; }
-.secrets .cs-card-head { flex-wrap: nowrap; align-items: center; gap: 8px; padding: 0; }
-.secrets .cs-card-head h3 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; letter-spacing: 0; color: #1c1d1f; }
-.secrets .cs-card-body { padding: 14px 0 0; }
-.secrets .cs-stamp { display: none; }
-.secrets .cs-empty { color: var(--cs-mute); } .secrets .cs-empty svg { fill: #c9cbd1; } .secrets .cs-empty strong { font-size: 13px; font-weight: 500; }
-.sx-card { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
-.sx-card:hover { border-color: #d3d5da; }
-.secrets .sx-card.on { border-color: var(--at-blue); box-shadow: 0 0 0 3px var(--at-blue-3); }
-/* What a card counts, as a workspace names its objects: a small coloured square and a word. */
-.at-obj { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 6px; border-radius: 6px; background: #f4f4f6;
-  box-shadow: inset 0 0 0 1px #ebebee; font-size: 12px; color: var(--at-sub); }
-.at-obj i { width: 12px; height: 12px; border-radius: 4px; }
-
-.at-num { flex: none; display: flex; align-items: baseline; gap: 4px; margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.02em; line-height: 1;
-  color: #1c1d1f; font-variant-numeric: tabular-nums; }
-.at-num span { font-size: 14px; font-weight: 400; letter-spacing: 0; color: var(--at-sub); }
-.at-num small { margin-left: auto; font-size: 12px; font-weight: 400; letter-spacing: 0; color: var(--cs-mute); }
-.at-ring { flex: 1; min-height: 0; display: flex; align-items: center; gap: 18px; }
-.at-ring .vz-ring { flex: none; height: 100%; max-height: 132px; aspect-ratio: 1; }
-.at-ring .vz-ring text { display: none; }
-.at-ring .side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-.at-keys { display: flex; flex-direction: column; }
-.at-keys button { height: 26px; display: grid; grid-template-columns: 8px minmax(0, 1fr) auto 20px; align-items: center; gap: 8px; padding: 0 6px; margin: 0 -6px;
-  border: 0; border-radius: 6px; background: none; font-size: 12.5px; color: var(--at-sub); text-align: left; cursor: pointer; }
-.at-keys button:hover:not(:disabled) { background: #f4f4f6; }
-.at-keys button.on, .at-keys button.on:hover:not(:disabled) { background: var(--at-blue-3); color: #1c1d1f; }
-.at-keys i { width: 8px; height: 8px; border-radius: 50%; }
-.at-keys span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.at-keys small { font-size: 11.5px; color: var(--cs-mute); font-variant-numeric: tabular-nums; }
-.at-keys strong { text-align: right; font-weight: 500; color: #1c1d1f; font-variant-numeric: tabular-nums; }
-
-/* Bars as a report draws them: a faint column to the top of the plot, the value solid at its foot. */
-.at-bars { flex: 1; min-height: 0; display: flex; gap: 6px; margin-top: 26px; }
-.at-bars u { flex: 1; position: relative; border-radius: 6px; background: linear-gradient(to top, #edf2ff, rgba(237, 242, 255, 0)); text-decoration: none; }
-.at-bars b { position: absolute; left: 0; right: 0; bottom: 0; min-height: 4px; border-radius: 6px; background: var(--at-blue-2); }
-.at-bars u.peak b { background: var(--at-blue); }
-.at-bars em, .at-funnel .at-val { position: absolute; left: 50%; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 6px; border-radius: 8px;
-  background: #fff; box-shadow: 0 1px 3px rgba(16, 24, 40, .12), 0 0 0 1px rgba(16, 24, 40, .06); font-style: normal; font-weight: 500; font-size: 12px; color: #1c1d1f;
-  font-variant-numeric: tabular-nums; white-space: nowrap; }
-.at-bars em { top: -24px; transform: translateX(-50%); }
-.at-axis { flex: none; display: flex; justify-content: space-between; margin-top: 8px; font-size: 11.5px; color: var(--cs-mute); font-variant-numeric: tabular-nums; }
-.at-funnel { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.at-funnel .stage { min-width: 0; display: flex; flex-direction: column; }
-.at-funnel .col { flex: 1; min-height: 0; position: relative; margin-top: 20px; border-radius: 8px; background: linear-gradient(to top, #edf2ff, rgba(237, 242, 255, 0)); }
-.at-funnel .col b { position: absolute; left: 0; right: 0; bottom: 0; min-height: 6px; border-radius: 8px; background: var(--at-blue-2); }
-.at-funnel .mid .col b { background: var(--at-blue); }
-.at-funnel .bad .col { background: linear-gradient(to top, #fdeeee, rgba(253, 238, 238, 0)); }
-.at-funnel .bad .col b { background: var(--at-red); }
-.at-funnel .at-val { top: 0; transform: translate(-50%, -50%); }
-.at-funnel .at-val small { padding: 0 5px; border-radius: 5px; background: var(--at-blue-3); color: #1d4fc4; font-size: 11px; font-weight: 500; }
-.at-funnel .bad .chip small { background: #fdeeee; color: #c2343a; }
-.at-funnel p { flex: none; margin: 8px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--at-sub); }
-.at-srcs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.at-src { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) 34px 44px 22px; align-items: center; gap: 8px; height: 34px; border-bottom: 1px solid #f1f1f3;
-  font-size: 12.5px; }
-.at-src code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px ui-monospace, "SF Mono", Menlo, monospace; color: #1c1d1f; }
-.at-src small { text-align: right; font-size: 12px; color: var(--at-sub); font-variant-numeric: tabular-nums; }
-.at-src .bar { height: 4px; border-radius: 2px; background: #ececef; }
-.at-src .bar i { display: block; height: 100%; min-width: 3px; border-radius: 2px; background: var(--at-blue); }
-.at-src strong { text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
-.at-more { flex: none; margin: auto 0 0; padding-top: 8px; font-size: 12px; color: var(--cs-mute); }
-
-/* Tags: what a row is and how it ended, as flat labels. */
-.at-tag, .sx-pill { justify-self: start; display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 6px; background: #f1f1f3;
-  font-size: 12px; font-weight: 500; line-height: 1; color: #45474d; white-space: nowrap; vertical-align: middle; }
-.sx-pill:empty { display: none; }
-.sx-pill.bad { background: #fdeeee; color: #c2343a; }
-.sx-pill.warn { background: #fff4dc; color: #8f5b00; }
-.sx-pill.mid { background: var(--at-blue-3); color: #1d4fc4; }
-.sx-pill.ok { background: #e7f6ed; color: #17703f; }
-
-/* The rows beneath the cards: a ruled table under its filters, its count at the foot. */
-.secrets .cs-row.split.secrets-split { grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr); }
-.secrets .cs-row.split.secrets-split .cs-card { height: calc(100vh - 410px); min-height: 360px; padding: 0; overflow: hidden; }
-.secrets .secrets-split .cs-card-head { flex: none; height: 46px; padding: 0 16px; border-bottom: 1px solid var(--cs-line); gap: 10px; }
-.secrets .secrets-split .cs-card-head h3 { flex: none; }
-.secrets .secrets-split .cs-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--cs-mute); }
-.secrets .secrets-split .cs-card-body { padding: 0; }
-.at-filters { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--cs-line); }
-.at-filters > span { font-size: 12.5px; color: var(--cs-mute); margin-right: 2px; }
-.at-chip { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px dashed #d3d5da; border-radius: 7px; background: #fff;
-  font-size: 12.5px; color: var(--at-sub); cursor: pointer; }
-.at-chip:hover:not(:disabled) { background: #f6f6f7; border-color: #bfc2c9; }
-.at-chip i { width: 8px; height: 8px; border-radius: 50%; }
-.at-chip.on, .at-chip.on:hover:not(:disabled) { border: 1px solid #c5d5fb; background: var(--at-blue-3); color: #1d4fc4; font-weight: 500; }
-.secrets .secrets-table { min-height: 0; }
-.secrets .secrets-tbody { gap: 0; }
-.secrets .secrets-tr { height: 40px; padding: 0; gap: 0; border-radius: 0; background: none; box-shadow: inset 0 -1px 0 #eeeff1; font-size: 13px; color: #1c1d1f; }
-.secrets .secrets-tr > * { height: 40px; padding: 0 12px; line-height: 40px; border-right: 1px solid #eeeff1; }
-.secrets .secrets-tr > *:first-child { padding-left: 16px; }
-.secrets .secrets-tr > *:last-child { border-right: 0; }
-.secrets .secrets-tr.head { height: 34px; font-size: 12.5px; color: var(--at-sub); box-shadow: inset 0 -1px 0 var(--cs-line); }
-.secrets .secrets-tr.head > * { height: 34px; line-height: 34px; }
-.secrets button.secrets-tr:hover:not(:disabled) { background: #f8f8f9; }
-.secrets button.secrets-tr.on, .secrets button.secrets-tr.on:hover:not(:disabled) { background: #f3f6ff; box-shadow: inset 2px 0 0 var(--at-blue), inset 0 -1px 0 #e3e9fb; }
-.secrets .secrets-tr code { font: 12.5px/40px ui-monospace, "SF Mono", Menlo, monospace; color: #1c1d1f; }
-.secrets .secrets-tr .muted { color: var(--at-sub); }
-.secrets .secrets-tr .when { font-size: 12.5px; color: var(--cs-mute); }
-.secrets .secrets-tr:not(.tries):not(.srcs) { grid-template-columns: minmax(0, 1.2fr) 112px 132px 124px minmax(0, 1fr) 168px; }
-.secrets .secrets-tr.tries { grid-template-columns: 124px minmax(0, 1.6fr) minmax(0, 1fr) 52px minmax(0, 1.2fr) 168px; }
-.secrets .secrets-tr.srcs { grid-template-columns: minmax(0, 2fr) 84px 52px minmax(0, 1fr) 56px 168px; }
-.at-count { flex: none; height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 16px; border-top: 1px solid var(--cs-line); font-size: 12.5px; color: var(--cs-mute); }
-.at-count strong { font-weight: 500; color: #1c1d1f; font-variant-numeric: tabular-nums; }
-
-/* The row opened: where the value showed, each a block, joined by a line down to the next. */
-.secrets .secrets-flow { padding: 16px; background: #fbfbfb; }
-.at-block { flex: none; position: relative; height: auto; display: block; margin-top: 20px; padding: 12px 14px; border: 1px solid var(--cs-line); border-radius: 12px;
-  background: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); text-align: left; color: #1c1d1f; cursor: pointer; }
-.at-block:first-child { margin-top: 0; }
-.at-block:not(:first-child)::before { content: ""; position: absolute; left: 25px; top: -21px; width: 1px; height: 20px; background: #d3d5da; }
-.at-block:hover:not(:disabled) { background: #fff; border-color: #c9ccd2; }
-.at-block .head { display: flex; align-items: center; gap: 10px; }
-.at-block .ico { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: var(--at-blue-3); }
-.at-block .ico::after { content: ""; width: 8px; height: 8px; border-radius: 3px; background: var(--at-blue); }
-.at-block.res .ico { background: #e3f6fb; } .at-block.res .ico::after { background: #17a5c9; }
-.at-block.call .ico { background: #efeafe; } .at-block.call .ico::after { background: #7c5cf0; }
-.at-block.say .ico { background: #f1f1f3; } .at-block.say .ico::after { background: #8b8d93; }
-.at-block.out .ico { background: #fdeeee; } .at-block.out .ico::after { background: var(--at-red); }
-.at-block.out { border-color: #f3c7c9; }
-.at-block strong { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; }
-.at-block time { flex: none; font-size: 12px; color: var(--cs-mute); font-variant-numeric: tabular-nums; }
-.at-block p { margin: 8px 0 0; font-size: 12.5px; color: var(--cs-mute); }
-.at-block code { display: block; margin-top: 8px; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--at-sub); word-break: break-all; }
-.cs-list-row.sx-value { grid-template-columns: minmax(0, 1fr) auto auto auto; height: 40px; margin-top: 8px; padding: 0 12px; border: 1px solid var(--cs-line); border-radius: 10px;
-  background: #fff; color: #1c1d1f; }
-.cs-list-row.sx-value:first-child { margin-top: 0; }
-.cs-list-row.sx-value:hover:not(:disabled) { background: #f8f8f9; }
-.cs-list-row.sx-value code { color: #1c1d1f; }
-.cs-list-row.sx-value .kind { color: var(--at-sub); }
-.cs-list-row.sx-value .meta { max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--cs-mute); }
-.cs-list-row.sx-value + .at-block { margin-top: 20px; }
-.cs-list-row.sx-value + .at-block::before { content: ""; position: absolute; left: 25px; top: -21px; width: 1px; height: 20px; background: #d3d5da; }
-.at-block + .cs-list-row.sx-value { margin-top: 20px; }
-.secrets .admin-failed { margin: 16px 24px 0; }
+/* 민감 정보: four cards that are also choices, the picked one's rows beneath them. */
+.sx-card { cursor: pointer; box-shadow: inset 0 2px 0 transparent; transition: background .12s; }
+.sx-card:hover { background: #262629; }
+.sx-card.on, .sx-card.on:hover { background: #25272d; box-shadow: inset 0 2px 0 #6aa5ff; }
+.sx-card .cs-stamp { display: flex; justify-content: space-between; }
+.sx-on { color: #8fb8ff; }
+.sx-ring { flex: 1; min-height: 0; display: flex; align-items: center; gap: 16px; }
+.sx-ring .keys { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sx-ring .keys button { height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 3px; background: none;
+  font-size: 12px; color: #dcdce0; text-align: left; cursor: pointer; }
+.sx-ring .keys button:hover:not(:disabled) { background: var(--cs-row); }
+.sx-ring .keys button.on, .sx-ring .keys button.on:hover:not(:disabled) { background: #2f3b55; color: #fff; }
+.sx-ring .keys i { flex: none; width: 9px; height: 9px; border-radius: 2px; }
+.sx-ring .keys span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-ring .keys strong { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--cs-text); }
+.cs-big.warn { color: #f2c26b; }
+.cs-sub .one-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.secrets .vz-rank code.name { font: 11.5px ui-monospace, "SF Mono", Menlo, monospace; color: #dcdce0; }
+.secrets .vz-rank .fill { background: #8f8cf6; }
+.secrets .cs-row.split.secrets-split .cs-card { height: 460px; }
+.secrets-tr.tries { grid-template-columns: 96px minmax(0, 1.6fr) minmax(0, 1fr) 40px minmax(0, 1.2fr) 130px; }
+.secrets-tr.srcs { grid-template-columns: minmax(0, 2fr) 76px 40px minmax(0, 1fr) 44px 130px; }
+.cs-list-row.sx-value { grid-template-columns: minmax(0, 1fr) auto auto auto; background: var(--cs-row); border-bottom-color: #1c1c1e; padding: 0 8px; }
+.cs-list-row.sx-value:hover:not(:disabled) { background: #333337; }
 
 /* 인벤토리: the fleet a mark each, an agent's mark, a session's dot, the kill switch set apart. */
 .cs-sub.tight { margin-top: 6px; }
@@ -3547,3 +3393,4 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .name i { display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; }
 .vz-rank .fill { display: block; height: 100%; min-width: 3px; border-radius: 4px; }
 button.vz-rank:disabled { cursor: default; opacity: 1; }
+.cs-list-row.sx-value .meta { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }

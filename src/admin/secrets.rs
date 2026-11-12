@@ -19,7 +19,7 @@ use dioxus::prelude::*;
 use regex::Regex;
 
 use super::charts::donut;
-use super::main_page::{Axis, Card, DAY_MS, Empty, clock, now_ms, stamp};
+use super::main_page::{Card, DAY_MS, Empty, clock, now_ms, period_label, stamp};
 use crate::api::Backend;
 use crate::model::{SecretMention, Session};
 use crate::ui::{AppState, Load, Screen};
@@ -82,10 +82,10 @@ fn node_label(m: &SecretMention) -> &'static str {
 
 /// The categories in a fixed order, each with its name and its colour wherever it is drawn.
 const CATEGORIES: [(&str, &str, &str); 4] = [
-    ("credential", "키·토큰", "#266df0"),
-    ("pii", "개인정보", "#17a5c9"),
-    ("financial", "금융정보", "#f5a623"),
-    ("device", "기기 식별자", "#7c5cf0"),
+    ("credential", "키·토큰", "#8f8cf6"),
+    ("pii", "개인정보", "#7fd6f2"),
+    ("financial", "금융정보", "#f2a46b"),
+    ("device", "기기 식별자", "#9fe0a6"),
 ];
 /// A host in a command or a URL: after `http(s)://`, or between `user@` and `:` as scp names it.
 static HOST: LazyLock<Regex> = LazyLock::new(|| {
@@ -403,29 +403,12 @@ pub fn Secrets() -> Element {
     }
     let mut prompted_kinds: Vec<(&str, usize)> = prompted_kinds.into_iter().collect();
     prompted_kinds.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-    let axis = Axis::new(days(), now);
-    let mut prompt_days: Vec<(String, usize)> = axis.labels().into_iter().map(|l| (l, 0)).collect();
-    for t in &prompted {
-        if let Some(i) = t.last.and_then(|at| axis.index(at)) {
-            prompt_days[i].1 += 1;
-        }
-    }
-    let prompt_peak = prompt_days.iter().map(|d| d.1).max().unwrap_or(0).max(1);
-    let peak_at = prompt_days
-        .iter()
-        .position(|d| d.1 > 0 && d.1 == prompt_peak);
-    let total = list.len().max(1);
-    // The sessions a value showed in at all, the widest step of the funnel.
-    let seen_sessions = list
-        .iter()
-        .map(|t| t.session.as_str())
-        .collect::<BTreeSet<&str>>()
-        .len();
     let tries = attempts(&list);
     let tries_out = tries.iter().filter(|a| a.ran > 0).count();
     let from = sources(&list);
     let from_max = from.first().map_or(1, |s| s.values).max(1);
     let from_values: usize = from.iter().map(|s| s.values).sum();
+    let period = period_label(days());
     let at = clock(loaded);
     let none = if loading {
         "불러오는 중…"
@@ -459,9 +442,9 @@ pub fn Secrets() -> Element {
         "드러난 민감 값"
     };
     let table_note = match (current_view, category()) {
-        (View::Prompts, _) => "사용자가 프롬프트에 직접 적은 값".to_owned(),
-        (_, Some(c)) => format!("{c}만 보는 중"),
-        _ => "위험한 순으로 정렬".to_owned(),
+        (View::Prompts, _) => "사용자가 프롬프트에 적은 값 · 가려진 값만 보관합니다".to_owned(),
+        (_, Some(c)) => format!("{c}만 · 밖으로 나간 것, 막힌 것, 호출에 쓴 것 순"),
+        _ => "밖으로 나간 것, 막힌 것, 호출에 쓴 것 순 · 가려진 값만 보관합니다".to_owned(),
     };
     let attempt: Option<Attempt> = picked_session()
         .and_then(|s| tries.iter().find(|a| a.session == s).cloned())
@@ -482,12 +465,13 @@ pub fn Secrets() -> Element {
                     span { class: if p.demo { "dot demo" } else { "dot" } }
                     "{source}"
                 }
-                if !at.is_empty() {
-                    span { class: "at-fresh", "{at}에 읽음" }
-                }
-                div { class: "at-seg",
-                    for (v, l) in [(Some(1), "24시간"), (Some(7), "7일"), (Some(30), "30일"), (None, "전체")] {
-                        button { key: "{l}", class: if days() == v { "on" } else { "" }, onclick: move |_| days.set(v), "{l}" }
+                label { class: "admin-pick-field",
+                    span { "기간" }
+                    select {
+                        onchange: move |e| days.set(e.value().parse().ok()),
+                        for (v, l) in [("1", "최근 24시간"), ("7", "최근 7일"), ("30", "최근 30일"), ("all", "전체 기간")] {
+                            option { key: "{v}", value: "{v}", selected: days().map_or("all".to_owned(), |d| d.to_string()) == v, "{l}" }
+                        }
                     }
                 }
             }
@@ -496,98 +480,85 @@ pub fn Secrets() -> Element {
             }
             div { class: "cs-grid",
                 div { class: "cs-row four",
-                    Pane { title: "드러난 민감 값", object: "값", hue: "#266df0", on: current_view == View::Values,
+                    Pane { title: "드러난 민감 값", note: format!("{period} · 유형별"), stamp: at.clone(), on: current_view == View::Values,
                         onpick: move |_| { view.set(View::Values); category.set(None); },
                         if list.is_empty() {
                             Empty { text: none }
                         } else {
-                            div { class: "at-ring",
+                            div { class: "sx-ring",
                                 {donut(&by_category, "개")}
-                                div { class: "side",
-                                    p { class: "at-num", "{list.len()}" span { "개" } }
-                                    div { class: "at-keys",
-                                        for (label, color, n) in by_category.iter().copied().filter(|c| c.2 > 0) {
-                                            button { key: "{label}", class: if category() == Some(label) { "on" } else { "" },
-                                                title: "이 유형의 값만 보기",
-                                                onclick: move |e: MouseEvent| {
-                                                    e.stop_propagation();
-                                                    view.set(View::Values);
-                                                    category.set(if category() == Some(label) { None } else { Some(label) });
-                                                },
-                                                i { style: "background:{color}" }
-                                                span { "{label}" }
-                                                small { "{n as f64 / total as f64 * 100.0:.0}%" }
-                                                strong { "{n}" }
-                                            }
+                                div { class: "keys",
+                                    for (label, color, n) in by_category.iter().copied().filter(|c| c.2 > 0) {
+                                        button { key: "{label}", class: if category() == Some(label) { "on" } else { "" },
+                                            title: "이 유형의 값만 보기",
+                                            onclick: move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                view.set(View::Values);
+                                                category.set(if category() == Some(label) { None } else { Some(label) });
+                                            },
+                                            i { style: "background:{color}" }
+                                            span { "{label}" }
+                                            strong { "{n}" }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    Pane { title: "프롬프트에 넣은 민감정보", object: "프롬프트", hue: "#7c5cf0", on: current_view == View::Prompts,
+                    Pane { title: "프롬프트에 넣은 민감정보", note: "사용자가 프롬프트에 직접 적은 횟수", stamp: at.clone(), on: current_view == View::Prompts,
                         onpick: move |_| view.set(View::Prompts),
-                        p { class: "at-num",
-                            if loading { "…" } else { "{prompted.len()}" }
-                            span { "회" }
-                            small { "세션 {prompted_sessions.len()}개, 단말 {prompted_clients.len()}대" }
+                        div { class: "cs-figure static",
+                            span { class: if prompted.is_empty() { "cs-big" } else { "cs-big warn" }, if loading { "…" } else { "{prompted.len()}" } }
+                            span { class: "cs-of", "회" }
                         }
-                        div { class: "at-bars",
-                            for (i, (label, n)) in prompt_days.iter().enumerate() {
-                                u { key: "{label}", class: if peak_at == Some(i) { "peak" } else { "" }, title: "{label}: {n}회",
-                                    if *n > 0 {
-                                        b { style: "height:{*n as f64 / prompt_peak as f64 * 100.0:.0}%",
-                                            if peak_at == Some(i) { em { "{n}" } }
-                                        }
+                        div { class: "cs-sub",
+                            span { "세션 " strong { "{prompted_sessions.len()}" } "개 · 단말 " strong { "{prompted_clients.len()}" } "대" }
+                            if !prompted_kinds.is_empty() {
+                                span { class: "one-line",
+                                    for (i, (k, n)) in prompted_kinds.iter().take(3).enumerate() {
+                                        if i > 0 { " · " }
+                                        "{k} " strong { "{n}" }
                                     }
                                 }
                             }
                         }
-                        div { class: "at-axis",
-                            span { "{prompt_days.first().map(|d| d.0.clone()).unwrap_or_default()}" }
-                            span { "{prompt_days.last().map(|d| d.0.clone()).unwrap_or_default()}" }
-                        }
                     }
-                    Pane { title: "유출을 시도한 세션", object: "세션", hue: "#e5484d", on: current_view == View::Attempts,
+                    Pane { title: "유출을 시도한 세션", note: "민감 값을 밖으로 보내려 한 세션", stamp: at.clone(), on: current_view == View::Attempts,
                         onpick: move |_| view.set(View::Attempts),
-                        if seen_sessions == 0 {
-                            Empty { text: none }
-                        } else {
-                            div { class: "at-funnel",
-                                for (label, n, tone) in [("값이 드러난 세션", seen_sessions, ""), ("보내려 한 세션", tries.len(), "mid"), ("막지 못해 나간 세션", tries_out, "bad")] {
-                                    {
-                                        let share = n as f64 / seen_sessions as f64 * 100.0;
-                                        rsx! {
-                                            div { key: "{label}", class: "stage {tone}", title: "{label} {n}개",
-                                                div { class: "col",
-                                                    b { style: "height:{share.max(4.0):.0}%",
-                                                        span { class: "at-val", small { "{share:.0}%" } "{n}" }
-                                                    }
-                                                }
-                                                p { "{label}" }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        div { class: "cs-figure static",
+                            span { class: if tries_out > 0 { "cs-big bad" } else { "cs-big" }, if loading { "…" } else { "{tries.len()}" } }
+                            span { class: "cs-of", "개" }
+                        }
+                        div { class: "cs-sub",
+                            span { "막지 못해 나간 세션 " strong { class: "bad", "{tries_out}" } "개" }
+                            span { "보내려다 막힌 세션 " strong { class: "warn", "{tries.len() - tries_out}" } "개" }
                         }
                     }
-                    Pane { title: "민감정보가 나온 곳", object: "문서", hue: "#17a5c9", on: current_view == View::Sources,
+                    Pane { title: "민감정보가 나온 곳", note: "값이 처음 나온 문서·도구 결과", stamp: at.clone(), on: current_view == View::Sources,
                         onpick: move |_| view.set(View::Sources),
                         if from.is_empty() {
                             Empty { text: none }
                         } else {
-                            div { class: "at-srcs",
+                            div { class: "cs-list",
                                 for s in from.iter().take(4) {
-                                    div { key: "{s.name}", class: "at-src", title: "{s.name}",
-                                        code { "{short(&s.name)}" }
-                                        small { "{s.values as f64 / from_values.max(1) as f64 * 100.0:.0}%" }
-                                        span { class: "bar", i { style: "width:{s.values as f64 / from_max as f64 * 100.0:.1}%" } }
-                                        strong { "{s.values}" }
+                                    div { key: "{s.name}", class: "vz-rank", title: "{s.name}",
+                                        code { class: "name", "{short(&s.name)}" }
+                                        span { class: "track", span { class: "fill", style: "width:{s.values as f64 / from_max as f64 * 100.0:.1}%" } }
+                                        span { class: "n", "{s.values}" }
                                     }
                                 }
-                                p { class: "at-more", "문서와 도구 결과 {from.len()}곳에서 값 {from_values}개" }
                             }
+                            div { class: "cs-total",
+                                span { "출처 {from.len()}곳" }
+                                span { class: "n", "값 {from_values}개" }
+                            }
+                        }
+                    }
+                }
+                nav { class: "inv-tabs",
+                    for (v, label, n) in [(View::Values, "드러난 값", list.len()), (View::Prompts, "프롬프트 입력", prompted.len()), (View::Attempts, "유출 시도 세션", tries.len()), (View::Sources, "나온 곳", from.len())] {
+                        button { key: "{label}", class: if current_view == v { "on" } else { "" }, onclick: move |_| view.set(v),
+                            "{label}" span { class: "n", "{n}" }
                         }
                     }
                 }
@@ -595,23 +566,12 @@ pub fn Secrets() -> Element {
                     View::Values | View::Prompts => rsx! {
                         div { class: "cs-row split secrets-split",
                             Card { title: table_title, note: table_note.clone(), stamp: at.clone(),
-                                if current_view == View::Values {
-                                    div { class: "at-filters",
-                                        span { "유형" }
-                                        for (label, color, n) in by_category.iter().copied().filter(|c| c.2 > 0) {
-                                            button { key: "{label}", class: if category() == Some(label) { "at-chip on" } else { "at-chip" },
-                                                onclick: move |_| category.set(if category() == Some(label) { None } else { Some(label) }),
-                                                i { style: "background:{color}" }
-                                                "{label} {n}"
-                                            }
-                                        }
-                                    }
-                                }
                                 div { class: "secrets-table",
                                     div { class: "secrets-tr head",
                                         span { "값" }
                                         span { "종류" }
                                         span { "처음 나온 곳" }
+                                        span { "호출에 넣음" }
                                         span { "결과" }
                                         span { "단말" }
                                         span { "마지막" }
@@ -632,9 +592,10 @@ pub fn Secrets() -> Element {
                                                         class: if on { "secrets-tr on" } else { "secrets-tr" },
                                                         onclick: move |_| picked.set(Some(id.clone())),
                                                         code { "{t.text}" }
-                                                        span { span { class: "at-tag", "{kind_label(&t.kind)}" } }
+                                                        span { "{kind_label(&t.kind)}" }
                                                         span { class: "muted", "{slot_label(&t.from)}" }
-                                                        span { span { class: "sx-pill {tone}", "{label}" } }
+                                                        span { class: "num", "{t.calls}" }
+                                                        span { class: "status {tone}", "{label}" }
                                                         span { class: "muted", "{t.client}" }
                                                         span { class: "when", "{stamp(t.last)}" }
                                                     }
@@ -643,9 +604,8 @@ pub fn Secrets() -> Element {
                                         }
                                     }
                                 }
-                                div { class: "at-count", strong { "{rows.len()}" } "개" }
                             }
-                            Card { title: "이 값의 흐름", note: current.as_ref().map_or("값을 고르세요".to_owned(), |c| c.text.clone()), stamp: at.clone(),
+                            Card { title: "이 값의 흐름", note: current.as_ref().map_or("값을 고르세요".to_owned(), |c| format!("{} · {}", kind_label(&c.kind), c.text)), stamp: at.clone(),
                                 if let Some(c) = current.clone() {
                                     div { class: "cs-list secrets-flow",
                                         for m in c.mentions {
@@ -683,9 +643,9 @@ pub fn Secrets() -> Element {
                                                     button { key: "{a.session}", class: if on { "secrets-tr tries on" } else { "secrets-tr tries" },
                                                         onclick: move |_| picked_session.set(Some(id.clone())),
                                                         if a.ran > 0 {
-                                                            span { span { class: "sx-pill bad", "밖으로 나감" } }
+                                                            span { class: "status bad", "밖으로 나감" }
                                                         } else {
-                                                            span { span { class: "sx-pill warn", "보내려다 막힘" } }
+                                                            span { class: "status warn", "보내려다 막힘" }
                                                         }
                                                         span { title: "{what}", "{what}" }
                                                         span { class: "muted", "{a.client}" }
@@ -699,7 +659,7 @@ pub fn Secrets() -> Element {
                                     }
                                 }
                             }
-                            Card { title: "이 세션이 보내려 한 값", note: attempt.as_ref().map_or("세션을 고르세요".to_owned(), |a| a.client.clone()), stamp: at.clone(),
+                            Card { title: "이 세션이 보내려 한 값", note: attempt.as_ref().map_or("세션을 고르세요".to_owned(), |a| format!("{} · 누르면 노선도에서 봅니다", a.client)), stamp: at.clone(),
                                 if let Some(a) = attempt.clone() {
                                     div { class: "cs-list secrets-flow",
                                         for t in list.iter().filter(|t| t.session == a.session && t.out_ran + t.out_stopped > 0).cloned() {
@@ -770,13 +730,12 @@ pub fn Secrets() -> Element {
     }
 }
 
-/// A card that is also a choice: picked, the page shows its rows beneath the cards. It says
-/// what it counts as a workspace names its objects, a coloured square and a word.
+/// A card that is also a choice: picked, the page shows its rows beneath the cards.
 #[component]
 fn Pane(
     title: &'static str,
-    object: &'static str,
-    hue: &'static str,
+    note: String,
+    stamp: String,
     on: bool,
     onpick: EventHandler<()>,
     children: Element,
@@ -788,9 +747,12 @@ fn Pane(
             onclick: move |_| onpick.call(()),
             div { class: "cs-card-head",
                 h3 { "{title}" }
-                span { class: "at-obj", i { style: "background:{hue}" } "{object}" }
+                span { class: "cs-note", "{note}" }
             }
             div { class: "cs-card-body", {children} }
+            p { class: "cs-stamp",
+                if !stamp.is_empty() { "마지막 갱신: {stamp}" }
+            }
         }
     }
 }
@@ -817,7 +779,7 @@ fn ValueHead(t: Trail, client: Option<bool>) -> Element {
             if client == Some(true) {
                 span { class: "meta", "{t.client}" }
             }
-            span { class: "sx-pill {tone}", "{label}" }
+            span { class: "status {tone}", "{label}" }
         }
     }
 }
@@ -843,29 +805,18 @@ fn FlowRow(m: SecretMention) -> Element {
     } else {
         String::new()
     };
-    let out = call && outward(&m);
-    let kind = match (m.node.as_deref(), m.slot.as_deref()) {
-        _ if out => "out",
-        (Some("Call"), _) => "call",
-        (Some("Request"), _) => "req",
-        (_, Some("agent")) => "say",
-        _ => "res",
-    };
     rsx! {
         button {
-            class: "at-block {kind}",
+            class: if call && outward(&m) { "cs-list-row pick flow out" } else { "cs-list-row pick flow" },
             title: "노선도에서 보기",
             onclick: move |_| {
                 state.open_call(session.clone(), seq);
                 state.screen.set(Screen::Work);
             },
-            span { class: "head",
-                i { class: "ico" }
-                strong { if out { "밖으로 보내는 호출" } else { "{node_label(&m)}" } }
-                span { class: "sx-pill {verdict.0}", "{verdict.1}" }
-                time { "{clock(m.at)}" }
-            }
-            if !what.is_empty() { code { "{what}" } }
+            span { class: "meta", "{clock(m.at)}" }
+            span { class: "where", "{node_label(&m)}" }
+            code { "{what}" }
+            span { class: "status {verdict.0}", "{verdict.1}" }
         }
     }
 }
