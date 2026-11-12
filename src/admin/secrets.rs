@@ -19,7 +19,7 @@ use dioxus::prelude::*;
 use regex::Regex;
 
 use super::charts::donut;
-use super::main_page::{Axis, Card, DAY_MS, Empty, clock, now_ms, period_label, stamp};
+use super::main_page::{Axis, Card, DAY_MS, Empty, clock, now_ms, stamp};
 use crate::api::Backend;
 use crate::model::{SecretMention, Session};
 use crate::ui::{AppState, Load, Screen};
@@ -82,10 +82,10 @@ fn node_label(m: &SecretMention) -> &'static str {
 
 /// The categories in a fixed order, each with its name and its colour wherever it is drawn.
 const CATEGORIES: [(&str, &str, &str); 4] = [
-    ("credential", "키·토큰", "#8f8cf6"),
-    ("pii", "개인정보", "#7fd6f2"),
-    ("financial", "금융정보", "#f2a46b"),
-    ("device", "기기 식별자", "#9fe0a6"),
+    ("credential", "키·토큰", "#266df0"),
+    ("pii", "개인정보", "#17a5c9"),
+    ("financial", "금융정보", "#f5a623"),
+    ("device", "기기 식별자", "#7c5cf0"),
 ];
 /// A host in a command or a URL: after `http(s)://`, or between `user@` and `:` as scp names it.
 static HOST: LazyLock<Regex> = LazyLock::new(|| {
@@ -411,13 +411,21 @@ pub fn Secrets() -> Element {
         }
     }
     let prompt_peak = prompt_days.iter().map(|d| d.1).max().unwrap_or(0).max(1);
+    let peak_at = prompt_days
+        .iter()
+        .position(|d| d.1 > 0 && d.1 == prompt_peak);
     let total = list.len().max(1);
+    // The sessions a value showed in at all, the widest step of the funnel.
+    let seen_sessions = list
+        .iter()
+        .map(|t| t.session.as_str())
+        .collect::<BTreeSet<&str>>()
+        .len();
     let tries = attempts(&list);
     let tries_out = tries.iter().filter(|a| a.ran > 0).count();
     let from = sources(&list);
     let from_max = from.first().map_or(1, |s| s.values).max(1);
     let from_values: usize = from.iter().map(|s| s.values).sum();
-    let period = period_label(days());
     let at = clock(loaded);
     let none = if loading {
         "불러오는 중…"
@@ -451,9 +459,9 @@ pub fn Secrets() -> Element {
         "드러난 민감 값"
     };
     let table_note = match (current_view, category()) {
-        (View::Prompts, _) => "사용자가 프롬프트에 적은 값 · 가려진 값만 보관합니다".to_owned(),
-        (_, Some(c)) => format!("{c}만 · 밖으로 나간 것, 막힌 것, 호출에 쓴 것 순"),
-        _ => "밖으로 나간 것, 막힌 것, 호출에 쓴 것 순 · 가려진 값만 보관합니다".to_owned(),
+        (View::Prompts, _) => "사용자가 프롬프트에 직접 적은 값".to_owned(),
+        (_, Some(c)) => format!("{c}만 보는 중"),
+        _ => "위험한 순으로 정렬".to_owned(),
     };
     let attempt: Option<Attempt> = picked_session()
         .and_then(|s| tries.iter().find(|a| a.session == s).cloned())
@@ -475,15 +483,11 @@ pub fn Secrets() -> Element {
                     "{source}"
                 }
                 if !at.is_empty() {
-                    span { class: "sx-fresh", "{at}에 읽음" }
+                    span { class: "at-fresh", "{at}에 읽음" }
                 }
-                label { class: "admin-pick-field",
-                    span { "기간" }
-                    select {
-                        onchange: move |e| days.set(e.value().parse().ok()),
-                        for (v, l) in [("1", "최근 24시간"), ("7", "최근 7일"), ("30", "최근 30일"), ("all", "전체 기간")] {
-                            option { key: "{v}", value: "{v}", selected: days().map_or("all".to_owned(), |d| d.to_string()) == v, "{l}" }
-                        }
+                div { class: "at-seg",
+                    for (v, l) in [(Some(1), "24시간"), (Some(7), "7일"), (Some(30), "30일"), (None, "전체")] {
+                        button { key: "{l}", class: if days() == v { "on" } else { "" }, onclick: move |_| days.set(v), "{l}" }
                     }
                 }
             }
@@ -492,91 +496,97 @@ pub fn Secrets() -> Element {
             }
             div { class: "cs-grid",
                 div { class: "cs-row four",
-                    Pane { title: "드러난 민감 값", note: format!("{period}, 유형별"), on: current_view == View::Values,
+                    Pane { title: "드러난 민감 값", object: "값", hue: "#266df0", on: current_view == View::Values,
                         onpick: move |_| { view.set(View::Values); category.set(None); },
                         if list.is_empty() {
                             Empty { text: none }
                         } else {
-                            div { class: "sx-ring",
+                            div { class: "at-ring",
                                 {donut(&by_category, "개")}
-                                div { class: "keys",
-                                    for (label, color, n) in by_category.iter().copied().filter(|c| c.2 > 0) {
-                                        button { key: "{label}", class: if category() == Some(label) { "on" } else { "" },
-                                            title: "이 유형의 값만 보기",
-                                            onclick: move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                view.set(View::Values);
-                                                category.set(if category() == Some(label) { None } else { Some(label) });
-                                            },
-                                            i { style: "background:{color}" }
-                                            span { "{label}" }
-                                            small { "{n as f64 / total as f64 * 100.0:.0}%" }
-                                            strong { "{n}" }
+                                div { class: "side",
+                                    p { class: "at-num", "{list.len()}" span { "개" } }
+                                    div { class: "at-keys",
+                                        for (label, color, n) in by_category.iter().copied().filter(|c| c.2 > 0) {
+                                            button { key: "{label}", class: if category() == Some(label) { "on" } else { "" },
+                                                title: "이 유형의 값만 보기",
+                                                onclick: move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    view.set(View::Values);
+                                                    category.set(if category() == Some(label) { None } else { Some(label) });
+                                                },
+                                                i { style: "background:{color}" }
+                                                span { "{label}" }
+                                                small { "{n as f64 / total as f64 * 100.0:.0}%" }
+                                                strong { "{n}" }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    Pane { title: "프롬프트에 넣은 민감정보", note: "사용자가 프롬프트에 직접 적은 횟수", on: current_view == View::Prompts,
+                    Pane { title: "프롬프트에 넣은 민감정보", object: "프롬프트", hue: "#7c5cf0", on: current_view == View::Prompts,
                         onpick: move |_| view.set(View::Prompts),
-                        div { class: "sx-stat",
-                            span { class: "num", if loading { "…" } else { "{prompted.len()}" } }
-                            span { class: "unit", "회" }
-                            if let Some((k, n)) = prompted_kinds.first() {
-                                span { class: "sx-pill warn", title: "가장 많이 적은 종류", "{k} {n}" }
+                        p { class: "at-num",
+                            if loading { "…" } else { "{prompted.len()}" }
+                            span { "회" }
+                            small { "세션 {prompted_sessions.len()}개, 단말 {prompted_clients.len()}대" }
+                        }
+                        div { class: "at-bars",
+                            for (i, (label, n)) in prompt_days.iter().enumerate() {
+                                u { key: "{label}", class: if peak_at == Some(i) { "peak" } else { "" }, title: "{label}: {n}회",
+                                    if *n > 0 {
+                                        b { style: "height:{*n as f64 / prompt_peak as f64 * 100.0:.0}%",
+                                            if peak_at == Some(i) { em { "{n}" } }
+                                        }
+                                    }
+                                }
                             }
                         }
-                        div { class: "sx-meta",
-                            span { "세션 " strong { "{prompted_sessions.len()}" } "개" }
-                            span { "단말 " strong { "{prompted_clients.len()}" } "대" }
-                        }
-                        div { class: "sx-bars",
-                            for (label, n) in prompt_days.iter() {
-                                i { key: "{label}", class: if *n == 0 { "zero" } else { "" }, title: "{label}: {n}회",
-                                    style: "height:{(*n as f64 / prompt_peak as f64 * 100.0).max(5.0):.0}%" }
-                            }
-                        }
-                        div { class: "sx-axis",
+                        div { class: "at-axis",
                             span { "{prompt_days.first().map(|d| d.0.clone()).unwrap_or_default()}" }
                             span { "{prompt_days.last().map(|d| d.0.clone()).unwrap_or_default()}" }
                         }
                     }
-                    Pane { title: "유출을 시도한 세션", note: "민감 값을 밖으로 보내려 한 세션", on: current_view == View::Attempts,
+                    Pane { title: "유출을 시도한 세션", object: "세션", hue: "#e5484d", on: current_view == View::Attempts,
                         onpick: move |_| view.set(View::Attempts),
-                        div { class: "sx-stat",
-                            span { class: "num", if loading { "…" } else { "{tries.len()}" } }
-                            span { class: "unit", "개" }
-                            if tries_out > 0 {
-                                span { class: "sx-pill bad", "{tries_out}개는 막지 못함" }
-                            } else if !tries.is_empty() {
-                                span { class: "sx-pill ok", "모두 막음" }
+                        if seen_sessions == 0 {
+                            Empty { text: none }
+                        } else {
+                            div { class: "at-funnel",
+                                for (label, n, tone) in [("값이 드러난 세션", seen_sessions, ""), ("보내려 한 세션", tries.len(), "mid"), ("막지 못해 나간 세션", tries_out, "bad")] {
+                                    {
+                                        let share = n as f64 / seen_sessions as f64 * 100.0;
+                                        rsx! {
+                                            div { key: "{label}", class: "stage {tone}", title: "{label} {n}개",
+                                                div { class: "col",
+                                                    b { style: "height:{share.max(4.0):.0}%",
+                                                        span { class: "at-val", small { "{share:.0}%" } "{n}" }
+                                                    }
+                                                }
+                                                p { "{label}" }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        }
-                        if !tries.is_empty() {
-                            div { class: "sx-split",
-                                if tries_out > 0 { span { class: "a", style: "flex-grow:{tries_out}" } }
-                                if tries.len() > tries_out { span { class: "b", style: "flex-grow:{tries.len() - tries_out}" } }
-                            }
-                        }
-                        div { class: "sx-legend",
-                            span { i { class: "a" } "밖으로 나감" strong { "{tries_out}" } }
-                            span { i { class: "b" } "보내려다 막힘" strong { "{tries.len() - tries_out}" } }
                         }
                     }
-                    Pane { title: "민감정보가 나온 곳", note: format!("문서와 도구 결과 {}곳에서 값 {}개", from.len(), from_values), on: current_view == View::Sources,
+                    Pane { title: "민감정보가 나온 곳", object: "문서", hue: "#17a5c9", on: current_view == View::Sources,
                         onpick: move |_| view.set(View::Sources),
                         if from.is_empty() {
                             Empty { text: none }
                         } else {
-                            div { class: "sx-srcs",
+                            div { class: "at-srcs",
                                 for s in from.iter().take(4) {
-                                    div { key: "{s.name}", class: "sx-src", title: "{s.name}",
+                                    div { key: "{s.name}", class: "at-src", title: "{s.name}",
                                         code { "{short(&s.name)}" }
-                                        strong { "{s.values}" }
+                                        small { "{s.values as f64 / from_values.max(1) as f64 * 100.0:.0}%" }
                                         span { class: "bar", i { style: "width:{s.values as f64 / from_max as f64 * 100.0:.1}%" } }
+                                        strong { "{s.values}" }
                                     }
                                 }
+                                p { class: "at-more", "문서와 도구 결과 {from.len()}곳에서 값 {from_values}개" }
                             }
                         }
                     }
@@ -585,6 +595,18 @@ pub fn Secrets() -> Element {
                     View::Values | View::Prompts => rsx! {
                         div { class: "cs-row split secrets-split",
                             Card { title: table_title, note: table_note.clone(), stamp: at.clone(),
+                                if current_view == View::Values {
+                                    div { class: "at-filters",
+                                        span { "유형" }
+                                        for (label, color, n) in by_category.iter().copied().filter(|c| c.2 > 0) {
+                                            button { key: "{label}", class: if category() == Some(label) { "at-chip on" } else { "at-chip" },
+                                                onclick: move |_| category.set(if category() == Some(label) { None } else { Some(label) }),
+                                                i { style: "background:{color}" }
+                                                "{label} {n}"
+                                            }
+                                        }
+                                    }
+                                }
                                 div { class: "secrets-table",
                                     div { class: "secrets-tr head",
                                         span { "값" }
@@ -610,9 +632,9 @@ pub fn Secrets() -> Element {
                                                         class: if on { "secrets-tr on" } else { "secrets-tr" },
                                                         onclick: move |_| picked.set(Some(id.clone())),
                                                         code { "{t.text}" }
-                                                        span { "{kind_label(&t.kind)}" }
+                                                        span { span { class: "at-tag", "{kind_label(&t.kind)}" } }
                                                         span { class: "muted", "{slot_label(&t.from)}" }
-                                                        span { class: "sx-pill {tone}", "{label}" }
+                                                        span { span { class: "sx-pill {tone}", "{label}" } }
                                                         span { class: "muted", "{t.client}" }
                                                         span { class: "when", "{stamp(t.last)}" }
                                                     }
@@ -621,8 +643,9 @@ pub fn Secrets() -> Element {
                                         }
                                     }
                                 }
+                                div { class: "at-count", strong { "{rows.len()}" } "개" }
                             }
-                            Card { title: "이 값의 흐름", note: current.as_ref().map_or("값을 고르세요".to_owned(), |c| format!("{} · {}", kind_label(&c.kind), c.text)), stamp: at.clone(),
+                            Card { title: "이 값의 흐름", note: current.as_ref().map_or("값을 고르세요".to_owned(), |c| c.text.clone()), stamp: at.clone(),
                                 if let Some(c) = current.clone() {
                                     div { class: "cs-list secrets-flow",
                                         for m in c.mentions {
@@ -660,9 +683,9 @@ pub fn Secrets() -> Element {
                                                     button { key: "{a.session}", class: if on { "secrets-tr tries on" } else { "secrets-tr tries" },
                                                         onclick: move |_| picked_session.set(Some(id.clone())),
                                                         if a.ran > 0 {
-                                                            span { class: "sx-pill bad", "밖으로 나감" }
+                                                            span { span { class: "sx-pill bad", "밖으로 나감" } }
                                                         } else {
-                                                            span { class: "sx-pill warn", "보내려다 막힘" }
+                                                            span { span { class: "sx-pill warn", "보내려다 막힘" } }
                                                         }
                                                         span { title: "{what}", "{what}" }
                                                         span { class: "muted", "{a.client}" }
@@ -676,7 +699,7 @@ pub fn Secrets() -> Element {
                                     }
                                 }
                             }
-                            Card { title: "이 세션이 보내려 한 값", note: attempt.as_ref().map_or("세션을 고르세요".to_owned(), |a| format!("{} · 누르면 노선도에서 봅니다", a.client)), stamp: at.clone(),
+                            Card { title: "이 세션이 보내려 한 값", note: attempt.as_ref().map_or("세션을 고르세요".to_owned(), |a| a.client.clone()), stamp: at.clone(),
                                 if let Some(a) = attempt.clone() {
                                     div { class: "cs-list secrets-flow",
                                         for t in list.iter().filter(|t| t.session == a.session && t.out_ran + t.out_stopped > 0).cloned() {
@@ -747,11 +770,13 @@ pub fn Secrets() -> Element {
     }
 }
 
-/// A card that is also a choice: picked, the page shows its rows beneath the cards.
+/// A card that is also a choice: picked, the page shows its rows beneath the cards. It says
+/// what it counts as a workspace names its objects, a coloured square and a word.
 #[component]
 fn Pane(
     title: &'static str,
-    note: String,
+    object: &'static str,
+    hue: &'static str,
     on: bool,
     onpick: EventHandler<()>,
     children: Element,
@@ -763,9 +788,8 @@ fn Pane(
             onclick: move |_| onpick.call(()),
             div { class: "cs-card-head",
                 h3 { "{title}" }
-                span { class: "sx-radio" }
+                span { class: "at-obj", i { style: "background:{hue}" } "{object}" }
             }
-            p { class: "sx-note", "{note}" }
             div { class: "cs-card-body", {children} }
         }
     }
@@ -819,24 +843,29 @@ fn FlowRow(m: SecretMention) -> Element {
     } else {
         String::new()
     };
+    let out = call && outward(&m);
+    let kind = match (m.node.as_deref(), m.slot.as_deref()) {
+        _ if out => "out",
+        (Some("Call"), _) => "call",
+        (Some("Request"), _) => "req",
+        (_, Some("agent")) => "say",
+        _ => "res",
+    };
     rsx! {
         button {
-            class: if call && outward(&m) { "sx-step out" } else { "sx-step" },
+            class: "at-block {kind}",
             title: "노선도에서 보기",
             onclick: move |_| {
                 state.open_call(session.clone(), seq);
                 state.screen.set(Screen::Work);
             },
-            span { class: "t", "{clock(m.at)}" }
-            span { class: "sx-rail", i {} }
-            span { class: "body",
-                span { class: "line",
-                    strong { "{node_label(&m)}" }
-                    if call && outward(&m) { span { class: "where", "밖으로 보내는 호출" } }
-                    span { class: "sx-pill {verdict.0}", "{verdict.1}" }
-                }
-                if !what.is_empty() { code { "{what}" } }
+            span { class: "head",
+                i { class: "ico" }
+                strong { if out { "밖으로 보내는 호출" } else { "{node_label(&m)}" } }
+                span { class: "sx-pill {verdict.0}", "{verdict.1}" }
+                time { "{clock(m.at)}" }
             }
+            if !what.is_empty() { code { "{what}" } }
         }
     }
 }
