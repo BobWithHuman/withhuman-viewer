@@ -9,6 +9,7 @@
 | `replay.py` | 실제 에이전트가 좀처럼 하지 않는 장면(숨은 지시 따르기, 프로덕션 배포, 요청 없는 `rm -rf`)을 hook으로 보낸다 |
 | `make_long.py` | `fixture.json`에 **합성한 긴 세션** 셋을 더해 `long.json`을 만든다(Call 108개·턴 3개·서브에이전트 실행 셋(둘은 동시), Call 55개·멀리 걸친 cause 링크와 차단, Call 227개, 턴 40개·Call 175개). 판정과 점수는 지어낸 값이다 |
 | `long.json` | `make_long.py`가 만든 파일. 앱에는 들어가지 않는다. `VIEWER_MOCK=1 VIEWER_FIXTURE=mock/long.json cargo run`으로 쓰고, 노선도 테스트가 읽는다 |
+| `make_dashboard_fixture.py` | `fixture.json`에 **합성한 3주치 세션** 190개를 더한다(위반 유형마다 차단·확인 요청·허용, 단말 다섯, 드러나거나 밖으로 나간 민감 값). 보안팀 대시보드의 차트를 채워 보려는 것이고, 판정과 값은 지어낸 것이다. 시각이 지금 기준이라 쓸 때 다시 만든다: `python3 mock/make_dashboard_fixture.py target/dashboard-fixture.json` 뒤 `VIEWER_MOCK=1 VIEWER_FIXTURE=target/dashboard-fixture.json cargo admin` |
 
 `fixture.json` 세션의 판정·원인·의도는 모두 엔진과 Jev가 실제로 낸 것이다(`long.json`의 합성 세션은 아니다). `replay.py` 세션은 에이전트 쪽 행동만 각본이다.
 

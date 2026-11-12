@@ -331,6 +331,22 @@ pub struct Inventory {
     pub keys: Vec<ApiKey>,
     pub events: Vec<KeyEvent>,
     pub sessions: Vec<SessionRun>,
+    /// Agents found running without the hooks; none when the engine cannot tell yet.
+    pub shadow: Option<Vec<ShadowAgent>>,
+}
+
+/// An agent running where the hooks are not: a Claude Code or Codex project a machine's check
+/// found with no hooks in it. Other agents leave nothing the check can see.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct ShadowAgent {
+    pub client_id: Option<String>,
+    pub user_email: Option<String>,
+    /// `claude-code` or `codex`.
+    pub agent: String,
+    pub project: Option<String>,
+    pub last_seen: Option<i64>,
 }
 
 /// A machine with the hooks: its client ID, what it said when it registered, when its hooks were

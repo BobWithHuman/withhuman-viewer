@@ -13,6 +13,7 @@
 //!   previewed on the Calls already recorded.
 
 mod audit;
+mod charts;
 mod detections;
 mod inventory;
 mod main_page;
