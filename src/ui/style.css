@@ -3297,9 +3297,6 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .stack span { min-width: 2px; }
 .vz-rank .n { text-align: right; font-size: 11.5px; color: #c9c9cd; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .vz-rank .n.bad { color: #ff8b8b; font-weight: 600; } .vz-rank .n.warn { color: #f2c26b; }
-.vz-ring { display: block; height: 100%; max-height: 168px; aspect-ratio: 1; }
-.vz-ring .total { fill: #f2f2f4; font: 300 22px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
-.vz-ring .unit { fill: #8b8b90; font-size: 8px; }
 .vz-heat rect.zero { fill: #2a2a2d; } .vz-heat rect.on { fill: #6cc6ec; }
 .vz-spark { display: block; width: 100%; height: 34px; }
 
@@ -3309,15 +3306,32 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .sx-card.on, .sx-card.on:hover { background: #25272d; box-shadow: inset 0 2px 0 #6aa5ff; }
 .sx-card .cs-stamp { display: flex; justify-content: space-between; }
 .sx-on { color: #8fb8ff; }
-.sx-ring { flex: 1; min-height: 0; display: flex; align-items: center; gap: 16px; }
-.sx-ring .keys { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.sx-ring .keys button { height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; border-radius: 3px; background: none;
-  font-size: 12px; color: #dcdce0; text-align: left; cursor: pointer; }
-.sx-ring .keys button:hover:not(:disabled) { background: var(--cs-row); }
-.sx-ring .keys button.on, .sx-ring .keys button.on:hover:not(:disabled) { background: #2f3b55; color: #fff; }
-.sx-ring .keys i { flex: none; width: 9px; height: 9px; border-radius: 2px; }
-.sx-ring .keys span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sx-ring .keys strong { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--cs-text); }
+/* The values by category as a treemap: each tile as big as its count, its name, count and share
+   written on it, so there is no legend to match colours against. A tile picked narrows the
+   table beneath and the others step back. */
+.sx-fig { flex: none; margin: 0; display: flex; align-items: baseline; gap: 4px; font: 300 34px/1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  letter-spacing: -.03em; color: #f2f2f4; font-variant-numeric: tabular-nums; }
+.sx-fig small { font-size: 13px; letter-spacing: 0; color: var(--cs-mute); }
+.sx-tree { position: relative; flex: 1; min-height: 72px; margin: 10px -2px 0; }
+.sx-tile, .sx-tile:hover:not(:disabled) { position: absolute; padding: 0; border: 0; border-radius: 0; background: none; cursor: pointer; }
+.sx-tile .face { position: absolute; inset: 2px; display: flex; flex-direction: column; gap: 2px; padding: 8px 9px; border-radius: 4px; overflow: hidden;
+  color: #fff; text-align: left; transition: opacity .15s, filter .15s, box-shadow .15s; }
+.sx-tile .nm { font-size: 11.5px; font-weight: 600; line-height: 1.25; word-break: keep-all; }
+.sx-tile .v { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.sx-tile .v b { font: 300 22px/1.1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sx-tile .v small { font-size: 11px; color: rgba(255, 255, 255, .78); font-variant-numeric: tabular-nums; }
+.sx-tile.row .face { flex-direction: row; align-items: center; gap: 8px; padding: 0 9px; }
+.sx-tile.row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sx-tile.row .v b { font-size: 15px; }
+.sx-tile.tiny .face { align-items: center; justify-content: center; padding: 0; }
+.sx-tile.tiny .nm, .sx-tile.tiny .v small, .sx-tile.bare .face > * { display: none; }
+.sx-tile.tiny .v b { font-size: 13px; font-weight: 500; }
+.sx-tile:hover .face { filter: brightness(1.1); }
+.sx-tree.picking .sx-tile:not(.on) .face { opacity: .3; }
+.sx-tile.on .face, .sx-tile:focus-visible .face { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .9); }
+.sx-tile:focus-visible { outline: none; }
+.sx-rest { flex: none; margin: 6px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--cs-mute); }
+@media (prefers-reduced-motion: reduce) { .sx-tile .face { transition: none; } }
 .cs-big.warn { color: #f2c26b; }
 .cs-sub .one-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .secrets .vz-rank code.name { font: 11.5px ui-monospace, "SF Mono", Menlo, monospace; color: #dcdce0; }

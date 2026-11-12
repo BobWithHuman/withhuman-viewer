@@ -1,6 +1,6 @@
 //! The charts the security team's dashboards share, drawn as inline SVG or plain boxes: bars
-//! stacked over time, a sparkline, a week's hours as a grid, a ring of shares, and a bar of
-//! shares with its legend. Each mark says its numbers in a tooltip.
+//! stacked over time, a sparkline, a week's hours as a grid, a bar of shares with its legend,
+//! and the layout of a treemap. Each mark says its numbers in a tooltip.
 
 use dioxus::prelude::*;
 
@@ -140,40 +140,50 @@ pub(super) fn heat(cells: &[[usize; 24]; 7], unit: &str) -> Element {
     }
 }
 
-/// Shares of a whole as a ring, the whole's count in its middle.
-pub(super) fn donut(parts: &[(&'static str, &'static str, usize)], unit: &str) -> Element {
-    let total: usize = parts.iter().map(|p| p.2).sum();
-    if total == 0 {
-        return rsx! {};
+/// A tile of a treemap, in percent of the box it fills.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Tile {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// Lays out counts as tiles of a `w` by `h` box, each tile's area its count, in percent of the
+/// box. The counts go in the order given, the largest first reading best, one at a time: each
+/// takes the left part of what is left while that is well wider than tall, else its top part.
+/// A big count then stands as a column beside the rest, which stack above each other, and small
+/// counts stack instead of thinning into slivers.
+pub(super) fn treemap(counts: &[usize], w: f64, h: f64) -> Vec<Tile> {
+    let mut left = counts.iter().sum::<usize>() as f64;
+    let (mut x, mut y, mut bw, mut bh) = (0.0, 0.0, w, h);
+    let mut out = Vec::with_capacity(counts.len());
+    for (i, &n) in counts.iter().enumerate() {
+        let share = if left > 0.0 { n as f64 / left } else { 0.0 };
+        let tile = if i + 1 == counts.len() {
+            Tile { x, y, w: bw, h: bh }
+        } else if bw > 1.8 * bh {
+            let tw = bw * share;
+            let t = Tile { x, y, w: tw, h: bh };
+            x += tw;
+            bw -= tw;
+            t
+        } else {
+            let th = bh * share;
+            let t = Tile { x, y, w: bw, h: th };
+            y += th;
+            bh -= th;
+            t
+        };
+        out.push(Tile {
+            x: tile.x / w * 100.0,
+            y: tile.y / h * 100.0,
+            w: tile.w / w * 100.0,
+            h: tile.h / h * 100.0,
+        });
+        left -= n as f64;
     }
-    let (r, width) = (38.0, 15.0);
-    let around = 2.0 * std::f64::consts::PI * r;
-    let shown: Vec<(&'static str, &'static str, usize)> =
-        parts.iter().copied().filter(|p| p.2 > 0).collect();
-    // A hair of the card between parts, when there is more than one.
-    let gap = if shown.len() > 1 { 1.6 } else { 0.0 };
-    let mut start = 0.0;
-    let arcs: Vec<(&'static str, &'static str, usize, f64, f64)> = shown
-        .into_iter()
-        .map(|(label, color, n)| {
-            let long = n as f64 / total as f64 * around;
-            let arc = (label, color, n, start, (long - gap).max(0.5));
-            start += long;
-            arc
-        })
-        .collect();
-    rsx! {
-        svg { class: "vz-ring", view_box: "0 0 100 100",
-            for (label, color, n, from, long) in arcs {
-                circle { key: "{label}", cx: "50", cy: "50", r: "{r}", fill: "none", stroke: "{color}", stroke_width: "{width}",
-                    stroke_dasharray: "{long:.2} {around - long:.2}", stroke_dashoffset: "{-from:.2}", transform: "rotate(-90 50 50)",
-                    title { "{label} {n}{unit} ({n as f64 / total as f64 * 100.0:.0}%)" }
-                }
-            }
-            text { x: "50", y: "55", text_anchor: "middle", class: "total", "{total}" }
-            text { x: "50", y: "66", text_anchor: "middle", class: "unit", "{unit}" }
-        }
-    }
+    out
 }
 
 /// Shares of a whole as one bar, with what each part is and its count beneath.
@@ -196,5 +206,71 @@ pub(super) fn mix(parts: &[(&'static str, &'static str, usize)]) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn area(t: &Tile) -> f64 {
+        t.w * t.h
+    }
+
+    #[test]
+    fn a_treemap_fills_its_box_with_tiles_as_big_as_their_counts() {
+        let counts = [11, 9, 7, 3];
+        let tiles = treemap(&counts, 300.0, 140.0);
+        assert_eq!(tiles.len(), 4);
+        let whole: f64 = tiles.iter().map(area).sum();
+        assert!(
+            (whole - 100.0 * 100.0).abs() < 1e-6,
+            "the tiles fill the box"
+        );
+        for (t, n) in tiles.iter().zip(counts) {
+            assert!(
+                (area(t) / whole - n as f64 / 30.0).abs() < 1e-9,
+                "a tile's area is its count"
+            );
+            assert!(t.x >= 0.0 && t.y >= 0.0);
+            assert!(t.x + t.w <= 100.0 + 1e-9 && t.y + t.h <= 100.0 + 1e-9);
+        }
+        // The largest stands as a column down the left; the next lies across the top of the rest.
+        assert_eq!((tiles[0].x, tiles[0].y, tiles[0].h), (0.0, 0.0, 100.0));
+        assert!((tiles[1].x - tiles[0].w).abs() < 1e-9 && tiles[1].y == 0.0);
+        assert!(
+            tiles[1].w * 300.0 > tiles[1].h * 140.0,
+            "the second is wider than tall"
+        );
+    }
+
+    #[test]
+    fn small_counts_stack_rather_than_thin_into_slivers() {
+        let tiles = treemap(&[25, 2, 2, 1], 300.0, 140.0);
+        // Beside the big column the rest is narrow, so each small count takes a full-width row.
+        for t in &tiles[1..] {
+            assert!(
+                (t.w - tiles[1].w).abs() < 1e-9,
+                "the small ones share a width"
+            );
+        }
+        assert_eq!(
+            treemap(&[5], 300.0, 140.0)[0],
+            Tile {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0
+            }
+        );
+        assert!(treemap(&[], 300.0, 140.0).is_empty());
+    }
+
+    #[test]
+    fn counts_close_together_stack_beside_the_largest_rather_than_stand_in_a_row() {
+        let tiles = treemap(&[9, 8, 8], 300.0, 136.0);
+        assert_eq!(tiles[0].h, 100.0, "the largest is a column");
+        assert_eq!((tiles[1].x, tiles[2].x), (tiles[0].w, tiles[0].w));
+        assert!(tiles[2].y > 0.0, "the other two lie one above the other");
     }
 }

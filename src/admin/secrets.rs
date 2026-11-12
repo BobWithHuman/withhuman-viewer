@@ -18,7 +18,7 @@ use std::sync::{Arc, LazyLock};
 use dioxus::prelude::*;
 use regex::Regex;
 
-use super::charts::donut;
+use super::charts::treemap;
 use super::main_page::{Card, DAY_MS, Empty, clock, now_ms, period_label, stamp};
 use crate::api::Backend;
 use crate::model::{SecretMention, Session};
@@ -82,11 +82,29 @@ fn node_label(m: &SecretMention) -> &'static str {
 
 /// The categories in a fixed order, each with its name and its colour wherever it is drawn.
 const CATEGORIES: [(&str, &str, &str); 4] = [
-    ("credential", "키·토큰", "#8f8cf6"),
-    ("pii", "개인정보", "#7fd6f2"),
-    ("financial", "금융정보", "#f2a46b"),
-    ("device", "기기 식별자", "#9fe0a6"),
+    ("credential", "키·토큰", "#3987e5"),
+    ("pii", "개인정보", "#d95926"),
+    ("financial", "금융정보", "#199e70"),
+    ("device", "기기 식별자", "#c98500"),
 ];
+
+/// The box the treemap is laid out in, in about the pixels a card gives it, so tiles keep
+/// their shape when the card is drawn wider or narrower.
+const TREE_BOX: (f64, f64) = (300.0, 136.0);
+
+/// How much a tile has room to say, from its size in [`TREE_BOX`]'s pixels: its name above its
+/// count and share, all on one line, its count alone, or nothing (its tooltip still does).
+fn tile_room(w: f64, h: f64) -> &'static str {
+    if w >= 84.0 && h >= 56.0 {
+        "full"
+    } else if w >= 110.0 && h >= 24.0 {
+        "row"
+    } else if w >= 24.0 && h >= 20.0 {
+        "tiny"
+    } else {
+        "bare"
+    }
+}
 /// A host in a command or a URL: after `http(s)://`, or between `user@` and `:` as scp names it.
 static HOST: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"https?://([^/\s:?'"]+)|@([A-Za-z0-9.\-]+):"#).expect("valid regex")
@@ -393,6 +411,27 @@ pub fn Secrets() -> Element {
             )
         })
         .collect();
+    // The categories with any values, the most first, laid out as tiles. A category keeps its
+    // colour whichever place its count gives it.
+    let mut by_size: Vec<(&'static str, &'static str, usize)> =
+        by_category.iter().copied().filter(|c| c.2 > 0).collect();
+    by_size.sort_by_key(|c| std::cmp::Reverse(c.2));
+    let tiles = treemap(
+        &by_size.iter().map(|c| c.2).collect::<Vec<_>>(),
+        TREE_BOX.0,
+        TREE_BOX.1,
+    );
+    let rooms: Vec<&'static str> = tiles
+        .iter()
+        .map(|t| tile_room(t.w / 100.0 * TREE_BOX.0, t.h / 100.0 * TREE_BOX.1))
+        .collect();
+    // The categories whose tiles have no room for their names, named beneath the tiles instead.
+    let unnamed: Vec<String> = by_size
+        .iter()
+        .zip(&rooms)
+        .filter(|(_, room)| matches!(**room, "tiny" | "bare"))
+        .map(|((label, _, n), _)| format!("{label} {n}개"))
+        .collect();
     // The values a person wrote in a prompt, each time one did.
     let prompted: Vec<Trail> = list.iter().filter(|t| t.from == "user").cloned().collect();
     let prompted_sessions: BTreeSet<&str> = prompted.iter().map(|t| t.session.as_str()).collect();
@@ -480,28 +519,39 @@ pub fn Secrets() -> Element {
             }
             div { class: "cs-grid",
                 div { class: "cs-row four",
-                    Pane { title: "드러난 민감 값", note: format!("{period} · 유형별"), stamp: at.clone(), on: current_view == View::Values,
+                    Pane { title: "드러난 민감 값", note: format!("{period}, 유형별"), stamp: at.clone(), on: current_view == View::Values,
                         onpick: move |_| { view.set(View::Values); category.set(None); },
                         if list.is_empty() {
                             Empty { text: none }
                         } else {
-                            div { class: "sx-ring",
-                                {donut(&by_category, "개")}
-                                div { class: "keys",
-                                    for (label, color, n) in by_category.iter().copied().filter(|c| c.2 > 0) {
-                                        button { key: "{label}", class: if category() == Some(label) { "on" } else { "" },
-                                            title: "이 유형의 값만 보기",
-                                            onclick: move |e: MouseEvent| {
-                                                e.stop_propagation();
-                                                view.set(View::Values);
-                                                category.set(if category() == Some(label) { None } else { Some(label) });
-                                            },
-                                            i { style: "background:{color}" }
-                                            span { "{label}" }
-                                            strong { "{n}" }
+                            p { class: "sx-fig", "{list.len()}" small { "개" } }
+                            div { class: if category().is_some() { "sx-tree picking" } else { "sx-tree" },
+                                for ((t, (label, color, n)), room) in tiles.iter().copied().zip(by_size.iter().copied()).zip(rooms.iter().copied()) {
+                                    {
+                                        let share = (n as f64 / list.len() as f64 * 100.0).round();
+                                        let on = category() == Some(label);
+                                        rsx! {
+                                            button {
+                                                key: "{label}",
+                                                class: if on { "sx-tile {room} on" } else { "sx-tile {room}" },
+                                                style: "left:{t.x:.3}%;top:{t.y:.3}%;width:{t.w:.3}%;height:{t.h:.3}%",
+                                                title: "{label} {n}개 ({share}%), 누르면 이 유형만 봅니다",
+                                                onclick: move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    view.set(View::Values);
+                                                    category.set(if category() == Some(label) { None } else { Some(label) });
+                                                },
+                                                span { class: "face", style: "background:{color}",
+                                                    span { class: "nm", "{label}" }
+                                                    span { class: "v", b { "{n}" } small { "{share}%" } }
+                                                }
+                                            }
                                         }
                                     }
                                 }
+                            }
+                            if !unnamed.is_empty() {
+                                p { class: "sx-rest", "그 밖에 {unnamed.join(\", \")}" }
                             }
                         }
                     }
