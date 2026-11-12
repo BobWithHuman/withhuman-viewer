@@ -1,0 +1,4 @@
+# `cargo run` on macOS signs the app with a fixed identity first (scripts/dev-run.sh), so the
+# keychain asks for the saved Neo4j password once rather than after every build.
+[target.'cfg(target_os = "macos")']
+runner = "scripts/dev-run.sh"

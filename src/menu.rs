@@ -8,8 +8,6 @@ use dioxus::desktop::muda::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, S
 pub const SETTINGS: &str = "settings";
 pub const RELOAD: &str = "reload";
 pub const SEARCH: &str = "search";
-pub const TREE: &str = "view-tree";
-pub const FLOW: &str = "view-flow";
 pub const FIT: &str = "fit";
 pub const DEMO: &str = "demo";
 pub const CHECK_UPDATES: &str = "check-updates";
@@ -63,8 +61,6 @@ pub fn build() -> Menu {
         "보기",
         true,
         &[
-            &item(TREE, "원인 트리", Some("CmdOrCtrl+1")),
-            &item(FLOW, "시간 흐름", Some("CmdOrCtrl+2")),
             &PredefinedMenuItem::separator(),
             &item(FIT, "전체 보기", Some("CmdOrCtrl+0")),
             &item(RELOAD, "새로고침", Some("CmdOrCtrl+R")),

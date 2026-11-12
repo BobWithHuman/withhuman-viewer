@@ -18,6 +18,9 @@ const PREVIEW_CHARS: usize = 4000;
 /// A decision trace stays whole: the page reads it as JSON for the Jev panels.
 const WHOLE: &[&str] = &["trace_json"];
 
+/// Every session, newest first. The cap is far over what one engine records (a thousand
+/// sessions read in a quarter of a second); at 200 a busy engine's older sessions could not be
+/// opened at all.
 const SESSIONS: &str = r#"
 MATCH (s:Session) WHERE s.created_at IS NOT NULL
 RETURN s.session_id AS id, s.version AS version, s.created_at AS created_at,
@@ -37,7 +40,7 @@ RETURN s.session_id AS id, s.version AS version, s.created_at AS created_at,
          AS client,
        COLLECT { MATCH (s)-[:CONTAINS]->(n) WHERE n.observed_at IS NOT NULL
                  RETURN n.observed_at ORDER BY n.observed_at DESC LIMIT 1 }[0] AS last_at
-ORDER BY s.created_at DESC LIMIT 200
+ORDER BY s.created_at DESC LIMIT 5000
 "#;
 
 const NODES: &str = r#"
@@ -50,6 +53,16 @@ const SUBGRAPHS: &str = r#"
 MATCH (g:SubGraph {session_id: $session})
 RETURN properties(g) AS props, COLLECT { MATCH (g)-[:MEMBER]->(m) RETURN m.seq } AS members
 ORDER BY g.number
+"#;
+
+/// Every value the Generator indexed in the session (URLs, paths, keys, ...), by the node that
+/// mentions it and who wrote it there: `user` (a prompt), `agent` (a Call or message),
+/// `external` (a tool result). Equal values share a key; sensitive ones are hashed and masked.
+const TOKENS: &str = r#"
+MATCH (t:Token {session_id: $session})
+RETURN t.node_seq AS seq, t.key AS key, t.key_kind AS kind, t.slot AS slot,
+       t.category AS category, coalesce(t.decoded, t.key) AS text
+ORDER BY t.node_seq
 "#;
 
 const EDGES: &str = r#"
@@ -249,8 +262,9 @@ impl Neo4j<'_> {
             })
             .collect();
         let subgraphs = self.read(SUBGRAPHS, parameters.clone()).await?;
-        let edges = self.read(EDGES, parameters).await?;
-        Ok(json!({"nodes": nodes, "subgraphs": subgraphs, "edges": edges}))
+        let edges = self.read(EDGES, parameters.clone()).await?;
+        let tokens = self.read(TOKENS, parameters).await?;
+        Ok(json!({"nodes": nodes, "subgraphs": subgraphs, "edges": edges, "tokens": tokens}))
     }
 
     pub async fn node(&self, session: &str, seq: i64) -> Result<Value, ApiError> {
@@ -443,6 +457,14 @@ fn summary(props: &Map<String, Value>) -> Map<String, Value> {
         ("intent", text(payload.get("intent"))),
         ("text", text(payload.get("text"))),
         ("error", text(payload.get("error"))),
+        // What a tool gave back, for quoting what a Call read: the output, else a file's text.
+        (
+            "output",
+            text(payload.get("tool_response"))
+                .or_else(|| text(payload["tool_response"].get("stdout")))
+                .or_else(|| text(payload["tool_response"].get("content")))
+                .or_else(|| text(payload["tool_response"]["file"].get("content"))),
+        ),
         (
             "file_path",
             text(payload.get("file_path")).or_else(|| text(props.get("file_path"))),

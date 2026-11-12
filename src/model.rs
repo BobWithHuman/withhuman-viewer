@@ -53,6 +53,21 @@ pub struct GraphData {
     pub nodes: Vec<Node>,
     pub subgraphs: Vec<SubGraph>,
     pub edges: Vec<Edge>,
+    /// The values indexed in the session (`graph::TOKENS`); none in older exports.
+    pub tokens: Vec<TokenRow>,
+}
+
+/// One mention of an indexed value: the node, the value's key and kind, who wrote it there
+/// (`user`, `agent`, `external`), and its text (masked when sensitive).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct TokenRow {
+    pub seq: i64,
+    pub key: String,
+    pub kind: String,
+    pub slot: String,
+    pub category: String,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -73,16 +88,14 @@ pub struct Summary {
     pub intent: Option<String>,
     pub text: Option<String>,
     pub error: Option<String>,
+    /// What the tool gave back, its start.
+    pub output: Option<String>,
     pub file_path: Option<String>,
 }
 
 impl Node {
     pub fn seq(&self) -> i64 {
         self.props.get("seq").and_then(Value::as_i64).unwrap_or(-1)
-    }
-
-    pub fn order(&self) -> i64 {
-        self.props.get("order").and_then(Value::as_i64).unwrap_or(0)
     }
 
     pub fn decision(&self) -> Option<&str> {

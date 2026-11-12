@@ -1,4 +1,4 @@
-//! What the viewer remembers between launches: pinned sessions, the last one opened, the view.
+//! What the viewer remembers between launches: pinned sessions, the last one opened, the layout.
 
 use std::fs;
 use std::path::PathBuf;
@@ -12,7 +12,6 @@ use crate::api::config_dir;
 pub struct Prefs {
     pub pinned: Vec<String>,
     pub last_session: Option<String>,
-    pub flow_view: bool,
     pub inspector_width: Option<f64>,
     pub window: Option<WindowPlace>,
     /// The comparison: the case search, the conditions seen and chosen, and the names given

@@ -1,10 +1,13 @@
 //! The app's screens. One state, shared by context, drives them all: the sessions, the one
 //! open, its graph, and what is selected in it.
 
-mod canvas;
 mod compare;
+mod flow;
 mod inspector;
+mod metro;
 mod settings;
+// The session list, kept while sessions are picked in the route list's region.
+#[allow(dead_code)]
 mod sidebar;
 mod trace;
 mod update;
@@ -15,7 +18,7 @@ use std::time::Duration;
 use dioxus::prelude::*;
 
 use crate::api::Backend;
-use crate::layout::{Model, View};
+use crate::layout::Model;
 use crate::menu;
 use crate::model::Session;
 use crate::prefs::{Prefs, WindowPlace};
@@ -35,12 +38,6 @@ pub enum Load<T> {
 pub enum Selection {
     None,
     Node(i64),
-    /// A cause edge, from a Call to what it was traced to.
-    Edge {
-        call: i64,
-        to: i64,
-        id: String,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,8 +57,9 @@ pub struct AppState {
     pub graph_of: Signal<Option<String>>,
     /// The graph or the comparison.
     pub mode: Signal<Mode>,
-    pub view: Signal<View>,
     pub selected: Signal<Selection>,
+    /// The inspector beside the map: closed until the route's detail asks for it.
+    pub inspect: Signal<bool>,
     /// A node for the canvas to bring into view.
     pub focus: Signal<Option<i64>>,
     pub settings_open: Signal<bool>,
@@ -113,11 +111,6 @@ impl AppState {
 pub fn App() -> Element {
     let backend = use_context::<Arc<Backend>>();
     let prefs = use_hook(Prefs::load);
-    let view = if prefs.flow_view {
-        View::Flow
-    } else {
-        View::Tree
-    };
     let width = prefs.inspector_width.unwrap_or(INSPECTOR_WIDTH.1);
     let mut state = use_context_provider(|| AppState {
         public: Signal::new(backend.settings()),
@@ -127,8 +120,8 @@ pub fn App() -> Element {
         graph: Signal::new(Load::Loading),
         graph_of: Signal::new(None),
         mode: Signal::new(Mode::Graph),
-        view: Signal::new(view),
         selected: Signal::new(Selection::None),
+        inspect: Signal::new(false),
         focus: Signal::new(None),
         settings_open: Signal::new(false),
         live: Signal::new(false),
@@ -167,21 +160,20 @@ pub fn App() -> Element {
             onmousemove: drag,
             onmouseup: drop,
             onmouseleave: drop,
-            TopBar {}
+            NavRail {}
+            div { class: "app-main",
             update::UpdateBanner {}
             if (state.mode)() == Mode::Compare {
                 compare::Compare {}
             }
             div { class: "columns", hidden: (state.mode)() == Mode::Compare,
-                sidebar::Sidebar {}
                 main { class: "stage",
-                    canvas::Toolbar {}
                     div { class: "canvas-wrap",
-                        canvas::Canvas {}
+                        flow::FlowMap {}
                         StageNotice {}
-                        canvas::Legend {}
                     }
                 }
+                if (state.inspect)() {
                 div {
                     class: "splitter",
                     title: "끌어서 폭 조절 · 두 번 누르면 기본 폭",
@@ -195,6 +187,8 @@ pub fn App() -> Element {
                     },
                 }
                 inspector::Inspector {}
+                }
+            }
             }
             if (state.settings_open)() {
                 settings::SettingsSheet {}
@@ -219,8 +213,6 @@ fn use_menu(backend: Arc<Backend>, mut state: AppState) {
                 "const s = document.getElementById('session-search'); s?.focus(); s?.select();",
             );
         }
-        menu::TREE => state.view.set(View::Tree),
-        menu::FLOW => state.view.set(View::Flow),
         menu::FIT => state.fit += 1,
         menu::DEMO => state.toggle_demo(&backend),
         menu::CHECK_UPDATES => state.check_updates += 1,
@@ -378,48 +370,68 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
     });
 
     // What to remember between launches.
-    use_effect(move || {
-        let flow = (state.view)() == View::Flow;
-        if state.prefs.peek().flow_view != flow {
-            state.prefs.write().flow_view = flow;
-        }
-    });
     use_effect(move || state.prefs.read().save());
 }
 
+/// The app's menu down the left edge, as a map app keeps one: the logo, then the screens
+/// (route finding over the session's map, and comparing conditions), then where the data
+/// comes from and the settings at the foot.
 #[component]
-fn TopBar() -> Element {
+fn NavRail() -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let p = (state.public)();
     let mode = (state.mode)();
     // The dot says whether the source answered: waiting, reached, or not reached.
     let (source_state, source_title) = match (p.demo, &*state.sessions.read()) {
-        (true, _) => ("demo", "데모 데이터 · 연결 설정 열기"),
-        (false, Load::Ready(_)) => ("ok", "연결됨 · 연결 설정 열기"),
-        (false, Load::Failed(_)) => ("down", "연결되지 않음 · 연결 설정 열기"),
-        (false, Load::Loading) => ("wait", "연결하는 중 · 연결 설정 열기"),
+        (true, _) => ("demo", "데모 데이터 · 누르면 Neo4j로"),
+        (false, Load::Ready(_)) => ("ok", "Neo4j 연결됨 · 누르면 데모로"),
+        (false, Load::Failed(_)) => ("down", "Neo4j에 연결되지 않음 · 누르면 데모로"),
+        (false, Load::Loading) => ("wait", "Neo4j에 연결하는 중"),
     };
     rsx! {
-        header { class: "topbar",
-            span { class: "brand", "WithHuman Viewer" }
-            div { class: "segmented",
-                button { class: if mode == Mode::Graph { "on" } else { "" }, onclick: move |_| state.mode.set(Mode::Graph), "그래프" }
-                button { class: if mode == Mode::Compare { "on" } else { "" }, onclick: move |_| state.mode.set(Mode::Compare), "조건 비교" }
-            }
-            div { class: "spacer" }
+        nav { class: "rail",
+            div { class: "rail-logo", title: "WithHuman Viewer", "W" }
             button {
-                class: "source {source_state}",
+                class: if mode == Mode::Graph { "rail-item on" } else { "rail-item" },
+                onclick: move |_| state.mode.set(Mode::Graph),
+                svg { width: "22", height: "22", view_box: "0 0 24 24",
+                    path { d: "M6 20V11a3 3 0 0 1 3-3h9", fill: "none", stroke: "currentColor", stroke_width: "2.4", stroke_linecap: "round" }
+                    path { d: "M14 4l4 4-4 4", fill: "none", stroke: "currentColor", stroke_width: "2.4", stroke_linecap: "round", stroke_linejoin: "round" }
+                }
+                span { "길찾기" }
+            }
+            button {
+                class: if mode == Mode::Compare { "rail-item on" } else { "rail-item" },
+                onclick: move |_| state.mode.set(Mode::Compare),
+                svg { width: "22", height: "22", view_box: "0 0 24 24",
+                    rect { x: "3.5", y: "4.5", width: "17", height: "15", rx: "2", fill: "none", stroke: "currentColor", stroke_width: "2" }
+                    path { d: "M3.5 10h17M10 4.5v15", fill: "none", stroke: "currentColor", stroke_width: "2" }
+                }
+                span { "조건 비교" }
+            }
+            div { class: "rail-spacer" }
+            button {
+                class: "rail-item source {source_state}",
                 title: "{source_title}",
-                onclick: move |_| state.settings_open.set(true),
-                span { class: "dot" }
-                if p.demo { "데모 데이터" } else { "Neo4j · {p.neo4j_url}" }
+                onclick: move |_| state.toggle_demo(&backend),
+                svg { width: "22", height: "22", view_box: "0 0 24 24",
+                    ellipse { cx: "12", cy: "6", rx: "7", ry: "2.6", fill: "none", stroke: "currentColor", stroke_width: "2" }
+                    path { d: "M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6", fill: "none", stroke: "currentColor", stroke_width: "2" }
+                }
+                span { class: "rail-dot" }
+                span { if p.demo { "데모" } else { "Neo4j" } }
             }
             button {
-                onclick: move |_| state.toggle_demo(&backend),
-                if p.demo { "데모 끄기" } else { "데모 보기" }
+                class: "rail-item",
+                title: "설정",
+                onclick: move |_| state.settings_open.set(true),
+                svg { width: "22", height: "22", view_box: "0 0 24 24",
+                    circle { cx: "12", cy: "12", r: "3.2", fill: "none", stroke: "currentColor", stroke_width: "2" }
+                    path { d: "M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round" }
+                }
+                span { "설정" }
             }
-            button { class: "icon", title: "설정", onclick: move |_| state.settings_open.set(true), "⚙" }
         }
     }
 }
