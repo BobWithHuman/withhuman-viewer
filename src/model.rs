@@ -21,6 +21,57 @@ pub struct Session {
     pub cwd: Option<String>,
     /// The client ID the hooks sent (`x-withhuman-client`).
     pub client: Option<String>,
+    /// Calls allowed though hard to undo: what the user asked for can still need an audit.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub risky: i64,
+    /// Calls with no decision: the engine only watched, its decision failed, or the hook was
+    /// gone around.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub undecided: i64,
+    /// Calls a tool result made the agent take, rather than the user's request.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub from_result: i64,
+    /// How the engine enforced the session's last decision: `record`, `shadow` or `enforce`.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub mode: Option<String>,
+}
+
+/// One Call as the security team's charts count it (`graph::CALL_FACTS`).
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct CallFact {
+    pub session: String,
+    /// The Call's node number in its session, to open it on the route map.
+    pub seq: i64,
+    /// What it acted on: the command, file, URL or pattern, cut short.
+    pub target: Option<String>,
+    /// Why the engine decided as it did.
+    pub reason: Option<String>,
+    /// The person's prompt the Call's turn answered, cut short.
+    pub prompt: Option<String>,
+    /// The tool ran: a result came back. A Call held for review ran only if the person allowed it.
+    pub ran: bool,
+    /// When its first result came back (ms).
+    pub ran_at: Option<i64>,
+    /// The machine: the client ID the hooks sent.
+    pub client: Option<String>,
+    pub cwd: Option<String>,
+    /// When it was decided, else when it was seen (ms).
+    pub at: Option<i64>,
+    /// `ALLOW`, `REVIEW`, `DENY`, or none when nothing decided it.
+    pub decision: Option<String>,
+    /// `record`, `shadow` or `enforce`.
+    pub mode: Option<String>,
+    /// The rule that decided it, such as `intent::mismatch`.
+    pub rule: Option<String>,
+    pub tool: Option<String>,
+    /// What made the agent take it: `request` (the user), `segment` (a tool result), `none`.
+    pub link: Option<String>,
+    /// The worst thing it broke, such as `exfiltration`; `none` for nothing.
+    pub worst: Option<String>,
+    /// Hard to undo ([`crate::metro::IRREVERSIBLE`] or more).
+    pub irreversible: bool,
 }
 
 impl Session {
@@ -193,6 +244,36 @@ pub struct Token {
     pub decoded: Value,
 }
 
+/// One mention of a sensitive value (a credential, personal, financial or device identifier)
+/// in a node: who wrote it there (`user` a prompt, `external` a tool result, `agent` a Call's
+/// input or the agent's words), the value masked, and for a Call how it was decided.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct SecretMention {
+    pub session: String,
+    pub seq: i64,
+    /// The node's kind: `Call`, `Request`, `Segment`, ...
+    pub node: Option<String>,
+    pub slot: Option<String>,
+    /// The value's key: the SHA-256 of it, so equal values share one.
+    pub key: String,
+    /// `api_key`, `jwt`, `kr_rrn`, `card_pan`, ...
+    pub kind: Option<String>,
+    /// `credential`, `pii`, `financial` or `device`.
+    pub category: Option<String>,
+    /// The value, masked.
+    pub text: Option<String>,
+    pub decision: Option<String>,
+    pub client: Option<String>,
+    pub at: Option<i64>,
+    pub tool: Option<String>,
+    /// What the Call acted on (masked as stored).
+    pub target: Option<String>,
+    /// A result came back.
+    pub ran: bool,
+}
+
 /// A JSON document stored as a string property; anything unreadable reads as nothing.
 pub fn parse_json(value: Option<&Value>) -> Value {
     value
@@ -236,4 +317,258 @@ mod tests {
         assert_eq!(p.instructs, None);
         assert_eq!(p.source.as_deref(), Some("Read"));
     }
+}
+
+/// What the engine knows of the machines, people and sessions it protects (withhuman-core's agent
+/// inventory): its tables as they are, or the demo's.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct Inventory {
+    pub clients: Vec<Device>,
+    pub projects: Vec<DeviceProject>,
+    pub users: Vec<Person>,
+    pub keys: Vec<ApiKey>,
+    pub events: Vec<KeyEvent>,
+    pub sessions: Vec<SessionRun>,
+}
+
+/// A machine with the hooks: its client ID, what it said when it registered, when its hooks were
+/// first and last heard.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct Device {
+    pub client_id: String,
+    pub team: Option<String>,
+    pub hostname: Option<String>,
+    pub os: Option<String>,
+    pub os_user: Option<String>,
+    pub hook_version: Option<String>,
+    pub agent: Option<String>,
+    pub user_email: Option<String>,
+    /// It registered at install; none when only its hooks were heard.
+    pub registered_at: Option<i64>,
+    pub updated_at: Option<i64>,
+    pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
+}
+
+/// A project a machine's hooks were installed in.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct DeviceProject {
+    pub client_id: String,
+    pub project: String,
+    pub agent: Option<String>,
+    pub hook_version: Option<String>,
+    pub installed_at: Option<i64>,
+    pub updated_at: Option<i64>,
+}
+
+/// A person keys were issued to.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct Person {
+    pub email: String,
+    pub created_at: Option<i64>,
+    /// `person` or `service`, when the engine tells.
+    pub kind: Option<String>,
+}
+
+/// A person's key, without its hash: who issued it, when it was last used, whether and why it
+/// was revoked, and the Calls refused with it since.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct ApiKey {
+    pub key_id: String,
+    pub user_email: String,
+    pub created_at: Option<i64>,
+    pub created_by: Option<String>,
+    pub note: Option<String>,
+    pub last_used_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+    pub revoked_by: Option<String>,
+    pub revoke_reason: Option<String>,
+    pub first_denied_at: Option<i64>,
+    pub last_denied_at: Option<i64>,
+    pub denied_count: Option<i64>,
+}
+
+/// A key issued, revoked, or a Call refused for a revoked key: the audit's record of who stopped
+/// whom.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct KeyEvent {
+    /// `issued`, `revoked` or `denied`.
+    pub kind: String,
+    pub actor: Option<String>,
+    pub reason: Option<String>,
+    pub user_email: Option<String>,
+    pub key_id: Option<String>,
+    pub session_id: Option<String>,
+    pub client_id: Option<String>,
+    pub at: Option<i64>,
+}
+
+/// A session as the inventory sees it: which machine and person, how it started and ended.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct SessionRun {
+    pub session_id: String,
+    pub client_id: Option<String>,
+    pub user_email: Option<String>,
+    /// `startup`, `resume`, `clear`, `compact` or `fork`.
+    pub start_source: Option<String>,
+    pub permission_mode: Option<String>,
+    pub model: Option<String>,
+    pub created_at: Option<i64>,
+    pub last_seen_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    /// `clear`, `resume`, `logout`, `prompt_input_exit` or `other`.
+    pub end_reason: Option<String>,
+}
+
+/// The MCP servers and tools the gateway lets the agents use, as its allowlist keeps them, with
+/// the requests developers sent to have more let through, and the calls the gateway refused.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpCatalog {
+    /// The allowlist's version, and when it last changed.
+    pub version: String,
+    pub updated_at: Option<i64>,
+    pub servers: Vec<McpServer>,
+    pub requests: Vec<McpRequest>,
+    pub refused: Vec<McpRefusal>,
+}
+
+/// An approved server: reached at a URL (`remote`) or run by the gateway (`local`).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpServer {
+    pub name: String,
+    pub transport: String,
+    /// The URL, or the command.
+    pub endpoint: String,
+    pub approved_by: Option<String>,
+    pub approved_at: Option<i64>,
+    /// The request it was approved on, if one.
+    pub request: Option<String>,
+    pub tools: Vec<McpTool>,
+}
+
+/// A tool of an approved server, and how far it is let through.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpTool {
+    pub name: String,
+    /// What the server tells the agent the tool does.
+    pub description: String,
+    /// `read`, `write`, `delete` or `send` (out of the company).
+    pub nature: String,
+    /// `allow`, `review` (a person confirms each call) or `deny`.
+    pub level: String,
+    /// The teams or people it is for; everyone when empty.
+    pub scope: Vec<String>,
+    pub approved_by: Option<String>,
+    pub approved_at: Option<i64>,
+    pub calls: Vec<McpUse>,
+}
+
+/// A call of a tool that went through the gateway.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpUse {
+    pub at: i64,
+    pub user: String,
+    pub client: String,
+    /// What it was called on, cut short.
+    pub target: String,
+    /// `ALLOW`, `REVIEW` or `DENY`, as for any Call.
+    pub decision: String,
+    pub ran: bool,
+}
+
+/// A developer's request, sent from their machine, to have a server or a tool let through, or a
+/// tool opened to them, and why; and what the security team answered.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpRequest {
+    pub id: String,
+    pub at: i64,
+    pub user: String,
+    pub client: String,
+    /// The project it was asked from.
+    pub cwd: Option<String>,
+    /// `server` (a new server), `tool` (a new tool of an approved server) or `scope` (an
+    /// approved tool opened to the person).
+    pub kind: String,
+    pub server: String,
+    /// A new server's URL or command, and `remote` or `local`.
+    pub endpoint: Option<String>,
+    pub transport: Option<String>,
+    /// The tools the server offers, as the gateway listed them when the request came.
+    pub offered: Vec<McpOffered>,
+    /// The tools asked for.
+    pub wanted: Vec<String>,
+    /// Why, in the developer's words.
+    pub message: String,
+    /// The calls refused for this before it was asked.
+    pub attempts: i64,
+    /// `pending`, `approved` or `rejected`.
+    pub status: String,
+    pub decided_by: Option<String>,
+    pub decided_at: Option<i64>,
+    /// The security team's answer to the developer.
+    pub answer: Option<String>,
+}
+
+/// A tool a server offers, before it is approved.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpOffered {
+    pub name: String,
+    pub description: String,
+    pub nature: String,
+}
+
+/// Calls the gateway refused, the same person, server, tool and reason counted together.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct McpRefusal {
+    pub first_at: i64,
+    pub last_at: i64,
+    pub count: i64,
+    pub user: String,
+    pub client: String,
+    pub server: String,
+    pub tool: Option<String>,
+    /// `unapproved` (not on the allowlist), `pending` (asked for, not yet decided), `scope`
+    /// (approved, not for this person) or `deny` (a tool set to deny).
+    pub reason: String,
+    /// The request made for it, if one.
+    pub request: Option<String>,
+}
+
+/// A change the MCP page makes to the allowlist.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub enum McpChange {
+    /// How far a tool is let through: `allow`, `review` or `deny`.
+    Level { server: String, tool: String, level: String },
+    /// A request approved, with the level for each tool offered and whom they are for, or
+    /// rejected; with the answer to the developer.
+    Decide { id: String, approve: bool, actor: String, answer: String, levels: Vec<(String, String)>, scope: Vec<String> },
 }
