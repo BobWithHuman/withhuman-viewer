@@ -2190,7 +2190,7 @@ button.primary { background: var(--c-accent); border-color: var(--c-accent); }
 .tb-lights { flex: none; width: 76px; }
 .tb-icon { width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: #c8c8c8; display: grid; place-items: center; }
 .tb-icon:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
-.tb-logo { font: italic 900 21px/1 -apple-system, BlinkMacSystemFont, sans-serif; color: #f4f4f4; letter-spacing: -.04em; margin: 0 2px; }
+.tb-logo { display: block; flex: none; width: 32px; height: 32px; object-fit: contain; margin: 0 2px; }
 .tb-seg { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: #232424; }
 .tb-seg button { height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 7px; background: none;
   color: #d6d6d6; font-size: 13px; font-weight: 500; }
@@ -3394,3 +3394,64 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .fill { display: block; height: 100%; min-width: 3px; border-radius: 4px; }
 button.vz-rank:disabled { cursor: default; opacity: 1; }
 .cs-list-row.sx-value .meta { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Match the app's charcoal panels regardless of the OS color scheme. */
+.call-verdict-dialog {
+  --bg: var(--af-field); --panel: var(--af-panel); --raised: var(--af-raise);
+  --text: var(--af-text); --muted: var(--af-mute); --line: var(--af-raise);
+  --hover: var(--af-raise); --accent: var(--af-blue);
+  --accent-soft: color-mix(in srgb, var(--af-blue) 18%, var(--af-panel));
+  --shadow: 0 20px 60px rgba(0, 0, 0, .55);
+  color-scheme: dark;
+}
+.call-verdict-dialog { width: min(860px, calc(100vw - 48px)); max-width: none; max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+.call-verdict-dialog::backdrop { background: rgba(0, 0, 0, .5); }
+.call-verdict-content { display: flex; flex-direction: column; max-height: calc(100vh - 50px); }
+.call-verdict-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border-bottom: 1px solid var(--line); }
+.call-verdict-header h2 { margin: 0; font-size: 16px; }
+.call-verdict-dialog .inspector { width: 100% !important; flex: 1 1 auto; overflow: hidden; border: 0; }
+.call-verdict-dialog .tabs { flex-wrap: wrap; }
+
+.call-verdict-header { background: var(--af-bar); }
+.call-verdict-dialog .tabs { background: var(--af-tab); }
+.call-verdict-dialog .tabs button.on { color: var(--accent); }
+.call-verdict-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.call-verdict-dialog .verdict-extra > summary { cursor: pointer; width: fit-content; padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); }
+.call-verdict-dialog .verdict-extra > summary:hover { background: var(--af-btn); }
+.call-verdict-dialog .verdict-extra > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.call-verdict-dialog .verdict-extra .extra-hide, .call-verdict-dialog .verdict-extra[open] .extra-show { display: none; }
+.call-verdict-dialog .verdict-extra[open] .extra-hide { display: inline; }
+.call-verdict-dialog .verdict-extra-body { margin-top: 12px; }
+
+/* Tool verdicts live on the map, at the same offset as answer bubbles. */
+.fx-prompt.tool-verdict { width: 640px; max-width: none; max-height: none; padding: 0; overflow: visible; background: transparent; box-shadow: none; z-index: 8; }
+.fx-prompt.tool-verdict::before { content: ""; position: absolute; top: -9px; left: var(--tail-x, 28px); width: 18px; height: 18px; transform: rotate(45deg); background: var(--af-panel); border-top: 1px solid var(--af-raise); border-left: 1px solid var(--af-raise); }
+.tool-verdict .call-verdict-dialog { position: relative; width: 100%; max-height: none; margin: 0; overflow: hidden; border-radius: 10px; }
+.tool-verdict .call-verdict-content { max-height: 560px; }
+.tool-verdict .call-verdict-content { position: relative; }
+.tool-verdict .inspector-body { padding-top: 18px; }
+.tool-verdict .verdict { padding-right: 28px; }
+.call-verdict-dialog .verdict-close { position: absolute; top: 8px; right: 8px; z-index: 1; border: 0; background: transparent; color: var(--muted); }
+.call-verdict-dialog .verdict-close:hover { background: var(--hover); color: var(--text); }
+
+.fx-prompt.tool-verdict[data-placement="above"]::before { top: auto; bottom: -9px; transform: rotate(225deg); }
+
+.final-judgment { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.judgment-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.judgment-heading h3 { margin: 0; color: var(--text); font-size: 13px; }
+.judgment-chart { position: relative; margin-top: 14px; padding-top: 36px; padding-bottom: 30px; }
+.judgment-zones { display: flex; height: 18px; overflow: hidden; border-radius: 5px; }
+.judgment-zones > span { display: block; }
+.judgment-marker { position: absolute; top: 0; height: 59px; width: 0; z-index: 1; border-left: 2px solid var(--text); }
+.judgment-marker strong { position: absolute; top: 0; width: max-content; white-space: nowrap; word-break: normal; overflow-wrap: normal; padding: 1px 6px; background: var(--bg); color: var(--text); font-size: 20px; font-variant-numeric: tabular-nums; }
+.judgment-threshold { white-space: nowrap; word-break: normal; overflow-wrap: normal; position: absolute; top: 59px; transform: translateX(-50%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.judgment-threshold::before { content: ""; position: absolute; left: 50%; top: -23px; height: 18px; border-left: 2px dashed var(--bg); }
+.judgment-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 11px; color: var(--muted); }
+.judgment-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.judgment-legend i { width: 8px; height: 8px; border-radius: 2px; }
+.judgment-legend small { margin-left: auto; }
+
+.tool-verdict .final-judgment { margin-top: 14px; }
+
+.setup-top img.setup-mark { display: block; width: 32px; height: 32px; object-fit: contain; background: transparent; border-radius: 0; }

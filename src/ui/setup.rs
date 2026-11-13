@@ -214,8 +214,8 @@ pub fn Setup() -> Element {
             super::TitleBar { overlay: true }
             div { class: "setup-glow" }
             header { class: "setup-top",
-                span { class: "setup-mark", "W" }
-                span { "WithHuman Viewer" }
+                img { class: "setup-mark", src: super::logo_source(), alt: "Vienna", draggable: "false" }
+                span { "{super::APP_NAME}" }
                 span { class: "setup-step", if key_ok { "2 / 2" } else { "1 / 2" } }
             }
             h1 { class: "setup-title", "에이전트가 누가 시킨" br {} "일을 했는지 봅니다" }

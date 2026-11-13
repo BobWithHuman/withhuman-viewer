@@ -189,6 +189,7 @@ pub struct AppState {
     pub selected: Signal<Selection>,
     /// The inspector beside the map: closed until the route's detail asks for it.
     pub inspect: Signal<bool>,
+    pub call_details_open: Signal<bool>,
     /// A node for the canvas to bring into view.
     pub focus: Signal<Option<i64>>,
     pub settings_open: Signal<bool>,
@@ -209,6 +210,11 @@ impl AppState {
         self.focus.set(Some(seq));
     }
 
+    pub fn show_call(mut self, seq: i64) {
+        self.selected.set(Selection::Node(seq));
+        self.call_details_open.set(true);
+    }
+
     /// Opens a Call of any session in the graph, from the comparison.
     pub fn open_call(mut self, session: String, seq: i64) {
         self.mode.set(Mode::Graph);
@@ -220,6 +226,7 @@ impl AppState {
         if self.current.peek().as_deref() == Some(id.as_str()) {
             return;
         }
+        self.call_details_open.set(false);
         self.selected.set(Selection::None);
         self.prefs.write().last_session = Some(id.clone());
         self.current.set(Some(id));
@@ -257,6 +264,7 @@ pub fn App() -> Element {
         mode: Signal::new(Mode::Graph),
         selected: Signal::new(Selection::None),
         inspect: Signal::new(false),
+        call_details_open: Signal::new(false),
         focus: Signal::new(None),
         settings_open: Signal::new(false),
         live: Signal::new(false),
@@ -582,6 +590,18 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
     use_effect(move || state.prefs.read().save());
 }
 
+fn logo_source() -> &'static str {
+    use base64::Engine;
+    static LOGO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LOGO.get_or_init(|| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD
+                .encode(include_bytes!("../../icons/Vienna.png"))
+        )
+    })
+}
+
 /// The bar across the top, as a design app keeps one: the traffic lights at its left, the
 /// sidebar's button, the mark, then the screens as one segmented control whose chosen screen
 /// takes its own colour (the main page lime, the route map cyan, the comparison salmon); at its
@@ -589,6 +609,7 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
 /// zooms it, as a title bar does.
 #[component]
 fn TopBar() -> Element {
+    let logo = logo_source();
     let mut state = use_context::<AppState>();
     let p = (state.public)();
     let screen = (state.screen)();
@@ -637,7 +658,7 @@ fn TopBar() -> Element {
                 onclick: move |_| state.sidebar.toggle(),
                 {sidebar_icon()}
             }
-            span { class: "tb-logo", "W" }
+            img { class: "tb-logo", src: "{logo}", alt: "Vienna", draggable: "false" }
             div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                 button { class: "{seg(\"home\")}", onclick: move |_| go(Screen::Home, mode),
                     {line_icon("M4 11l8-6.5L20 11v8.5a1 1 0 0 1-1 1h-4.5V15h-5v5.5H5a1 1 0 0 1-1-1z")}

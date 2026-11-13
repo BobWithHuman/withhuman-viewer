@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1263 1246" role="img" aria-label="Burgundy rounded square icon with cream and coral V symbol">
+ <defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#510025"/><stop offset="0.55" stop-color="#60002c"/><stop offset="1" stop-color="#49001e"/></linearGradient>
+  <linearGradient id="cream" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff8ef"/><stop offset="1" stop-color="#f8eee4"/></linearGradient>
+  <linearGradient id="coral" x1="0" y1="0" x2="0.7" y2="1"><stop stop-color="#ff7b69"/><stop offset="1" stop-color="#fa705c"/></linearGradient>
+ </defs>
+ <path d="M 193 182 L 164 212 L 138 251 L 124 282 L 113 325 L 111 354 L 111 885 L 115 917 L 129 962 L 158 1013 L 194 1053 L 233 1082 L 259 1096 L 298 1110 L 336 1117 L 913 1117 L 950 1111 L 990 1097 L 1035 1071 L 1066 1044 L 1091 1014 L 1116 970 L 1129 934 L 1136 896 L 1137 348 L 1132 306 L 1113 251 L 1089 212 L 1060 180 L 1038 162 L 1008 144 L 970 129 L 933 121 L 341 120 L 307 125 L 265 138 L 229 156 Z" fill="url(#bg)"/>
+ <path d="M 321 370 L 308 380 L 291 398 L 282 411 L 273 430 L 266 457 L 266 486 L 270 506 L 281 532 L 409 742 L 456 815 L 487 855 L 514 882 L 545 903 L 570 913 L 599 918 L 630 916 L 663 906 L 690 891 L 703 881 L 726 858 L 746 832 L 881 620 L 862 634 L 828 654 L 798 669 L 756 685 L 718 693 L 692 693 L 663 686 L 639 672 L 622 655 L 607 634 L 554 531 L 499 414 L 487 395 L 469 376 L 442 359 L 425 353 L 404 349 L 379 349 L 362 352 L 339 360 Z" fill="url(#cream)"/>
+ <path d="M 940 361 L 922 348 L 896 337 L 874 333 L 855 333 L 828 338 L 809 345 L 784 359 L 765 375 L 740 408 L 613 641 L 622 654 L 639 671 L 663 685 L 691 692 L 719 692 L 753 685 L 796 669 L 846 643 L 877 622 L 880 622 L 879 621 L 882 619 L 934 540 L 955 512 L 967 490 L 974 468 L 976 434 L 972 412 L 958 382 Z" fill="url(#coral)"/>
+</svg>

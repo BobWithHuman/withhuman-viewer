@@ -52,10 +52,35 @@ fn main() {
             .with_fullsize_content_view(true)
     };
     let head = format!("<meta charset=\"utf-8\"><style>{}</style>", ui::CSS);
+    let icon_image = image::load_from_memory(include_bytes!("../icons/icon.png"))
+        .expect("bundled Vienna app icon must be a valid PNG")
+        .into_rgba8();
+    let (icon_width, icon_height) = icon_image.dimensions();
+    let icon = dioxus::desktop::tao::window::Icon::from_rgba(
+        icon_image.into_raw(),
+        icon_width,
+        icon_height,
+    )
+    .expect("bundled Vienna app icon must have valid RGBA dimensions");
     let config = Config::new()
         .with_window(window)
+        .with_icon(icon)
         .with_menu(menu::build())
         .with_custom_head(head);
+    // Wayland uses the application ID to find the installed desktop entry and icon.
+    #[cfg(target_os = "linux")]
+    let config = {
+        use dioxus::desktop::tao::{
+            event_loop::EventLoopBuilder, platform::unix::EventLoopBuilderExtUnix,
+        };
+        let mut event_loop = EventLoopBuilder::with_user_event();
+        event_loop.with_app_id(if cfg!(feature = "admin") {
+            "dev.withhuman.console"
+        } else {
+            "dev.withhuman.viewer"
+        });
+        config.with_event_loop(event_loop.build())
+    };
     dioxus::LaunchBuilder::desktop()
         .with_cfg(config)
         .with_context(backend)
