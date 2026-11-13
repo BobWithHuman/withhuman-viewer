@@ -30,6 +30,8 @@ const RUN: usize = 3;
 const MANY: i64 = -1_000_000_000_000;
 /// A building further than this from every street (in metres) has no door a way can reach.
 const REACH: f64 = 45.0;
+/// How far apart the buildings that are Calls stand, while the town has room (in metres).
+const SPACE: f64 = 34.0;
 
 /// A place in the town, in metres east and north of its middle.
 type Pt = (f64, f64);
@@ -485,9 +487,16 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
     let mut at: HashMap<i64, usize> = HashMap::new();
     // The buildings Calls already are, the session over.
     let mut taken: HashSet<usize> = HashSet::new();
-    // The free building nearest a place, taken: a big one when one is asked for and near.
+    // Where those buildings are, so the next keeps its distance.
+    let mut spots: Vec<Pt> = Vec::new();
+    // The free building nearest a place, taken: one standing clear of the Calls already
+    // placed, so the way to it runs some way along the streets, and a big one when one is
+    // asked for and near.
     let mut take = |near: Pt, big: bool| -> Option<Building> {
         let free = || town.buildings.iter().filter(|b| !taken.contains(&b.id));
+        let clear = |b: &&Building| {
+            far(b.mid, near) >= SPACE && spots.iter().all(|&s| far(b.mid, s) >= SPACE)
+        };
         let nearest = |list: Vec<&Building>| {
             list.into_iter()
                 .min_by(|a, b| far(a.mid, near).total_cmp(&far(b.mid, near)))
@@ -497,15 +506,18 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
             .then(|| {
                 nearest(
                     free()
-                        .filter(|b| b.ground >= 260.0 && far(b.mid, near) < 160.0)
+                        .filter(clear)
+                        .filter(|b| b.ground >= 260.0 && far(b.mid, near) < 200.0)
                         .collect(),
                 )
             })
             .flatten()
+            .or_else(|| nearest(free().filter(clear).collect()))
+            // The town filling up: any free building, then the nearest, shared.
             .or_else(|| nearest(free().collect()))
-            // More Calls than the town has buildings: the nearest, shared.
             .or_else(|| nearest(town.buildings.iter().collect()))?;
         taken.insert(found.id);
+        spots.push(found.mid);
         Some(found)
     };
     let line = |way: &[Pt]| -> Vec<[f64; 2]> { way.iter().map(|&p| town.globe(p)).collect() };
@@ -925,19 +937,28 @@ mod tests {
                 assert_eq!(route[..before.len()], before[..]);
             }
         }
-        // The two turns start at crossings well apart, and each one's Calls are near its own.
+        // The two turns start at crossings well apart, and each one's Calls are nearer its own
+        // than the other's; the Calls of a turn keep their distance from each other.
         let starts = pts(&serde_json::json!([nodes[0]["at"], nodes[41]["at"]]));
         assert!(far(starts[0], starts[1]) > 100.0);
-        for (t, own) in [(0usize, starts[0]), (1, starts[1])] {
-            let mean = nodes
+        let mean = |t: usize, from: Pt| {
+            nodes
                 .iter()
                 .filter(|n| n["turn"] == t && n["kind"] != "ask")
-                .map(|n| far(pts(&serde_json::json!([n["at"]]))[0], own))
+                .map(|n| far(pts(&serde_json::json!([n["at"]]))[0], from))
                 .sum::<f64>()
-                / 40.0;
+                / 40.0
+        };
+        assert!(mean(0, starts[0]) < mean(0, starts[1]) && mean(1, starts[1]) < mean(1, starts[0]));
+        let homes: Vec<Pt> = nodes
+            .iter()
+            .filter(|n| n["kind"] != "ask")
+            .map(|n| pts(&serde_json::json!([n["at"]]))[0])
+            .collect();
+        for (i, a) in homes.iter().enumerate() {
             assert!(
-                mean < 150.0,
-                "turn {t}'s Calls are {mean} m from its request on average"
+                homes[i + 1..].iter().all(|b| far(*a, *b) >= SPACE - 0.5),
+                "two Calls stand too near"
             );
         }
         assert_eq!(nodes[at[&5]]["state"], "blocked");

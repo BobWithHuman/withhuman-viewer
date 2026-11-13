@@ -3,7 +3,8 @@
 // the page reads too). The page says which building each Call is, where each turn's request
 // is, and each Call's way along the streets (admin/route.rs); this file draws the town tilted
 // as a driving map is, raises the buildings that are Calls, and lights the way to the one
-// picked: a blue line on a darker casing, the buildings it goes by in blue, a pin on the one
+// picked: a blue line on a darker casing with marks pointing the way, the buildings it goes
+// by in blue, a pin on the one
 // it arrives at (green, red for a Call the engine stopped, amber for one it held), and the
 // same way as directions in a card. A building picked is the app's selection; a request
 // picked is its turn.
@@ -14,7 +15,10 @@ import district from "../../src/admin/district.json";
 // A width on the ground in metres as the line widths that keep it at every zoom: at this
 // latitude a pixel is 7.57 m at zoom 14 and halves with each zoom after.
 const metres = (m) => ["interpolate", ["exponential", 2], ["zoom"], 14, m / 7.57, 20, m / 0.118];
-const WIDTHS = { major: 10, minor: 6, lane: 3.6 };
+// How wide each kind of street is drawn, kerb to kerb: wider than it is on the ground, so the
+// roadway and its paint read at the scale the buildings are seen at.
+const WIDTHS = { major: 17, minor: 10.5, lane: 6.5 };
+const PAVEMENT = 2.6;
 const TONES = {
   none: "#f1eff4",
   dim: "#dcdbe8",
@@ -40,18 +44,37 @@ function style() {
     route: { type: "geojson", data: { type: "FeatureCollection", features: [] } },
   };
   const round = { "line-cap": "round", "line-join": "round" };
-  // Pavements under every roadway, so where streets meet they join as one.
-  for (const kind of ["lane", "minor", "major"]) {
-    sources[kind] = { type: "geojson", data: lines(kind) };
-    layers.push({ id: `pave-${kind}`, type: "line", source: kind, layout: round, paint: { "line-color": "#f6f5fa", "line-width": metres(WIDTHS[kind] + 3) } });
+  const kinds = ["lane", "minor", "major"];
+  for (const kind of kinds) sources[kind] = { type: "geojson", data: lines(kind) };
+  // Every street's kerb line, then every pavement, then every roadway: each drawn for all
+  // the streets before the next, so where streets meet they join as one crossing.
+  for (const kind of kinds) {
+    layers.push({ id: `kerb-${kind}`, type: "line", source: kind, layout: round, paint: { "line-color": "#d2d0e0", "line-width": metres(WIDTHS[kind] + 2 * PAVEMENT + 0.7) } });
   }
-  for (const kind of ["lane", "minor", "major"]) {
-    layers.push({ id: `road-${kind}`, type: "line", source: kind, layout: round, paint: { "line-color": "#b6b8da", "line-width": metres(WIDTHS[kind]) } });
+  for (const kind of kinds) {
+    layers.push({ id: `pave-${kind}`, type: "line", source: kind, layout: round, paint: { "line-color": "#f7f6fb", "line-width": metres(WIDTHS[kind] + 2 * PAVEMENT) } });
   }
-  layers.push({ id: "paint-major", type: "line", source: "major", paint: { "line-color": "#f6e3a0", "line-width": metres(0.3) } });
-  layers.push({ id: "paint-minor", type: "line", source: "minor", paint: { "line-color": "#fbfbff", "line-width": metres(0.22), "line-dasharray": [14, 12] } });
-  layers.push({ id: "way-casing", type: "line", source: "route", layout: round, paint: { "line-color": "#1d4fbf", "line-width": metres(5.2) } });
-  layers.push({ id: "way", type: "line", source: "route", layout: round, paint: { "line-color": "#3b82f6", "line-width": metres(3.6) } });
+  for (const kind of kinds) {
+    layers.push({ id: `road-${kind}`, type: "line", source: kind, layout: round, paint: { "line-color": "#aeb1d6", "line-width": metres(WIDTHS[kind]) } });
+  }
+  // The paint: a street's lanes as broken white lines either side of a yellow middle line, a
+  // back street's as one broken white line down its middle, from near enough to see them.
+  const broken = { "line-color": "#fbfbff", "line-dasharray": [9, 9] };
+  layers.push({ id: "paint-minor", type: "line", source: "minor", minzoom: 16.2, paint: { ...broken, "line-width": metres(0.32) } });
+  for (const side of [-1, 1]) {
+    layers.push({ id: `paint-lane-${side}`, type: "line", source: "major", minzoom: 15.6, paint: { ...broken, "line-width": metres(0.34), "line-offset": metres((side * WIDTHS.major) / 4) } });
+  }
+  layers.push({ id: "paint-major", type: "line", source: "major", paint: { "line-color": "#f3da86", "line-width": metres(0.5) } });
+  // The way lit, as a route finder draws one: a blue line on a wider, darker one, and marks
+  // along it pointing the way it goes.
+  layers.push({ id: "way-casing", type: "line", source: "route", layout: round, paint: { "line-color": "#1d4fbf", "line-width": metres(6.6) } });
+  layers.push({ id: "way", type: "line", source: "route", layout: round, paint: { "line-color": "#3b82f6", "line-width": metres(4.8) } });
+  layers.push({
+    id: "way-marks",
+    type: "symbol",
+    source: "route",
+    layout: { "symbol-placement": "line", "symbol-spacing": 56, "icon-image": "onward", "icon-size": ["interpolate", ["linear"], ["zoom"], 15, 0.32, 18.5, 0.7], "icon-allow-overlap": true, "icon-ignore-placement": true, "icon-rotation-alignment": "map" },
+  });
   const tone = ["coalesce", ["feature-state", "tone"], "none"];
   layers.push({
     id: "buildings",
@@ -102,6 +125,21 @@ function mount(container) {
     renderWorldCopies: false,
   });
   map.on("error", (e) => console.error("town map", e.error ?? e));
+  map.on("styleimagemissing", (e) => {
+    if (e.id !== "onward" || map.hasImage("onward")) return;
+    // A white chevron pointing along the line, which runs to the right of the image.
+    const side = 32;
+    const c = Object.assign(document.createElement("canvas"), { width: side, height: side }).getContext("2d");
+    c.fillStyle = "#fff";
+    c.beginPath();
+    c.moveTo(27, 16);
+    c.lineTo(9, 5);
+    c.lineTo(14, 16);
+    c.lineTo(9, 27);
+    c.closePath();
+    c.fill();
+    map.addImage("onward", c.getImageData(0, 0, side, side));
+  });
   const ready = new Promise((done) => map.once("load", done));
   const api = { container, onPick: null };
   let nodes = [];
