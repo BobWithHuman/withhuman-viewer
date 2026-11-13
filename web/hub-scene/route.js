@@ -85,18 +85,23 @@ function block(kind, pinned) {
   };
   let tall = 1;
   if (kind === "ask") {
-    for (const [r, h, y] of [[0.86, 0.26, 0.13], [0.56, 0.2, 0.36]]) {
-      const hex = solid(new THREE.CylinderGeometry(r, r, h, 6), wall, 0, y, 0);
-      hex.rotation.y = Math.PI / 6;
-      g.add(hex);
+    // A signpost at the corner: the request on its board, turned to the eye, and under it a
+    // smaller board for what the agent wrote it would do.
+    g.add(solid(new THREE.CylinderGeometry(0.17, 0.2, 0.07, 24), wall, 0, 0.035, 0));
+    part(new THREE.CylinderGeometry(0.035, 0.035, 1.3, 12), 0, 0.68, 0);
+    const board = box(0.98, 0.46, 0.07, 0.03, 1.22, 0.03, 0.03);
+    board.rotation.y = Math.PI / 4;
+    for (let k = 0; k < 3; k++) {
+      const row = part(new THREE.BoxGeometry(0.66 - k * 0.14, 0.045, 0.012), 0.062, 1.33 - k * 0.11, 0.062);
+      row.rotation.y = Math.PI / 4;
     }
-    tall = 0.46;
     if (pinned) {
-      // A pin stood on the request: where the agent said it was going with it.
-      part(new THREE.CylinderGeometry(0.035, 0.035, 0.7, 12), 0, 0.81, 0);
-      g.add(solid(new THREE.SphereGeometry(0.2, 32, 20), wall, 0, 1.3, 0));
-      tall = 1.5;
+      const under = box(0.7, 0.2, 0.06, 0.03, 0.82, 0.03, 0.03);
+      under.rotation.y = Math.PI / 4;
+      const row = part(new THREE.BoxGeometry(0.46, 0.04, 0.012), 0.058, 0.82, 0.058);
+      row.rotation.y = Math.PI / 4;
     }
+    tall = 1.5;
   } else if (kind === "words") {
     // A page stood on its edge: the words read out of a tool result.
     const page = box(0.5, 0.64, 0.05, 0, 0.34, 0, 0.02);
@@ -461,7 +466,7 @@ function mount(container) {
       const tone = new THREE.MeshStandardMaterial({ color: WAYS[end.state] ?? GREEN, roughness: 0.55 });
       // Where it leaves from: a ring round the request, as a route finder marks the start.
       const start = nodes[lit[lit.length - 1]];
-      const ring = flat(new THREE.RingGeometry(1.28, 1.46, 72), ROUTE, 0.019, 8);
+      const ring = flat(new THREE.RingGeometry(0.62, 0.76, 56), ROUTE, 0.019, 8);
       ring.rotation.x = -Math.PI / 2;
       ring.position.x = start.x;
       ring.position.z = start.z;
@@ -581,9 +586,8 @@ function mount(container) {
       root.add(mesh);
       ways.push({ way: mesh, at: 1, goal: 1 });
     };
-    // The road up the left that joins the turns' requests, then every turn's street and forks.
-    const asks = next.nodes.filter((n) => n.kind === "ask").map((n) => [n.x, n.z]);
-    if (asks.length > 1) road(trace(asks), 2.1).forEach(add);
+    // The avenue that joins the turns' corners, then every turn's streets.
+    if (next.avenue?.length > 1) road(trace(next.avenue), 2.1).forEach(add);
     // Its corners round enough that the inside of the bend does not fold over.
     for (const r of next.roads) road(trace(r.points, r.wide / 2 + 0.7), r.wide).forEach(add);
     nodes = next.nodes.map((n, i) => {
@@ -593,8 +597,9 @@ function mount(container) {
       root.add(b.g);
       // A request stands on a round place in its street; a building on a lot beside its road.
       const street = ON_STREET.has(n.kind);
-      const size = street ? 2.5 : n.kind === "many" ? 3.6 : 1.84;
-      if (!n.ghost) {
+      const size = street ? 1.1 : n.kind === "many" ? 3.6 : 1.84;
+      // A building stands on a lot; a signpost on the pavement.
+      if (!n.ghost && !street) {
         if (!n.state) {
           const kerb = lot(street, size + 0.12, KERB, 0.006, 3);
           kerb.position.x = n.x;

@@ -1,18 +1,20 @@
-//! 기록 in the security team's app: a session as a town seen from above at an angle, its roads
-//! the way the engine itself traced each Call back to the request. Each turn has a wide street
-//! of its own that runs round the town's blocks, turning and doubling back, its request (with
-//! what the agent wrote it would do, as one block) where it starts; the turns stand one above
-//! the last, a road up the left joining their requests. Every Call is a building at the side
-//! of a road, never on one. A Call the engine traced to the request stands along its turn's
-//! street. A Call it traced to an earlier Call (the one whose result told it, or the last in
-//! the SubGraph the engine chose as its parent) stands along a road that forks off beside that
-//! Call's building: so each fork is a line of the agent's work that followed from one Call. In
-//! a long turn, Calls in a row that only followed the request and were let through stand as
-//! one large building, which opens into them when picked. A Call picked is drawn round in
-//! black and the way to it from the request, fork by fork, is lit. Calls the engine stopped
-//! stand on a red lot, those it held on an amber one.
+//! 기록 in the security team's app: a session as a town seen from above at an angle, the way
+//! through its streets the way the engine itself traced each Call back to the request. Each
+//! turn is a part of town: streets crossing in a grid, the blocks between them lots for
+//! buildings. Its request (with what the agent wrote it would do) is a signpost at the corner
+//! the part of town starts from; the turns stand one above the last, an avenue joining their
+//! corners. Every Call is a building on a lot. A Call the engine traced to the request takes
+//! the nearest free lot to the signpost; one it traced to an earlier Call (the one whose
+//! result told it, or the last in the SubGraph the engine chose as its parent) takes the
+//! nearest free lot to that Call's building. In a long turn, Calls in a row that only followed
+//! the request and were let through stand as one large building filling a block, which opens
+//! into them when picked. The way to a Call is found through the streets as a route finder
+//! finds one: from the signpost to the door of each Call the engine's path comes through, in
+//! turn, and on to the Call's own, turning at the crossings. A Call picked is drawn round in
+//! black and that way is lit. Calls the engine stopped stand on a red lot, those it held on
+//! an amber one.
 //!
-//! This file says which buildings and roads there are and where; three.js draws them
+//! This file says which buildings and streets there are and where; three.js draws them
 //! (`web/hub-scene/route.js`, bundled into `hub_scene.js`).
 
 use std::collections::{HashMap, HashSet};
@@ -26,73 +28,30 @@ use crate::ui::{AppState, Selection};
 /// The eye looks down a diagonal of the floor, so what runs left to right on the page runs
 /// along the floor's other diagonal: a step of 1 that way is this much along x and back along z.
 const TURN: f64 = std::f64::consts::FRAC_1_SQRT_2;
-/// How far apart the street's points are given to the scene, in steps along it.
-const SAMPLE: f64 = 0.5;
-/// How much room a block takes around its middle, a large one more; how far a Call stands
-/// from the one it follows; and how far apart the turns' streets keep their blocks.
+/// How much room a building takes around its middle, a large one more: what the tests hold
+/// the lots to.
+#[cfg(test)]
 const ROOM: f64 = 0.975;
+#[cfg(test)]
 const LARGE: f64 = 1.9;
-/// Half the width of a turn's street and of a road forking off, and the pavement beside both.
-const MAIN: f64 = 1.05;
-const FORK: f64 = 0.75;
+/// A street's width and the pavement beside it; from one lot's middle to the next; and from a
+/// street's middle to the next street's: two lots and their pavements between.
+const WIDE: f64 = 1.5;
 const PAVE: f64 = 0.32;
-const BETWEEN: f64 = 1.7;
+const PITCH: f64 = 2.1;
+const BLOCK: f64 = WIDE + 2.0 * PAVE + 2.0 * PITCH;
+/// From a street's middle to its kerb, and to the middle of the first lot beside it.
+const KERB: f64 = WIDE / 2.0 + PAVE;
+const EDGE: f64 = KERB + PITCH / 2.0;
+/// How far apart the turns' parts of town keep.
+const BETWEEN: f64 = 3.2;
 /// A turn with more Calls than this folds its plain runs, of this many Calls or more.
 const LONG: usize = 10;
 const RUN: usize = 3;
-/// What a large block goes by where a Call goes by its seq: this, less its first Call's seq.
+/// What a large building goes by where a Call goes by its seq: this, less its first Call's seq.
 const MANY: i64 = -1_000_000_000_000;
 
 type Pt = (f64, f64);
-
-/// How far apart a turn's street runs from itself where it doubles back.
-const ROW: f64 = 13.0;
-
-/// Where a turn's street is on the floor `u` steps along it, and which way it is heading
-/// there. It runs like a street through a town's blocks: `wide` along x, a turn and `ROW` back
-/// along z, a turn and `wide` back the way it came, and so on, every stretch along the floor's
-/// own lines.
-fn street(u: f64, wide: f64) -> (Pt, Pt) {
-    let lap = 2.0 * (wide + ROW);
-    let (laps, on) = ((u / lap).floor(), u.rem_euclid(lap));
-    let z = -laps * 2.0 * ROW;
-    if on < wide {
-        ((on, z), (1.0, 0.0))
-    } else if on < wide + ROW {
-        ((wide, z - (on - wide)), (0.0, -1.0))
-    } else if on < 2.0 * wide + ROW {
-        ((wide - (on - wide - ROW), z - ROW), (-1.0, 0.0))
-    } else {
-        ((0.0, z - ROW - (on - 2.0 * wide - ROW)), (0.0, -1.0))
-    }
-}
-
-/// How wide a turn's street runs before it doubles back, for this many blocks along it: wide
-/// enough that the turn is about as deep as it is wide.
-fn width(blocks: usize) -> f64 {
-    let long = 3.0 + 0.8 * blocks as f64;
-    (ROW * long).sqrt().max(8.0).ceil()
-}
-
-/// The two ways off a street heading `along`: toward the eye, and away from it.
-fn sides(along: Pt) -> [Pt; 2] {
-    if along.0 == 0.0 {
-        [(1.0, 0.0), (-1.0, 0.0)]
-    } else {
-        [(0.0, 1.0), (0.0, -1.0)]
-    }
-}
-
-/// A number from 0 to 1 that is always the same for the same Call, to scatter the blocks the
-/// same way each time the session is drawn.
-fn chance(seq: i64, salt: u64) -> f64 {
-    let mut h =
-        (seq as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ salt.wrapping_mul(0xD1B5_4A32_D192_ED03);
-    h ^= h >> 31;
-    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h ^= h >> 29;
-    (h >> 11) as f64 / (1u64 << 53) as f64
-}
 
 /// What a turn's request goes by where a Call goes by its seq: on the map's list of blocks,
 /// and in what the scene sends when a block is picked. Below every seq.
@@ -126,112 +85,240 @@ fn cut(text: &str, most: usize) -> String {
     }
 }
 
-/// How far a point is from the stretch of road between two others.
-fn gap(p: Pt, a: Pt, b: Pt) -> f64 {
-    let (dx, dz) = (b.0 - a.0, b.1 - a.1);
-    let long = dx * dx + dz * dz;
-    let t = if long == 0.0 {
-        0.0
-    } else {
-        (((p.0 - a.0) * dx + (p.1 - a.1) * dz) / long).clamp(0.0, 1.0)
-    };
-    (p.0 - a.0 - t * dx).hypot(p.1 - a.1 - t * dz)
-}
-
-/// Which way three places turn: over zero to the left, under to the right.
-fn turn_of(p: Pt, q: Pt, r: Pt) -> f64 {
-    (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0)
-}
-
-/// How far apart two stretches of road are; nothing when they cross.
-fn apart(a: Pt, b: Pt, c: Pt, d: Pt) -> f64 {
-    if turn_of(a, b, c) * turn_of(a, b, d) < 0.0 && turn_of(c, d, a) * turn_of(c, d, b) < 0.0 {
-        return 0.0;
-    }
-    gap(a, c, d)
-        .min(gap(b, c, d))
-        .min(gap(c, a, b))
-        .min(gap(d, a, b))
-}
-
-/// Where a building stands and how much room it takes.
-#[derive(Clone, Copy, Debug)]
-struct Lot {
-    x: f64,
-    z: f64,
-    room: f64,
-}
-
-impl Lot {
-    fn at(&self) -> Pt {
-        (self.x, self.z)
-    }
-}
-
-/// A building's place on its road: the point of the road it fronts, which way the road runs
-/// there, which side of it the building is on, half the road's width, and the way along the
-/// roads from the request to that point.
-#[derive(Clone, Debug)]
-struct Front {
+/// A place on a street: where, and whether the street runs along z there (else along x). A
+/// crossing is on both.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Stop {
     at: Pt,
-    along: Pt,
-    side: Pt,
-    half: f64,
-    path: Vec<Pt>,
-    /// The road that forks off beside it, once a Call follows it: which road of the town,
-    /// and how far it runs.
-    fork: Option<(usize, f64)>,
+    upright: bool,
 }
 
-/// What stands in one turn so far: the buildings, and the stretches of road with half their
-/// widths.
-#[derive(Default)]
+impl Stop {
+    /// The crossings at either end of the stretch of street it is on; itself when it is one.
+    fn ends(&self) -> Vec<Pt> {
+        let (x, z) = self.at;
+        let near = |v: f64| [(v / BLOCK).floor() * BLOCK, (v / BLOCK).ceil() * BLOCK];
+        let mut ends: Vec<Pt> = if self.upright {
+            near(z).map(|z| (x, z)).to_vec()
+        } else {
+            near(x).map(|x| (x, z)).to_vec()
+        };
+        ends.dedup();
+        ends
+    }
+}
+
+/// How far it is along a way through the streets.
+fn long(way: &[Pt]) -> f64 {
+    way.windows(2)
+        .map(|w| (w[1].0 - w[0].0).abs() + (w[1].1 - w[0].1).abs())
+        .sum()
+}
+
+/// The shortest way through the streets from one place on them to another: along the street
+/// to a crossing, across town turning once, and along the last street. Straight there when
+/// both are on one stretch of street.
+fn drive(a: Stop, b: Stop) -> Vec<Pt> {
+    let same_line = a.upright == b.upright
+        && if a.upright {
+            a.at.0 == b.at.0
+        } else {
+            a.at.1 == b.at.1
+        };
+    if same_line && a.ends().iter().any(|e| b.ends().contains(e)) {
+        return vec![a.at, b.at];
+    }
+    let mut best: Option<Vec<Pt>> = None;
+    for from in a.ends() {
+        for to in b.ends() {
+            // Carrying on the way it left, then turning.
+            let corner = if a.upright {
+                (from.0, to.1)
+            } else {
+                (to.0, from.1)
+            };
+            let mut way = vec![a.at, from, corner, to, b.at];
+            way.dedup();
+            if best.as_ref().is_none_or(|b| long(&way) < long(b)) {
+                best = Some(way);
+            }
+        }
+    }
+    best.unwrap_or_else(|| vec![a.at, b.at])
+}
+
+/// A lot in a block: where its middle is, which block, and the places on the two streets it
+/// faces with the kerb before it at each.
+#[derive(Clone, Debug)]
+struct Plot {
+    at: Pt,
+    block: (usize, usize),
+    doors: Vec<(Stop, Pt)>,
+    taken: bool,
+}
+
+/// A turn's part of town: blocks of four lots in rows, more rows as they are needed.
 struct Town {
-    lots: Vec<Lot>,
-    roads: Vec<(Pt, Pt, f64)>,
+    cols: usize,
+    rows: usize,
+    plots: Vec<Plot>,
 }
 
 impl Town {
-    /// Whether a building can stand here: clear of every building, and off every road by
-    /// that road's pavement.
-    fn lot_clear(&self, lot: Lot) -> bool {
-        self.lots
-            .iter()
-            .all(|t| (lot.x - t.x).hypot(lot.z - t.z) >= lot.room + t.room)
-            && self
-                .roads
+    fn new(cols: usize) -> Self {
+        let mut town = Town {
+            cols,
+            rows: 0,
+            plots: Vec::new(),
+        };
+        town.grow();
+        town
+    }
+
+    /// Another row of blocks, further from the signpost.
+    fn grow(&mut self) {
+        let j = self.rows;
+        for i in 0..self.cols {
+            for b in 0..2 {
+                for a in 0..2 {
+                    let x = i as f64 * BLOCK + EDGE + a as f64 * PITCH;
+                    let z = -(j as f64 * BLOCK + EDGE + b as f64 * PITCH);
+                    let (beside, across) = ((i + a) as f64 * BLOCK, -((j + b) as f64 * BLOCK));
+                    self.plots.push(Plot {
+                        at: (x, z),
+                        block: (i, j),
+                        doors: vec![
+                            (
+                                Stop {
+                                    at: (beside, z),
+                                    upright: true,
+                                },
+                                (beside + if a == 0 { KERB } else { -KERB }, z),
+                            ),
+                            (
+                                Stop {
+                                    at: (x, across),
+                                    upright: false,
+                                },
+                                (x, across + if b == 0 { -KERB } else { KERB }),
+                            ),
+                        ],
+                        taken: false,
+                    });
+                }
+            }
+        }
+        self.rows += 1;
+    }
+
+    /// The free lot nearest a place, taken; rows are added until there is one.
+    fn take(&mut self, near: Pt) -> Plot {
+        loop {
+            let free = self
+                .plots
                 .iter()
-                .all(|&(a, b, half)| gap(lot.at(), a, b) >= half + PAVE + lot.room - 0.05)
+                .enumerate()
+                .filter(|(_, p)| !p.taken)
+                .min_by(|(_, a), (_, b)| {
+                    let far = |p: &Plot| (p.at.0 - near.0).hypot(p.at.1 - near.1);
+                    far(a).total_cmp(&far(b))
+                })
+                .map(|(i, _)| i);
+            match free {
+                Some(i) => {
+                    self.plots[i].taken = true;
+                    return self.plots[i].clone();
+                }
+                None => self.grow(),
+            }
+        }
     }
 
-    /// The same for a building along the road numbered `own`, which is about to run past it.
-    fn lot_clear_but(&self, lot: Lot, own: Option<usize>) -> bool {
-        self.lots
-            .iter()
-            .all(|t| (lot.x - t.x).hypot(lot.z - t.z) >= lot.room + t.room)
-            && self.roads.iter().enumerate().all(|(i, &(a, b, half))| {
-                Some(i) == own || gap(lot.at(), a, b) >= half + PAVE + lot.room - 0.05
-            })
-    }
-
-    /// Whether a stretch of road can run here: off every building by its pavement.
-    fn road_clear(&self, a: Pt, b: Pt, half: f64) -> bool {
-        self.lots
-            .iter()
-            .all(|t| gap(t.at(), a, b) >= half + PAVE + t.room - 0.05)
-    }
-
-    /// Whether a stretch of road keeps off every other road but the one numbered `own`.
-    fn roads_clear(&self, a: Pt, b: Pt, half: f64, own: Option<usize>) -> bool {
-        self.roads.iter().enumerate().all(|(i, &(c, d, other))| {
-            Some(i) == own || apart(a, b, c, d) >= half + other + 2.0 * PAVE + 0.4
-        })
+    /// The block nearest the signpost with all four lots free, taken whole: its middle, and
+    /// the places on the streets round it with their kerbs.
+    fn take_block(&mut self) -> (Pt, Vec<(Stop, Pt)>) {
+        loop {
+            let free = (0..self.rows)
+                .flat_map(|j| (0..self.cols).map(move |i| (i, j)))
+                .filter(|b| {
+                    self.plots
+                        .iter()
+                        .filter(|p| p.block == *b)
+                        .all(|p| !p.taken)
+                })
+                .min_by_key(|(i, j)| (i + j, *j));
+            let Some(block) = free else {
+                self.grow();
+                continue;
+            };
+            for p in self.plots.iter_mut().filter(|p| p.block == block) {
+                p.taken = true;
+            }
+            let (x, z) = (block.0 as f64 * BLOCK, -(block.1 as f64 * BLOCK));
+            let half = BLOCK / 2.0;
+            let mid = (x + half, z - half);
+            return (
+                mid,
+                vec![
+                    (
+                        Stop {
+                            at: (x, mid.1),
+                            upright: true,
+                        },
+                        (x + KERB, mid.1),
+                    ),
+                    (
+                        Stop {
+                            at: (mid.0, z),
+                            upright: false,
+                        },
+                        (mid.0, z - KERB),
+                    ),
+                    (
+                        Stop {
+                            at: (x + BLOCK, mid.1),
+                            upright: true,
+                        },
+                        (x + BLOCK - KERB, mid.1),
+                    ),
+                    (
+                        Stop {
+                            at: (mid.0, z - BLOCK),
+                            upright: false,
+                        },
+                        (mid.0, z - BLOCK + KERB),
+                    ),
+                ],
+            );
+        }
     }
 }
 
-/// A place `far` on from another, the way given.
-fn on(from: Pt, way: Pt, far: f64) -> Pt {
-    (from.0 + way.0 * far, from.1 + way.1 * far)
+/// A building's door: the place on the street before it, its kerb there, where the building
+/// is, and the way through the streets to it from the signpost.
+#[derive(Clone, Debug)]
+struct Door {
+    stop: Stop,
+    kerb: Pt,
+    lot: Pt,
+    path: Vec<Pt>,
+}
+
+/// The door, of those a building has, with the shortest way to it on from a way so far.
+fn nearest_door(doors: &[(Stop, Pt)], lot: Pt, from: Stop, so_far: &[Pt]) -> Door {
+    let (stop, kerb, way) = doors
+        .iter()
+        .map(|&(stop, kerb)| (stop, kerb, drive(from, stop)))
+        .min_by(|a, b| long(&a.2).total_cmp(&long(&b.2)))
+        .expect("a building faces a street");
+    let mut path = so_far.to_vec();
+    path.extend(way.into_iter().skip(1));
+    Door {
+        stop,
+        kerb,
+        lot,
+        path,
+    }
 }
 
 /// The words in a tool result that told the agent to make a Call, as the engine traced them.
@@ -368,16 +455,17 @@ fn tools(run: &[Step]) -> String {
     text
 }
 
-/// The session as the scene takes it: the roads, and the buildings. Each turn's street starts
-/// at its request (which carries what the agent wrote it would do) and runs round the town's
-/// blocks; the next turn's lies above, clear of this one's buildings. A Call the engine traced
-/// to the request stands at the side of the street; one it traced to an earlier Call stands
-/// at the side of the road that forks off beside that Call's building. Each Call something
-/// told carries the blocks on its way from the request (`way`: the request, the Calls whose
-/// forks it is down, the words of the result that told it, a small block at the fork that
-/// shows only while lit, and itself) and the way along the roads (`route`). A block that can
-/// be picked carries what the scene sends back for it (`pick`): a Call its seq, a request
-/// `ask_key`, a large building `many_key`.
+/// The session as the scene takes it: the streets, the avenue joining the turns, and the
+/// buildings. Each turn's part of town starts at a corner where its request stands as a
+/// signpost (carrying what the agent wrote it would do); the next turn's lies above, clear of
+/// this one's. A Call the engine traced to the request stands on the nearest free lot to the
+/// signpost; one it traced to an earlier Call on the nearest free lot to that Call. Each Call
+/// something told carries the blocks on its way from the request (`way`: the request, the
+/// Calls the engine's path comes through, the words of the result that told it, a small block
+/// before the door of the Call that read them that shows only while lit, and itself) and the
+/// way through the streets (`route`): from the signpost's corner to each of those Calls' doors
+/// in turn and on to its own kerb. A block that can be picked carries what the scene sends
+/// back for it (`pick`): a Call its seq, a request `ask_key`, a large building `many_key`.
 ///
 /// Also which block each Call's seq is, and each turn's request under `ask_key`, to light the
 /// one picked.
@@ -385,229 +473,70 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
     let mut nodes: Vec<serde_json::Value> = Vec::new();
     let mut at: HashMap<i64, usize> = HashMap::new();
     let mut roads: Vec<serde_json::Value> = Vec::new();
+    let mut avenue: Vec<[f64; 2]> = Vec::new();
     // How far from the eye, up the page, the turns so far reach.
     let mut above = 0.0;
     for turn in legs {
         let t = turn.turn;
         let first = nodes.len();
-        let mut town = Town::default();
-        // Each Call's place on its road, by its block.
-        let mut fronts: HashMap<usize, Front> = HashMap::new();
+        // Each Call's door, by its block.
+        let mut doors: HashMap<usize, Door> = HashMap::new();
         // The words to stand, once the turn is: (the Call's block, the words, where).
         let mut told: Vec<(usize, Words, Pt)> = Vec::new();
-        // The request and what the agent wrote it would do about it stand as one block where
-        // the street starts: where the way to every Call of the turn starts.
+        // The request, with what the agent wrote it would do about it, is a signpost beside
+        // the corner the part of town starts from: where the way to every Call starts.
         let ask = nodes.len();
-        town.lots.push(Lot {
-            x: 0.0,
-            z: 0.0,
-            room: 1.3,
-        });
+        let corner = Stop {
+            at: (0.0, 0.0),
+            upright: true,
+        };
+        let sign = (-1.2, 1.2);
         at.insert(ask_key(t), ask);
         nodes.push(serde_json::json!({
-            "kind": "ask", "turn": t, "seq": null, "pick": ask_key(t), "state": null, "x": 0.0, "z": 0.0,
+            "kind": "ask", "turn": t, "seq": null, "pick": ask_key(t), "state": null, "x": sign.0, "z": sign.1,
             "label": format!("요청 {}", turn.n),
             "tip": cut(&turn.req, 110),
             "intent": turn.intent.as_deref().map(|i| cut(i, 110)),
             "note": "사용자가 보낸 요청",
         }));
         let units = units(turn, open, kept);
-        // Only the buildings along the street itself take room along it.
-        let seqs: HashSet<i64> = turn.calls.iter().map(|c| c.seq).collect();
-        let wide = width(
-            units
-                .iter()
-                .filter(|unit| !matches!(unit, Unit::One(c) if c.parent.is_some_and(|p| seqs.contains(&p))))
-                .count(),
-        );
-        // The street's stretches, as far as the turn could reach: no building stands on them.
-        let far = 8.0 + 2.5 * turn.calls.len() as f64 + 2.0 * (wide + ROW);
-        let mut corner = street(0.0, wide).0;
-        for k in 1..=(far / SAMPLE) as usize {
-            let (next, _) = street(k as f64 * SAMPLE, wide);
-            let (after, _) = street((k + 1) as f64 * SAMPLE, wide);
-            let straight = |p: Pt| p.0 == corner.0 || p.1 == corner.1;
-            if straight(next) && !straight(after) {
-                town.roads.push((corner, next, MAIN));
-                corner = next;
-            }
-        }
-        // The street's points up to a place along it, for the way to a building there.
-        let along_street = |u: f64| -> Vec<Pt> {
-            (0..)
-                .map(|k| k as f64 * SAMPLE)
-                .take_while(|&s| s < u)
-                .chain([u])
-                .map(|s| street(s, wide).0)
-                .collect()
-        };
-        let mut u = 3.4;
-        let mut last = 0.0;
+        // About as many blocks across as up, for what is to stand.
+        let lots: usize = units
+            .iter()
+            .map(|u| if matches!(u, Unit::Many(_)) { 4 } else { 1 })
+            .sum();
+        let mut town = Town::new(((lots as f64 / 4.0 * 1.3).sqrt().ceil() as usize).max(2));
         for unit in units {
             let call = match unit {
                 Unit::One(call) => call,
-                // A large building, behind the street where it hides none of it.
+                // A large building, a block to itself.
                 Unit::Many(run) => {
-                    let (lot, front) = loop {
-                        let (meets, along) = street(u, wide);
-                        let side = sides(along)[1];
-                        let place = on(meets, side, MAIN + PAVE + LARGE);
-                        let lot = Lot {
-                            x: place.0,
-                            z: place.1,
-                            room: LARGE,
-                        };
-                        if town.lot_clear(lot) {
-                            break (lot, on(meets, side, MAIN + PAVE));
-                        }
-                        u += 0.45;
-                    };
-                    town.lots.push(lot);
-                    let mut route = along_street(u);
-                    route.push(front);
+                    let (lot, faces) = town.take_block();
+                    let door = nearest_door(&faces, lot, corner, &[corner.at]);
+                    let mut route = door.path.clone();
+                    route.push(door.kerb);
                     nodes.push(serde_json::json!({
                         "kind": "many", "turn": t, "seq": null, "pick": many_key(run[0].seq), "state": null,
-                        "x": lot.x, "z": lot.z, "count": run.len(),
+                        "x": lot.0, "z": lot.1, "count": run.len(), "route": route,
                         "label": format!("호출 {}개", run.len()),
                         "tip": tools(run),
                         "note": "요청을 따라 한 호출을 묶었습니다. 누르면 하나씩 펼쳐집니다",
                     }));
-                    last = u;
-                    u += 2.0;
                     continue;
                 }
             };
-            // The Call it follows, when that one stands in this turn.
+            // The Call it follows, when that one stands in this turn: it takes the lot nearest
+            // that one's, and the way to it goes on from that one's door.
             let up = call
                 .parent
                 .and_then(|p| at.get(&p).copied())
                 .filter(|&i| i >= first);
-            // A tall building stands only behind its road, where it hides none of it.
-            let tall = matches!(call.kind, "change" | "outside" | "delegate");
-            let nearer = |way: Pt| way.0 + way.1 > 0.0;
-            // Down the road that forks off beside the Call it follows: at the first place
-            // along it, on either side, that is clear. When there is none, it stands along the
-            // street like a Call the request told, and only its way says what it follows.
-            let forked = up
-                .and_then(|i| Some((i, fronts.get(&i)?.clone())))
-                .and_then(|(i, before)| {
-                    let start = on(before.at, before.along, FORK + PAVE + ROOM);
-                    let way = before.side;
-                    let (road, far) = before.fork.unzip();
-                    let found =
-                        (0..16)
-                            .flat_map(|k| [(k, 1.0), (k, -1.0)])
-                            .find_map(|(k, hand)| {
-                                let reach = before.half + PAVE + ROOM + 0.55 * k as f64;
-                                let side = (before.along.0 * hand, before.along.1 * hand);
-                                if tall && nearer(side) {
-                                    return None;
-                                }
-                                let meets = on(start, way, reach);
-                                let place = on(meets, side, FORK + PAVE + ROOM);
-                                let lot = Lot {
-                                    x: place.0,
-                                    z: place.1,
-                                    room: ROOM,
-                                };
-                                let end = reach.max(far.unwrap_or(0.0));
-                                let clear = town.lot_clear_but(lot, road)
-                                    && town.road_clear(
-                                        on(start, way, before.half + PAVE),
-                                        on(start, way, end),
-                                        FORK,
-                                    )
-                                    && (end <= 3.0
-                                        || town.roads_clear(
-                                            on(start, way, 3.0),
-                                            on(start, way, end),
-                                            FORK,
-                                            road,
-                                        ));
-                                clear.then_some((lot, meets, side, end))
-                            })?;
-                    Some((i, before, start, way, road, found))
-                });
-            let (lot, front) = match forked {
-                Some((i, before, start, way, road, (lot, meets, side, end))) => {
-                    // The fork runs as far as the furthest building along it.
-                    let road = match road {
-                        Some(road) => {
-                            town.roads[road].1 = on(start, way, end);
-                            road
-                        }
-                        None => {
-                            town.roads.push((start, on(start, way, end), FORK));
-                            town.roads.len() - 1
-                        }
-                    };
-                    if let Some(parent) = fronts.get_mut(&i) {
-                        parent.fork = Some((road, end));
-                    }
-                    if let Some(w) = &call.words {
-                        // The words stand on the pavement at the corner where the fork leaves.
-                        let corner = on(
-                            on(start, before.along, -(FORK + PAVE / 2.0)),
-                            way,
-                            before.half + PAVE / 2.0,
-                        );
-                        told.push((nodes.len(), w.clone(), corner));
-                    }
-                    let mut path = before.path.clone();
-                    path.extend([start, meets]);
-                    (
-                        lot,
-                        Front {
-                            at: meets,
-                            along: way,
-                            side,
-                            half: FORK,
-                            path,
-                            fork: None,
-                        },
-                    )
-                }
-                // Along the street, on one side or the other as the Call's own number has it:
-                // the next place that is clear.
-                None => {
-                    let first_side = (chance(call.seq, 1) * 2.0) as usize;
-                    let (lot, meets, along, side) = loop {
-                        let (meets, along) = street(u, wide);
-                        let found = (0..2).find_map(|k| {
-                            let side = sides(along)[(first_side + k) % 2];
-                            if tall && nearer(side) {
-                                return None;
-                            }
-                            let place = on(meets, side, MAIN + PAVE + ROOM);
-                            let lot = Lot {
-                                x: place.0,
-                                z: place.1,
-                                room: ROOM,
-                            };
-                            town.lot_clear(lot).then_some((lot, meets, along, side))
-                        });
-                        match found {
-                            Some(found) => break found,
-                            None => u += 0.45,
-                        }
-                    };
-                    let path = along_street(u);
-                    last = u;
-                    u += 1.1 + 0.3 * chance(call.seq, 4);
-                    (
-                        lot,
-                        Front {
-                            at: meets,
-                            along,
-                            side,
-                            half: MAIN,
-                            path,
-                            fork: None,
-                        },
-                    )
-                }
+            let before = up.and_then(|i| doors.get(&i)).cloned();
+            let plot = town.take(before.as_ref().map_or(sign, |b| b.lot));
+            let door = match &before {
+                Some(b) => nearest_door(&plot.doors, plot.at, b.stop, &b.path),
+                None => nearest_door(&plot.doors, plot.at, corner, &[corner.at]),
             };
-            town.lots.push(lot);
             let state = if call.blocked {
                 Some("blocked")
             } else if call.held {
@@ -615,7 +544,6 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
             } else {
                 None
             };
-            let joined = forked_at(&front, up, &fronts);
             let note = if call.blocked {
                 "엔진이 차단함"
             } else if call.held {
@@ -630,7 +558,7 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
                 "요청을 따라 한 호출"
             };
             let here = nodes.len();
-            // The blocks on its way from the request: the Calls whose forks it is down.
+            // The blocks on its way from the request: the Calls the engine's path comes through.
             let way = (!call.loose).then(|| {
                 let mut way = match up {
                     Some(i) => nodes[i]["way"]
@@ -647,20 +575,29 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
                 way.push(here);
                 way
             });
-            // The way along the roads, ending at the kerb before its door.
-            let mut route = front.path.clone();
-            route.push(on(front.at, front.side, front.half + PAVE));
+            if let (Some(b), Some(w)) = (&before, &call.words) {
+                // The words stand on the pavement before the door of the Call that read them.
+                let along = if b.stop.upright {
+                    (0.0, 0.8)
+                } else {
+                    (0.8, 0.0)
+                };
+                told.push((here, w.clone(), (b.kerb.0 + along.0, b.kerb.1 + along.1)));
+            }
+            // The way through the streets, ending at the kerb before its door.
+            let mut route = door.path.clone();
+            route.push(door.kerb);
             at.insert(call.seq, here);
             nodes.push(serde_json::json!({
                 "kind": call.kind, "turn": t, "seq": call.seq, "pick": call.seq, "state": state,
-                "x": lot.x, "z": lot.z, "forked": joined,
+                "x": plot.at.0, "z": plot.at.1,
                 "label": call.tool, "tip": cut(&call.title, 90), "note": note, "way": way,
                 "route": (!call.loose).then_some(route),
             }));
-            fronts.insert(here, front);
+            doors.insert(here, door);
         }
-        // The words, each at its corner, and into the way of the Call they told just before it.
-        for (call, words, corner) in told {
+        // The words, each before its door, and into the way of the Call they told just before it.
+        for (call, words, place) in told {
             let quote = words.quote.as_deref().map(|q| cut(q, 120));
             let named = match words.paragraph {
                 _ if words.error => "오류 메시지".to_owned(),
@@ -683,33 +620,39 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
             let w = nodes.len();
             nodes.push(serde_json::json!({
                 "kind": "words", "ghost": true, "turn": t, "seq": null, "state": null,
-                "x": corner.0, "z": corner.1, "label": label,
+                "x": place.0, "z": place.1, "label": label,
                 "tip": quote.unwrap_or(named),
                 "note": note,
             }));
             nodes[call]["over"] = w.into();
         }
-        // The turn's roads: its street as far as the last building along it and no further,
-        // so no stretch leads nowhere (a turn with no Calls has no street), and its forks.
-        let mut mine: Vec<(Vec<Pt>, f64)> = Vec::new();
-        if last > 0.0 {
-            mine.push((along_street(last), MAIN));
+        // The streets: every line of the grid as far as the last block built on, each way,
+        // so every street runs from one street to another. A turn with no Calls has none.
+        let built: Vec<(usize, usize)> = town
+            .plots
+            .iter()
+            .filter(|p| p.taken)
+            .map(|p| p.block)
+            .collect();
+        let cols = built.iter().map(|b| b.0 + 1).max().unwrap_or(0);
+        let rows = built.iter().map(|b| b.1 + 1).max().unwrap_or(0);
+        let (wide, deep) = (cols as f64 * BLOCK, rows as f64 * BLOCK);
+        let mut streets: Vec<[Pt; 2]> = Vec::new();
+        if cols > 0 {
+            streets
+                .extend((0..=cols).map(|i| [(i as f64 * BLOCK, 0.0), (i as f64 * BLOCK, -deep)]));
+            streets.extend(
+                (0..=rows).map(|j| [(0.0, -(j as f64 * BLOCK)), (wide, -(j as f64 * BLOCK))]),
+            );
         }
-        mine.extend(
-            town.roads
-                .iter()
-                .filter(|r| r.2 == FORK)
-                .map(|&(a, b, half)| (vec![a, b], half)),
-        );
         // The turn moves away from the eye, up the page, until it is clear of the turns below.
-        let reach = |pick: fn(f64, f64) -> f64, start: f64| {
-            town.lots.iter().fold(start, |far, l| {
-                pick(far, (l.x + l.z) * TURN - l.room.copysign(start))
-            })
-        };
+        let near = |p: Pt| (p.0 + p.1) * TURN;
+        let reach: Vec<f64> = [(0.0, 0.0), (wide, 0.0), (0.0, -deep), (wide, -deep), sign]
+            .map(near)
+            .to_vec();
         let (back, front) = (
-            reach(f64::min, f64::INFINITY),
-            reach(f64::max, f64::NEG_INFINITY),
+            reach.iter().copied().fold(f64::INFINITY, f64::min) - KERB,
+            reach.iter().copied().fold(f64::NEG_INFINITY, f64::max) + KERB,
         );
         let up = if first == 0 {
             0.0
@@ -731,10 +674,10 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
                 n["route"] = serde_json::json!(route);
             }
         }
-        for (points, half) in mine {
-            let points: Vec<[f64; 2]> = points.into_iter().map(moved).collect();
-            roads.push(serde_json::json!({ "turn": t, "wide": 2.0 * half, "points": points }));
+        for street in streets {
+            roads.push(serde_json::json!({ "turn": t, "wide": WIDE, "points": street.map(moved) }));
         }
+        avenue.push(moved(corner.at));
     }
     // A Call's way carries the words on it: before each Call a result told, that result's.
     let over: HashMap<usize, usize> = nodes
@@ -758,14 +701,8 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
             .collect();
         n["way"] = with.into();
     }
-    let json = serde_json::json!({ "nodes": nodes, "roads": roads }).to_string();
+    let json = serde_json::json!({ "nodes": nodes, "roads": roads, "avenue": avenue }).to_string();
     (json, at)
-}
-
-/// Whether a building stands down the fork of the Call it follows, not along the street.
-fn forked_at(front: &Front, up: Option<usize>, fronts: &HashMap<usize, Front>) -> bool {
-    up.and_then(|i| fronts.get(&i))
-        .is_some_and(|before| front.half == FORK && front.path.len() > before.path.len())
 }
 
 /// The map in place of the route map: the session's blocks, a heading over them, and the
@@ -920,15 +857,28 @@ mod tests {
         })
     }
 
-    /// How near a place is to a road given as its points.
-    fn off(p: Pt, road: &[Pt]) -> f64 {
-        road.windows(2)
-            .map(|w| gap(p, w[0], w[1]))
-            .fold(f64::INFINITY, f64::min)
+    #[test]
+    fn the_way_through_the_streets_turns_at_crossings() {
+        let at = |x: f64, z: f64, upright: bool| Stop {
+            at: (x * BLOCK, z * BLOCK),
+            upright,
+        };
+        // Along one stretch: straight there.
+        assert_eq!(drive(at(0.0, -0.2, true), at(0.0, -0.7, true)).len(), 2);
+        // Round a corner: to the crossing, and on.
+        let way = drive(at(0.0, -0.5, true), at(0.5, -1.0, false));
+        assert_eq!(
+            way,
+            [(0.0, -0.5 * BLOCK), (0.0, -BLOCK), (0.5 * BLOCK, -BLOCK)]
+        );
+        // Across town: every step along a street, the shortest of the ways.
+        let way = drive(at(0.0, -0.5, true), at(2.5, -3.0, false));
+        assert!(way.windows(2).all(|w| w[0].0 == w[1].0 || w[0].1 == w[1].1));
+        assert!((long(&way) - 5.0 * BLOCK).abs() < 1e-9, "{way:?}");
     }
 
     #[test]
-    fn every_building_stands_beside_a_road_and_none_on_one() {
+    fn every_building_stands_on_a_lot_and_its_way_keeps_to_the_streets() {
         // Every third Call follows the one before it; the rest follow the request.
         let turn = |turn: usize, first: i64| {
             leg(
@@ -944,42 +894,8 @@ mod tests {
         assert_eq!(nodes.len(), 2 * 41, "each turn's request and forty Calls");
         assert_eq!((at[&ask_key(0)], at[&ask_key(1)]), (0, 41));
         assert_eq!(nodes[0]["intent"], "고친다");
-        let roads: Vec<(u64, f64, Vec<Pt>)> = v["roads"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|r| {
-                (
-                    r["turn"].as_u64().unwrap(),
-                    r["wide"].as_f64().unwrap() / 2.0,
-                    pts(&r["points"]),
-                )
-            })
-            .collect();
-        for n in nodes.iter().filter(|n| n["kind"] != "ask") {
-            let here = (num(n, "x"), num(n, "z"));
-            // Off every road by its pavement; right beside one.
-            let mine = roads.iter().filter(|r| r.0 == n["turn"].as_u64().unwrap());
-            let clear: Vec<f64> = mine
-                .map(|(_, half, road)| off(here, road) - half - PAVE - ROOM)
-                .collect();
-            assert!(
-                clear.iter().all(|c| *c > -0.06),
-                "{} stands on a road: {clear:?}",
-                n["seq"]
-            );
-            assert!(
-                clear.iter().any(|c| c.abs() < 0.06),
-                "{} stands beside no road: {clear:?}",
-                n["seq"]
-            );
-            // Its way along the roads starts at the request and ends at its kerb.
-            let route = pts(&n["route"]);
-            let ask = &nodes[at[&ask_key(n["turn"].as_u64().unwrap() as usize)]];
-            assert_eq!(route[0], (num(ask, "x"), num(ask, "z")));
-            let kerb = route[route.len() - 1];
-            assert!(((kerb.0 - here.0).hypot(kerb.1 - here.1) - ROOM).abs() < 1e-6);
-        }
+        let corners = pts(&v["avenue"]);
+        assert_eq!(corners.len(), 2);
         for (i, a) in nodes.iter().enumerate() {
             for b in &nodes[i + 1..] {
                 let apart = (num(a, "x") - num(b, "x")).hypot(num(a, "z") - num(b, "z"));
@@ -991,33 +907,54 @@ mod tests {
                 );
             }
         }
-        // A Call that follows another stands down the fork beside it: the way to it goes
-        // first to that one, then on down a road of the narrower kind. Most find room to.
-        let followers: Vec<&serde_json::Value> =
-            nodes.iter().filter(|n| way(n).len() > 2).collect();
-        let forked: Vec<&&serde_json::Value> =
-            followers.iter().filter(|n| n["forked"] == true).collect();
-        assert!(
-            forked.len() * 4 >= followers.len() * 3,
-            "{} of {} forked",
-            forked.len(),
-            followers.len()
-        );
-        for n in forked {
-            let before = &nodes[way(n)[way(n).len() - 2]];
-            let (mine, theirs) = (pts(&n["route"]), pts(&before["route"]));
-            assert_eq!(mine[..theirs.len() - 1], theirs[..theirs.len() - 1]);
-            let here = (num(n, "x"), num(n, "z"));
-            assert!(roads.iter().any(|(_, half, road)| *half == FORK
-                && (off(here, road) - FORK - PAVE - ROOM).abs() < 0.06));
+        let mut turned = 0;
+        for n in nodes.iter().filter(|n| n["kind"] != "ask") {
+            let corner = corners[n["turn"].as_u64().unwrap() as usize];
+            let route = pts(&n["route"]);
+            // From the turn's corner, every step along a street of the grid, to the kerb
+            // before the building.
+            assert_eq!(route[0], corner);
+            let on_grid = |v: f64| ((v / BLOCK).round() * BLOCK - v).abs() < 1e-9;
+            for w in route[..route.len() - 1].windows(2) {
+                let (a, b) = (
+                    (w[0].0 - corner.0, w[0].1 - corner.1),
+                    (w[1].0 - corner.0, w[1].1 - corner.1),
+                );
+                assert!(
+                    (a.0 == b.0 && on_grid(a.0)) || (a.1 == b.1 && on_grid(a.1)),
+                    "{:?} leaves the streets",
+                    n["seq"]
+                );
+            }
+            let kerb = route[route.len() - 1];
+            let far = (kerb.0 - num(n, "x")).hypot(kerb.1 - num(n, "z"));
+            assert!(
+                (far - PITCH / 2.0).abs() < 1e-9,
+                "{:?}'s way ends {far} from it",
+                n["seq"]
+            );
+            turned += usize::from(route.len() > 3);
+            // The way to a Call that follows another goes by that one's door first.
+            if way(n).len() > 2 {
+                let before = pts(&nodes[way(n)[way(n).len() - 2]]["route"]);
+                assert_eq!(route[..before.len() - 1], before[..before.len() - 1]);
+            }
+        }
+        assert!(turned > 20, "only {turned} ways turn a corner");
+        // Every street runs the whole of its part of town, from one street to another.
+        let roads = v["roads"].as_array().unwrap();
+        assert!(roads.len() >= 12);
+        for r in roads {
+            let line = pts(&r["points"]);
+            assert!(long(&line) >= BLOCK - 1e-9);
         }
         // The second turn stands wholly further from the eye than the first, up the page, its
-        // request straight above the first's.
+        // corner straight above the first's.
         let near = |n: &serde_json::Value| (num(n, "x") + num(n, "z")) * TURN;
         let (under, over) = nodes.split_at(41);
         let highest = under.iter().map(near).fold(f64::INFINITY, f64::min);
         assert!(over.iter().all(|n| near(n) < highest - 1.0));
-        assert!((num(&nodes[41], "x") - num(&nodes[41], "z")).abs() < 1e-9);
+        assert!((corners[1].0 - corners[1].1).abs() < 1e-9);
         assert_eq!(nodes[at[&5]]["state"], "blocked");
         assert_eq!(nodes[at[&5]]["pick"], 5);
         // The same session is laid out the same way each time.
@@ -1025,7 +962,7 @@ mod tests {
     }
 
     #[test]
-    fn the_way_to_a_call_goes_down_the_forks_the_engine_traced() {
+    fn the_way_to_a_call_goes_by_the_doors_of_the_calls_the_engine_traced() {
         let mut loose = call(5, None, false);
         loose.loose = true;
         // 1 and 2 follow the request; 3 follows 1 because of words in its result; 4 follows 3.
@@ -1059,24 +996,6 @@ mod tests {
             way(&nodes[at[&5]]).is_empty() && nodes[at[&5]]["route"].is_null(),
             "a Call nothing told has no way to it"
         );
-        // 3 stands down the fork beside 1, and 4 down the fork beside 3: two forks, each way
-        // going on from the last.
-        assert_eq!(
-            (
-                nodes[at[&3]]["forked"].as_bool(),
-                nodes[at[&4]]["forked"].as_bool()
-            ),
-            (Some(true), Some(true))
-        );
-        assert_eq!(
-            v["roads"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|r| r["wide"] == 2.0 * FORK)
-                .count(),
-            2
-        );
         let (one, three, four) = (
             pts(&nodes[at[&1]]["route"]),
             pts(&nodes[at[&3]]["route"]),
@@ -1085,27 +1004,30 @@ mod tests {
         assert_eq!(three[..one.len() - 1], one[..one.len() - 1]);
         assert_eq!(four[..three.len() - 1], three[..three.len() - 1]);
         assert!(nodes[words]["note"].as_str().unwrap().contains("90%"));
+        // The words stand by the building of the Call that read them.
+        let far = (num(&nodes[words], "x") - num(&nodes[at[&1]], "x"))
+            .hypot(num(&nodes[words], "z") - num(&nodes[at[&1]], "z"));
+        assert!(far < PITCH);
 
-        // A Call following one of an earlier turn stands along its own turn's street.
+        // A Call following one of an earlier turn stands in its own turn's part of town.
         let (v, at, _) = drawn(&[
             leg(0, vec![call(1, None, false)]),
             leg(1, vec![call(2, Some(1), false)]),
         ]);
         let nodes = v["nodes"].as_array().unwrap();
         assert_eq!(way(&nodes[at[&1]]), [0, at[&1]]);
-        assert_eq!(nodes[at[&2]]["forked"], false);
         assert_eq!(way(&nodes[at[&2]]), [2, at[&2]]);
+        assert_eq!(pts(&nodes[at[&2]]["route"])[0], pts(&v["avenue"])[1]);
 
-        // A turn's street ends at its last building; a turn with no Calls has none.
-        let (v, at, _) = drawn(&[
-            leg(0, vec![call(1, None, false), call(2, None, false)]),
-            leg(1, Vec::new()),
-        ]);
-        let roads = v["roads"].as_array().unwrap();
-        assert_eq!(roads.len(), 1);
-        let end = *pts(&roads[0]["points"]).last().unwrap();
-        let last = pts(&v["nodes"][at[&2]]["route"]);
-        assert_eq!(end, last[last.len() - 2]);
+        // A turn with no Calls has no streets.
+        let (v, _, _) = drawn(&[leg(0, vec![call(1, None, false)]), leg(1, Vec::new())]);
+        assert!(
+            v["roads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["turn"] == 0)
+        );
     }
 
     /// Every session of the demo data stands on the map with every block somewhere.
@@ -1180,7 +1102,8 @@ mod tests {
         let (v, _, _) = drawn(&[leg(0, (1..=10).map(|s| call(s, None, false)).collect())]);
         assert_eq!(v["nodes"].as_array().unwrap().len(), 11);
 
-        // A large building is picked by its first Call's seq, takes more room, and says what it holds.
+        // A large building is picked by its first Call's seq, has a block to itself, and says
+        // what it holds.
         let (v, at, _) = drawn(&[leg(0, calls())]);
         let nodes = v["nodes"].as_array().unwrap();
         assert_eq!(nodes[1]["pick"], many_key(1));
