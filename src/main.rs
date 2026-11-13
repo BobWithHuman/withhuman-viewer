@@ -52,8 +52,19 @@ fn main() {
             .with_fullsize_content_view(true)
     };
     let head = format!("<meta charset=\"utf-8\"><style>{}</style>", ui::CSS);
+    let icon_image = image::load_from_memory(include_bytes!("../icons/icon.png"))
+        .expect("bundled Vienna app icon must be a valid PNG")
+        .into_rgba8();
+    let (icon_width, icon_height) = icon_image.dimensions();
+    let icon = dioxus::desktop::tao::window::Icon::from_rgba(
+        icon_image.into_raw(),
+        icon_width,
+        icon_height,
+    )
+    .expect("bundled Vienna app icon must have valid RGBA dimensions");
     let config = Config::new()
         .with_window(window)
+        .with_icon(icon)
         .with_menu(menu::build())
         .with_custom_head(head);
     dioxus::LaunchBuilder::desktop()

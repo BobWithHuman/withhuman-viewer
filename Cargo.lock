@@ -6347,6 +6347,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "dirs 6.0.0",
+ "image",
  "keyring",
  "regex",
  "reqwest",
