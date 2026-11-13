@@ -1,7 +1,7 @@
 //! 기록 in the security team's app: a session as a map seen from above at an angle, its roads
 //! the way the engine itself traced each Call back to the request. Each turn is a street of its
 //! own running left to right, its request (with what the agent wrote it would do, as one block)
-//! at its left end; the turns stand one below the next, a road down the left joining their
+//! at its left end; the turns stand one above the last, a road up the left joining their
 //! requests. A Call the engine traced to the request stands off its turn's street at the end of
 //! a lane of its own; a Call it traced to an earlier Call (the one whose result told it, or the
 //! last in the SubGraph the engine chose as its parent) stands on from that Call, the road
@@ -334,7 +334,7 @@ fn tools(run: &[Step]) -> String {
 /// The session as the scene takes it: each turn's street, the road joining the requests, and
 /// the blocks. Each turn stands along its own street in the order it happened, its request
 /// (carrying what the agent wrote it would do) at the left end and its Calls off to either
-/// side; the next turn's street lies below, clear of this one's blocks. Each Call's road
+/// side; the next turn's street lies above, clear of this one's blocks. Each Call's road
 /// comes from where the engine traced it to: from the street for one it traced to the request,
 /// from the Call before it on the engine's path (`up`) for one it traced to that Call. Each
 /// Call that something told also carries its whole way from the request (`way`): the request,
@@ -351,8 +351,8 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
     // The words to stand, once every Call is: (the Call's block, the words).
     let mut told: Vec<(usize, Words)> = Vec::new();
     let mut streets: Vec<serde_json::Value> = Vec::new();
-    // How far toward the eye the turns so far reach.
-    let mut below = 0.0;
+    // How far from the eye, up the page, the turns so far reach.
+    let mut above = 0.0;
     for turn in legs {
         let t = turn.turn;
         let first = nodes.len();
@@ -535,7 +535,7 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
                 u += 0.35 + 0.4 * chance(call.seq, 4);
             }
         }
-        // The turn moves toward the eye until it is clear of the turns above it.
+        // The turn moves away from the eye, up the page, until it is clear of the turns below.
         let reach = |pick: fn(f64, f64) -> f64, start: f64| {
             town.lots.iter().fold(start, |far, l| {
                 pick(far, (l.x + l.z) * TURN - l.room.copysign(start))
@@ -545,13 +545,13 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
             reach(f64::min, f64::INFINITY),
             reach(f64::max, f64::NEG_INFINITY),
         );
-        let down = if first == 0 {
+        let up = if first == 0 {
             0.0
         } else {
-            below + BETWEEN - back
+            above - BETWEEN - front
         };
-        below = down + front;
-        let shift = down * TURN;
+        above = up + back;
+        let shift = up * TURN;
         for n in &mut nodes[first..] {
             for key in ["x", "z", "jx", "jz"] {
                 n[key] = (n[key].as_f64().unwrap_or(0.0) + shift).into();
@@ -782,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn each_turn_runs_left_to_right_below_the_last_with_no_block_on_another() {
+    fn each_turn_runs_left_to_right_above_the_last_with_no_block_on_another() {
         // Every third Call follows the one before it; the rest follow the request.
         let turn = |turn: usize, first: i64| {
             leg(
@@ -814,12 +814,12 @@ mod tests {
                 "{along:?}"
             );
         }
-        // The second turn stands wholly nearer the eye than the first, its request straight
-        // below the first's.
+        // The second turn stands wholly further from the eye than the first, up the page, its
+        // request straight above the first's.
         let near = |n: &serde_json::Value| (num(n, "x") + num(n, "z")) * TURN;
-        let (above, under) = nodes.split_at(41);
-        let lowest = above.iter().map(near).fold(f64::NEG_INFINITY, f64::max);
-        assert!(under.iter().all(|n| near(n) > lowest + 1.0));
+        let (above, over) = nodes.split_at(41);
+        let highest = above.iter().map(near).fold(f64::INFINITY, f64::min);
+        assert!(over.iter().all(|n| near(n) < highest - 1.0));
         assert!((num(&nodes[41], "x") - num(&nodes[41], "z")).abs() < 1e-9);
         // Calls stand off the street on both sides.
         let sides: Vec<f64> = above

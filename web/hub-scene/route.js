@@ -1,7 +1,7 @@
 // 기록 as a map seen from above at an angle, its roads the way the engine traced each Call back
 // to the request. Each turn is a street of its own running left to right, its request (with
-// the agent's intent as a pin on it) at the left end; the turns lie one below the next, a road
-// down the left joining their requests. A Call the engine traced to the request stands off
+// the agent's intent as a pin on it) at the left end; the turns lie one above the last, a road
+// up the left joining their requests. A Call the engine traced to the request stands off
 // its turn's street at the end of a lane; a Call it traced to an earlier Call stands on from
 // that one, the road carrying on. In a long turn the Calls that only followed the request
 // stand folded into one large block, which opens when picked. The roads carry no colour. A
@@ -443,7 +443,7 @@ function mount(container) {
       root.add(mesh);
       ways.push({ way: mesh, at: 1, goal: 1 });
     };
-    // The road down the left that joins the turns' requests.
+    // The road up the left that joins the turns' requests.
     const asks = next.nodes.filter((n) => n.kind === "ask").map((n) => [n.x, n.z]);
     if (asks.length > 1) {
       const spine = trace(asks);
