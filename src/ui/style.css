@@ -3529,22 +3529,39 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .hub-card .none { margin: 18px 0 0; font-size: 12px; line-height: 1.5; color: var(--hub-sub); }
 @media (prefers-reduced-motion: reduce) { .hub button.hub-card { transition: none; } .hub button.hub-card:hover:not(:disabled) { transform: none; } }
 
-/* 기록 in the security team's app: the session as a map of white blocks on a dotted floor
-   (drawn by three.js into #route-scene), its heading over the top left, the keys beneath it
-   and the zoom at the bottom right. Black for what is picked, green for what told it. */
-.rt-stage { position: absolute; inset: 0; overflow: hidden; color: #15171a;
-  background: radial-gradient(circle at 1px 1px, #dfe2e5 1px, transparent 1.6px) 0 0 / 22px 22px, radial-gradient(120% 90% at 40% 30%, #fff 0%, #f4f5f6 100%); }
+/* 기록 in the security team's app: the session as a map of white blocks along one street
+   (drawn by three.js into #route-scene), its heading over the top left, the keys beneath it,
+   the zoom at the bottom right, and the lit way written out along the foot. Black for what
+   is picked, green for what told it. */
+.rt-stage { position: absolute; inset: 0; overflow: hidden; color: #15171a; background: radial-gradient(130% 100% at 38% 22%, #eef0f3 0%, #e2e5e9 100%); }
 #route-scene { position: absolute; inset: 0; }
 #route-scene canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #route-scene.moving canvas { cursor: grabbing; }
 #route-scene.lost::after { content: "3D 지도를 그리지 못했습니다. 창을 다시 열어 보세요."; position: absolute; inset: 0; display: grid; place-items: center; font-size: 13px; color: #6b7076; }
 .rt-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.rt-labels span { position: absolute; left: 0; top: 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; color: #8b9096; white-space: nowrap; transition: opacity .2s; }
-.rt-labels span.ask { color: #4a4f55; font-weight: 600; }
-.rt-labels span.blocked { color: #c2362b; } .rt-labels span.held { color: #96690a; }
-.rt-labels span.on { color: #15171a; font-weight: 600; background: rgba(255, 255, 255, .85); }
-.rt-tip { position: absolute; left: 0; top: 0; z-index: 3; max-width: 340px; display: flex; flex-direction: column; gap: 3px; padding: 10px 13px; border: 1.5px solid #15171a;
-  background: #fff; pointer-events: none; }
+.rt-labels span { position: absolute; left: 0; top: 0; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 10.5px; line-height: 18px; color: #6b7178; white-space: nowrap;
+  transition: opacity .18s; }
+.rt-labels span.ask { padding: 0 8px; font-size: 11.5px; font-weight: 600; color: #15171a; background: #fff; box-shadow: 0 0 0 1px #cfd4d9; }
+.rt-labels span.intent, .rt-labels span.say { font-size: 11px; font-weight: 500; color: #3c4147; }
+.rt-labels span.words { font-size: 11px; color: #15171a; }
+.rt-labels span.blocked { color: #b93126; font-weight: 600; } .rt-labels span.held { color: #8a5f06; font-weight: 600; }
+.rt-labels span.on { padding: 0 8px 0 3px; font-weight: 600; color: #fff; background: #15171a; box-shadow: none; }
+.rt-labels span.on::before { content: attr(data-step); display: inline-block; width: 14px; height: 14px; margin-right: 5px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
+  line-height: 14px; text-align: center; color: #0c3d22; background: #7fe3aa; font-variant-numeric: tabular-nums; }
+/* The lit way written out: each block from the request to the Call picked, numbered as on the map. */
+.rt-trail { position: absolute; left: 50%; bottom: 62px; z-index: 2; max-width: min(820px, calc(100% - 68px)); margin: 0; padding: 7px 8px; display: flex; flex-wrap: wrap;
+  justify-content: center; gap: 4px 0; list-style: none; transform: translateX(-50%); border-radius: 12px; background: #15171a; box-shadow: 0 10px 28px rgba(21, 23, 26, .2);
+  pointer-events: none; }
+.rt-trail[hidden] { display: none; }
+.rt-trail li { display: inline-flex; align-items: center; height: 24px; padding: 0 6px; font-size: 12px; color: #c9cdd2; white-space: nowrap; }
+.rt-trail li + li::before { content: ""; width: 14px; height: 2px; margin-right: 12px; border-radius: 1px; background: #3fc47c; }
+.rt-trail li i { width: 16px; height: 16px; margin-right: 6px; border-radius: 50%; font-size: 10px; font-style: normal; font-weight: 700; line-height: 16px; text-align: center;
+  color: #0c3d22; background: #7fe3aa; font-variant-numeric: tabular-nums; }
+.rt-trail li span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+.rt-trail li.words span { color: #9be7b9; }
+.rt-trail li.end span { color: #fff; font-weight: 600; }
+.rt-tip { position: absolute; left: 0; top: 0; z-index: 3; max-width: 340px; display: flex; flex-direction: column; gap: 3px; padding: 10px 13px; border-radius: 10px;
+  background: #fff; box-shadow: 0 0 0 1px #cfd4d9, 0 10px 28px rgba(21, 23, 26, .14); pointer-events: none; }
 .rt-tip small { font-size: 10.5px; color: #8b9096; }
 .rt-tip strong { font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; font-weight: 500; word-break: break-all; }
 .rt-tip span { font-size: 11.5px; color: #4a4f55; }
@@ -3555,11 +3572,12 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-keys { position: absolute; left: 34px; bottom: 26px; z-index: 2; display: flex; gap: 16px; font-size: 12px; color: #4a4f55; pointer-events: none; }
 .rt-keys span { display: inline-flex; align-items: center; gap: 7px; }
 .rt-keys i { width: 14px; height: 14px; border-radius: 3px; }
-.rt-keys i.way { background: #86e0a8; } .rt-keys i.blocked { background: #f5a19a; } .rt-keys i.held { background: #f6cf7a; }
-.rt-zoom { position: absolute; right: 26px; bottom: 24px; z-index: 2; display: flex; flex-direction: column; border: 1.5px solid #15171a; background: #fff; }
+.rt-keys i.way { height: 4px; width: 18px; border-radius: 2px; background: #3fc47c; } .rt-keys i.blocked { background: #f6aaa3; } .rt-keys i.held { background: #f7d488; }
+.rt-zoom { position: absolute; right: 26px; bottom: 24px; z-index: 2; display: flex; flex-direction: column; overflow: hidden; border-radius: 10px; background: #fff;
+  box-shadow: 0 0 0 1px #cfd4d9, 0 6px 18px rgba(21, 23, 26, .08); }
 .rt-stage .rt-zoom button { width: 38px; height: 38px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; background: #fff; color: #15171a;
   font-size: 20px; font-weight: 300; line-height: 1; }
-.rt-stage .rt-zoom button + button { border-top: 1.5px solid #15171a; }
+.rt-stage .rt-zoom button + button { border-top: 1px solid #e2e5e9; }
 .rt-stage .rt-zoom button:hover:not(:disabled) { background: #f0f1f2; }
 .rt-tip[hidden], .hub-tip[hidden] { display: none; }
 /* The route map's own zoom, legend toggle and mark sit out while the 3D map is up: it has its own. */
