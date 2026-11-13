@@ -3528,3 +3528,40 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .hub-gauge .hand { fill: var(--hub-hot); }
 .hub-card .none { margin: 18px 0 0; font-size: 12px; line-height: 1.5; color: var(--hub-sub); }
 @media (prefers-reduced-motion: reduce) { .hub button.hub-card { transition: none; } .hub button.hub-card:hover:not(:disabled) { transform: none; } }
+
+/* 기록 in the security team's app: the session as a map of white blocks on a dotted floor
+   (drawn by three.js into #route-scene), its heading over the top left, the keys beneath it
+   and the zoom at the bottom right. Black for what is picked, green for what told it. */
+.rt-stage { position: absolute; inset: 0; overflow: hidden; color: #15171a;
+  background: radial-gradient(circle at 1px 1px, #dfe2e5 1px, transparent 1.6px) 0 0 / 22px 22px, radial-gradient(120% 90% at 40% 30%, #fff 0%, #f4f5f6 100%); }
+#route-scene { position: absolute; inset: 0; }
+#route-scene canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#route-scene.moving canvas { cursor: grabbing; }
+#route-scene.lost::after { content: "3D 지도를 그리지 못했습니다. 창을 다시 열어 보세요."; position: absolute; inset: 0; display: grid; place-items: center; font-size: 13px; color: #6b7076; }
+.rt-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.rt-labels span { position: absolute; left: 0; top: 0; padding: 1px 6px; border-radius: 4px; font-size: 11px; color: #8b9096; white-space: nowrap; transition: opacity .2s; }
+.rt-labels span.ask { color: #4a4f55; font-weight: 600; }
+.rt-labels span.blocked { color: #c2362b; } .rt-labels span.held { color: #96690a; }
+.rt-labels span.on { color: #15171a; font-weight: 600; background: rgba(255, 255, 255, .85); }
+.rt-tip { position: absolute; left: 0; top: 0; z-index: 3; max-width: 340px; display: flex; flex-direction: column; gap: 3px; padding: 10px 13px; border: 1.5px solid #15171a;
+  background: #fff; pointer-events: none; }
+.rt-tip small { font-size: 10.5px; color: #8b9096; }
+.rt-tip strong { font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; font-weight: 500; word-break: break-all; }
+.rt-tip span { font-size: 11.5px; color: #4a4f55; }
+.rt-head { position: absolute; left: 34px; top: 28px; z-index: 2; max-width: 420px; pointer-events: none; }
+.rt-head h2 { margin: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 21px; font-weight: 600; letter-spacing: -.01em;
+  line-height: 1.3; word-break: keep-all; }
+.rt-head p { margin: 10px 0 0; max-width: 330px; font-size: 13px; line-height: 1.6; color: #4a4f55; word-break: keep-all; }
+.rt-keys { position: absolute; left: 34px; bottom: 26px; z-index: 2; display: flex; gap: 16px; font-size: 12px; color: #4a4f55; pointer-events: none; }
+.rt-keys span { display: inline-flex; align-items: center; gap: 7px; }
+.rt-keys i { width: 14px; height: 14px; border-radius: 3px; }
+.rt-keys i.way { background: #86e0a8; } .rt-keys i.blocked { background: #f5a19a; } .rt-keys i.held { background: #f6cf7a; }
+.rt-zoom { position: absolute; right: 26px; bottom: 24px; z-index: 2; display: flex; flex-direction: column; border: 1.5px solid #15171a; background: #fff; }
+.rt-stage .rt-zoom button { width: 38px; height: 38px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; background: #fff; color: #15171a;
+  font-size: 20px; font-weight: 300; line-height: 1; }
+.rt-stage .rt-zoom button + button { border-top: 1.5px solid #15171a; }
+.rt-stage .rt-zoom button:hover:not(:disabled) { background: #f0f1f2; }
+.rt-tip[hidden], .hub-tip[hidden] { display: none; }
+/* The route map's own zoom, legend toggle and mark sit out while the 3D map is up: it has its own. */
+.fx-main:has(.rt-stage) .fx-brand { display: none; }
+.routes.fx:has(.rt-stage) .fx-tools button:is([title="확대"], [title="축소"], [title="노선 전체를 한 화면에"], [title^="범례"]) { display: none; }

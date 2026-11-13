@@ -21,6 +21,7 @@ mod main_page;
 mod mcp;
 mod policy;
 mod posture;
+mod route;
 mod secrets;
 
 use std::sync::Arc;
@@ -33,6 +34,7 @@ pub use inventory::InventoryPage;
 pub use main_page::Main;
 pub use mcp::Mcp;
 pub use policy::Policy;
+pub use route::RouteScene;
 pub use secrets::Secrets;
 
 /// The main page's 3D scene: three.js and `web/hub-scene/scene.js`, bundled (`npm run build`
