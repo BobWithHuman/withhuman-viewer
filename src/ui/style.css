@@ -3550,15 +3550,6 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-labels span.on:not([data-step]) { padding: 0 8px; }
 .rt-labels span.on[data-step]::before { content: attr(data-step); display: inline-block; width: 14px; height: 14px; margin-right: 5px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
   line-height: 14px; text-align: center; color: #15171a; background: #fff; font-variant-numeric: tabular-nums; }
-/* From behind the car: the sky over the town, paler toward the haze the far end is in. */
-.rt-stage.drive { background: linear-gradient(180deg, #8fafeb 0%, #b4caf4 26%, #dfe6f6 44%, #dfe6f6 100%); }
-#route-scene canvas.rt-mini { position: absolute; right: 26px; bottom: 24px; z-index: 2; width: 196px; height: 196px; cursor: default; border-radius: 16px; background: #f5f4f9;
-  box-shadow: 0 0 0 5px #fff, 0 10px 28px rgba(21, 23, 26, .16); pointer-events: none; }
-#route-scene canvas.rt-mini[hidden], .rt-stage .rt-mode[hidden] { display: none; }
-.rt-stage.drive .rt-zoom { display: none; }
-.rt-stage .rt-mode { position: absolute; left: 34px; bottom: 58px; z-index: 2; height: 32px; padding: 0 14px; border: 0; border-radius: 16px; background: #fff;
-  font-size: 12px; font-weight: 500; color: #26335a; box-shadow: 0 0 0 1px #d5d9de, 0 6px 18px rgba(21, 23, 26, .08); }
-.rt-stage .rt-mode:hover:not(:disabled) { background: #f0f2f8; }
 /* The lit way as directions, in a card at the top right: what it arrives at and how, then each
    place in order down a line in the way's colour. */
 .rt-guide { --way: #3b82f6; --soft: #e4eefe; --deep: #1d4fbf; --end: #2fa868; position: absolute; right: 26px; top: 22px; z-index: 2; width: 292px; max-height: calc(100% - 190px);
