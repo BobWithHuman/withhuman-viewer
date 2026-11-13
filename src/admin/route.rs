@@ -1,7 +1,7 @@
 //! 기록 in the security team's app: a session as a map seen from above at an angle, its roads
 //! the way the engine itself traced each Call back to the request. One street runs through the
 //! whole session from left to right; each turn's request (with what the agent wrote it would
-//! do, as one block) and its last word to the person stand on the street. A Call the engine traced to the request
+//! do, as one block) stands on the street. A Call the engine traced to the request
 //! stands off the street at the end of a lane of its own; a Call it traced to an earlier Call
 //! (the one whose result told it, or the last in the SubGraph the engine chose as its parent)
 //! stands on from that Call, the road carrying on. So a road leaving the street is one line of
@@ -49,6 +49,12 @@ fn chance(seq: i64, salt: u64) -> f64 {
     h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
     h ^= h >> 29;
     (h >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// What a turn's request goes by where a Call goes by its seq: on the map's list of blocks,
+/// and in what the scene sends when a block is picked. Below every seq.
+fn ask_key(turn: usize) -> i64 {
+    -(turn as i64) - 1
 }
 
 fn kind(c: &Call) -> &'static str {
@@ -218,8 +224,8 @@ struct Step {
     loose: bool,
 }
 
-/// A turn as the map needs it: which it is, its request, what the agent wrote it would do, its
-/// Calls in order, and the agent's last word to the person.
+/// A turn as the map needs it: which it is, its request, what the agent wrote it would do, and
+/// its Calls in order.
 #[derive(Clone, Debug, PartialEq)]
 struct Leg {
     turn: usize,
@@ -227,7 +233,6 @@ struct Leg {
     req: String,
     intent: Option<String>,
     calls: Vec<Step>,
-    said: Option<String>,
 }
 
 fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
@@ -239,7 +244,6 @@ fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
             n: turn.n,
             req: turn.req.clone(),
             intent: turn.intent.clone().filter(|i| !i.trim().is_empty()),
-            said: turn.said.last().map(|s| s.text.clone()),
             calls: turn
                 .calls
                 .iter()
@@ -270,14 +274,15 @@ fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
 
 /// The session as the scene takes it: the street's points, and the blocks. Along the street
 /// each turn stands in the order it happened: its request (carrying what the agent wrote it
-/// would do), its Calls off to either side, and the agent's last word; the next turn follows on the same
+/// would do) and its Calls off to either side; the next turn follows on the same
 /// street. Each Call's road comes from where the engine traced it to: from the street for one
 /// it traced to the request, from the Call before it on the engine's path (`up`) for one it
 /// traced to that Call. Each Call that something told also carries its whole way from the
 /// request (`way`): the request, the Calls its road comes through, the words of
 /// the result that told it (a small block on its road that shows only while lit), and itself.
 ///
-/// Also which block each Call's seq is, to light the one picked.
+/// Also which block each Call's seq is, and each turn's request under `ask_key`, to light the
+/// one picked.
 fn scene(legs: &[Leg]) -> (String, HashMap<i64, usize>) {
     let mut nodes: Vec<serde_json::Value> = Vec::new();
     let mut at: HashMap<i64, usize> = HashMap::new();
@@ -304,6 +309,7 @@ fn scene(legs: &[Leg]) -> (String, HashMap<i64, usize>) {
             &mut nodes,
             &mut town,
         );
+        at.insert(ask_key(t), ask);
         u += 2.6;
         let start = vec![ask];
         for call in &turn.calls {
@@ -425,20 +431,6 @@ fn scene(legs: &[Leg]) -> (String, HashMap<i64, usize>) {
                 u += 0.35 + 0.4 * chance(call.seq, 4);
             }
         }
-        if let Some(said) = &turn.said {
-            u += 1.6;
-            on_street(
-                &mut u,
-                serde_json::json!({
-                    "kind": "say", "turn": t, "seq": null, "up": null, "state": null,
-                    "label": "답변",
-                    "tip": cut(said, 110),
-                    "note": "에이전트가 사용자에게 한 말",
-                }),
-                &mut nodes,
-                &mut town,
-            );
-        }
         u += 3.6;
     }
     // The words stand on the road between the Call that read them and the Call they told,
@@ -522,31 +514,43 @@ fn scene(legs: &[Leg]) -> (String, HashMap<i64, usize>) {
 }
 
 /// The map in place of the route map: the session's blocks, a heading over them, and the
-/// controls to zoom. A block picked is the app's selection, as a station picked is.
+/// controls to zoom. A Call picked is the app's selection, as a station picked is; with no Call
+/// picked, the request of the turn picked is the one marked. Picking a request on the map picks
+/// its turn and lets the Call go.
 #[component]
 pub fn RouteScene(
     flow: Arc<Flow>,
     turns: Vec<usize>,
     title: String,
+    turn: Signal<usize>,
     detail: Signal<bool>,
 ) -> Element {
     let mut state = use_context::<AppState>();
     let mut detail = detail;
+    let mut turn = turn;
     use_future(move || async move {
         let mut said = document::eval(
             "window.__routePick = (seq) => dioxus.send(seq); await new Promise(() => {});",
         );
         while let Ok(seq) = said.recv::<i64>().await {
-            state.selected.set(Selection::Node(seq));
-            detail.set(true);
+            if seq < 0 {
+                turn.set((-seq - 1) as usize);
+                state.selected.set(Selection::None);
+            } else {
+                state.selected.set(Selection::Node(seq));
+                detail.set(true);
+            }
         }
     });
     let (json, at) = scene(&legs(&flow, &turns));
     let model = serde_json::to_string(&json).unwrap_or_else(|_| "\"{}\"".into());
     let chosen = match (state.selected)() {
-        Selection::Node(seq) => at.get(&seq).map_or("null".to_owned(), |i| i.to_string()),
-        Selection::None => "null".to_owned(),
-    };
+        Selection::Node(seq) => at.get(&seq),
+        Selection::None => at.get(&ask_key(turn())),
+    }
+    .map_or("null".to_owned(), |i| i.to_string());
+    // `ask_key` as the scene's script has it.
+    let ask_key_js = "(turn) => -turn - 1";
     use_effect(use_reactive!(|(model, chosen)| {
         document::eval(&format!(
             r#"const el = document.getElementById("route-scene");
@@ -557,6 +561,7 @@ pub fn RouteScene(
                     window.__routeModel = null;
                 }}
                 const r = window.__route;
+                r.askKey = {ask_key_js};
                 r.onPick = (seq) => window.__routePick?.(seq);
                 const model = {model};
                 if (window.__routeModel !== model) {{
@@ -647,15 +652,10 @@ mod tests {
             calls: (first..first + 40)
                 .map(|s| call(s, (s % 3 == 0 && s > first).then_some(s - 1), s == 5))
                 .collect(),
-            said: Some("고쳤습니다".into()),
         };
         let (json, at) = scene(&[leg(0, 1), leg(1, 41)]);
         let nodes = told(&json);
-        assert_eq!(
-            nodes.len(),
-            2 * 42,
-            "each turn's request, forty Calls and answer"
-        );
+        assert_eq!(nodes.len(), 2 * 41, "each turn's request and forty Calls");
         // Further along the street is further right on the page; what stands on the street
         // and the Calls leaving it are in the order made, the second turn after the first.
         let along: Vec<f64> = nodes
@@ -668,9 +668,8 @@ mod tests {
             let right = (num(n, "jx") - num(n, "jz")) * TURN;
             assert!((right - num(n, "u")).abs() < 1e-9);
         }
-        assert_eq!(nodes[41]["kind"], "say");
         assert_eq!(
-            (nodes[42]["kind"].as_str(), nodes[42]["turn"].as_u64()),
+            (nodes[41]["kind"].as_str(), nodes[41]["turn"].as_u64()),
             (Some("ask"), Some(1))
         );
         // Calls stand off the street on both sides; the turn's own words stand on it.
@@ -680,6 +679,7 @@ mod tests {
             .collect();
         assert!(sides.iter().any(|s| *s > 2.0) && sides.iter().any(|s| *s < -2.0));
         assert_eq!((sides[0], sides[41]), (0.0, 0.0));
+        assert_eq!((at[&ask_key(0)], at[&ask_key(1)]), (0, 41));
         for (i, a) in nodes.iter().enumerate() {
             for b in &nodes[i + 1..] {
                 let apart = (num(a, "x") - num(b, "x")).hypot(num(a, "z") - num(b, "z"));
@@ -746,16 +746,12 @@ mod tests {
                 call(4, Some(3), false),
                 loose,
             ],
-            said: Some("고쳤습니다".into()),
         };
         let (json, at) = scene(&[leg]);
         let nodes = told(&json);
         let kinds: Vec<&str> = nodes.iter().map(|n| n["kind"].as_str().unwrap()).collect();
-        assert_eq!(
-            kinds,
-            ["ask", "run", "run", "run", "run", "run", "say", "words"]
-        );
-        let words = 7;
+        assert_eq!(kinds, ["ask", "run", "run", "run", "run", "run", "words"]);
+        let words = 6;
         assert_eq!(nodes[0]["intent"], "테스트를 고친다");
         assert_eq!(nodes[words]["ghost"], true);
         assert_eq!(way(&nodes[at[&1]]), [0, at[&1]]);
@@ -788,7 +784,6 @@ mod tests {
             req: "고쳐줘".into(),
             intent: None,
             calls: vec![call(1, None, false)],
-            said: None,
         };
         let next = Leg {
             turn: 1,
@@ -796,7 +791,6 @@ mod tests {
             req: "더".into(),
             intent: None,
             calls: vec![call(2, Some(1), false)],
-            said: None,
         };
         let (json, at) = scene(&[bare, next]);
         let nodes = told(&json);

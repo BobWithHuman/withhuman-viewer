@@ -77,11 +77,17 @@ fn select_turn(mut turn: Signal<usize>, mut state: AppState, flow: &Flow, t: usi
 /// The session as the security team's app draws it, a map of blocks seen at an angle
 /// (`admin::RouteScene`); the developer's app keeps the route map.
 #[cfg(feature = "admin")]
-fn map_3d(flow: Arc<Flow>, turns: Vec<usize>, title: String, detail: Signal<bool>) -> Element {
-    rsx! { crate::admin::RouteScene { flow, turns, title, detail } }
+fn map_3d(
+    flow: Arc<Flow>,
+    turns: Vec<usize>,
+    title: String,
+    turn: Signal<usize>,
+    detail: Signal<bool>,
+) -> Element {
+    rsx! { crate::admin::RouteScene { flow, turns, title, turn, detail } }
 }
 #[cfg(not(feature = "admin"))]
-fn map_3d(_: Arc<Flow>, _: Vec<usize>, _: String, _: Signal<bool>) -> Element {
+fn map_3d(_: Arc<Flow>, _: Vec<usize>, _: String, _: Signal<usize>, _: Signal<bool>) -> Element {
     rsx! {}
 }
 
@@ -334,7 +340,7 @@ pub fn FlowMap() -> Element {
             main { class: "fx-main",
                 div { class: "fx-stage",
                     if !visible.is_empty() && cfg!(feature = "admin") {
-                        {map_3d(f.clone(), visible.clone(), task_name.clone(), detail)}
+                        {map_3d(f.clone(), visible.clone(), task_name.clone(), turn, detail)}
                     } else if !visible.is_empty() {
                         LineMap { flow: f.clone(), turns: visible.clone(), turn, detail, legend, covered: if card { CARD_W } else { 0.0 } }
                     } else {

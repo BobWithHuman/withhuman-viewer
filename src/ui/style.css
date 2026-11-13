@@ -3542,11 +3542,11 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-labels span { position: absolute; left: 0; top: 0; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 10.5px; line-height: 18px; color: #6b7178; white-space: nowrap;
   transition: opacity .18s; }
 .rt-labels span.ask { padding: 0 8px; font-size: 11.5px; font-weight: 600; color: #15171a; background: #fff; box-shadow: 0 0 0 1px #cfd4d9; }
-.rt-labels span.say { font-size: 11px; font-weight: 500; color: #3c4147; }
 .rt-labels span.words { font-size: 11px; color: #15171a; }
 .rt-labels span.blocked { color: #b93126; font-weight: 600; } .rt-labels span.held { color: #8a5f06; font-weight: 600; }
 .rt-labels span.on { padding: 0 8px 0 3px; font-weight: 600; color: #fff; background: #15171a; box-shadow: none; }
-.rt-labels span.on::before { content: attr(data-step); display: inline-block; width: 14px; height: 14px; margin-right: 5px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
+.rt-labels span.on:not([data-step]) { padding: 0 8px; }
+.rt-labels span.on[data-step]::before { content: attr(data-step); display: inline-block; width: 14px; height: 14px; margin-right: 5px; border-radius: 50%; font-size: 9.5px; font-weight: 700;
   line-height: 14px; text-align: center; color: #15171a; background: #fff; font-variant-numeric: tabular-nums; }
 /* The lit way written out in one line: each block from the request to the Call picked, numbered
    as on the map, what it was beside its name, a rule in the way's colour between one and the next. */

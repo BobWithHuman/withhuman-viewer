@@ -1,10 +1,11 @@
 // 기록 as a map seen from above at an angle, its roads the way the engine traced each Call back
 // to the request. One street runs through the session from left to right; each turn's request,
-// with the agent's intent as a pin on it, and its answer stand on it. A Call the engine traced to the request stands
+// with the agent's intent as a pin on it, stands on it. A Call the engine traced to the request stands
 // off the street at the end of a lane; a Call it traced to an earlier Call stands on from that
 // one, the road carrying on. A thin grey line runs from each Call to the next in the order
 // made, whatever told it; the roads themselves carry no colour. A block picked is drawn round
-// in black, as is the request its way starts at, and that way alone is lit in a thick band:
+// in black, as is the request its way starts at (a request can be picked too, which keeps
+// its whole turn clear and fades the others), and that way alone is lit in a thick band:
 // green, red to a Call the engine stopped, amber to one it held; the words of a tool result
 // that told a Call stand on the road before it. The same way is written out as a line of
 // names at the foot. Calls the engine stopped stand on a red lot, those it held on an amber
@@ -29,7 +30,7 @@ const LOTS = { blocked: 0xf6aaa3, held: 0xf7d488 };
 // The eye looks down a diagonal of the floor: one step to the right on the page is this much
 // along x and back along z.
 const TURN = Math.SQRT1_2;
-const ON_STREET = new Set(["ask", "say"]);
+const ON_STREET = new Set(["ask"]);
 
 const white = () => new THREE.MeshStandardMaterial({ color: WHITE, roughness: 0.86, metalness: 0, transparent: true });
 const grey = () => new THREE.MeshStandardMaterial({ color: 0xd5d9de, roughness: 0.9, metalness: 0, transparent: true });
@@ -58,10 +59,6 @@ function block(kind, pinned) {
       g.add(solid(new THREE.SphereGeometry(0.2, 32, 20), white(), 0, 1.3, 0));
       tall = 1.5;
     }
-  } else if (kind === "say") {
-    g.add(solid(new THREE.CylinderGeometry(0.05, 0.05, 0.34, 12), grey(), 0, 0.17, 0));
-    g.add(solid(new RoundedBoxGeometry(1.0, 0.6, 0.6, 6, 0.24), white(), 0, 0.64, 0));
-    tall = 0.94;
   } else if (kind === "words") {
     // A page stood on its edge: the words read out of a tool result.
     const page = solid(new RoundedBoxGeometry(0.5, 0.64, 0.05, 3, 0.02), white(), 0, 0.34, 0);
@@ -323,8 +320,11 @@ function mount(container) {
     clear(glow);
     lit = picked != null && nodes[picked] ? chain(picked) : [];
     const on = new Set(lit);
+    const asked = picked != null && nodes[picked]?.kind === "ask" ? nodes[picked].turn : null;
     nodes.forEach((n, i) => {
-      n.goal = n.ghost ? (on.has(i) ? 1 : 0) : !lit.length || on.has(i) ? 1 : 0.42;
+      // A request picked keeps its whole turn in view and lets the other turns fade.
+      const whole = asked != null && n.turn === asked;
+      n.goal = n.ghost ? (on.has(i) ? 1 : 0) : !lit.length || on.has(i) || whole ? 1 : 0.42;
       // Drawn round in black: the Call picked, and the request its way starts at.
       const marked = i === picked || (on.has(i) && n.kind === "ask");
       n.hull.forEach((h) => (h.visible = marked));
@@ -364,7 +364,7 @@ function mount(container) {
     const steps = [...lit].reverse();
     steps.forEach((i, k) => {
       const n = nodes[i];
-      n.name.dataset.step = k + 1;
+      if (steps.length > 1) n.name.dataset.step = k + 1;
       // A long way keeps its first two and last three, and counts the Calls between.
       const cut = steps.length > 6 && k >= 2 && k < steps.length - 3;
       if (cut && k > 2) return;
@@ -565,7 +565,7 @@ function mount(container) {
     const i = under(e);
     if (i === hover) return;
     hover = i;
-    canvas.style.cursor = i == null ? "" : nodes[i].seq != null ? "pointer" : "default";
+    canvas.style.cursor = i == null ? "" : nodes[i].seq != null || nodes[i].kind === "ask" ? "pointer" : "default";
     tip.hidden = i == null;
     if (i != null) {
       tip.replaceChildren();
@@ -584,7 +584,9 @@ function mount(container) {
   canvas.addEventListener("pointerup", (e) => {
     if (drag && moved < 5) {
       const i = under(e);
+      // A Call by its seq; a request by what the page calls its turn.
       if (i != null && nodes[i].seq != null) api.onPick?.(nodes[i].seq);
+      else if (i != null && nodes[i].kind === "ask" && api.askKey) api.onPick?.(api.askKey(nodes[i].turn));
     }
     drag = null;
     container.classList.remove("moving");
