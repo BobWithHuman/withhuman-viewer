@@ -8,8 +8,10 @@
 // block picked is drawn round in black, as is the request its way starts at (a request can be
 // picked too, which keeps its whole turn clear and fades the others), and that way alone is
 // lit in a thick band: green, red to a Call the engine stopped, amber to one it held; the
-// words of a tool result that told a Call stand on the road before it. The same way is
-// written out as a line of names at the foot. Calls the engine stopped stand on a red lot,
+// words of a tool result that told a Call stand on the road before it, and a pin stands over
+// the Call the way ends at. The same way is given as directions in a card: where it leaves
+// from, what it goes through and why, where it arrives; a line of it picked brings that block
+// to the middle. Calls the engine stopped stand on a red lot,
 // those it held on an amber one. The page gives the blocks, where they stand and what each
 // follows (admin/route.rs); this file only draws them.
 import * as THREE from "three";
@@ -235,10 +237,12 @@ function mount(container) {
   const tip = document.createElement("div");
   tip.className = "rt-tip";
   tip.hidden = true;
-  const trail = document.createElement("ol");
-  trail.className = "rt-trail";
-  trail.hidden = true;
-  container.append(labels, tip, trail);
+  // The way lit, as a route finder gives directions: where it starts, each place it goes
+  // through, where it ends. A line picked brings its block to the middle of the map.
+  const guide = document.createElement("aside");
+  guide.className = "rt-guide";
+  guide.hidden = true;
+  container.append(labels, tip, guide);
 
   const scene = new THREE.Scene();
   scene.add(new THREE.HemisphereLight(0xffffff, 0xdfe3e8, 2.0));
@@ -367,38 +371,81 @@ function mount(container) {
       }
     }
     if (!dots.length) flow = null;
-    // The same way written out, from the request to the Call picked.
-    trail.replaceChildren();
-    trail.hidden = lit.length < 2;
-    trail.className = `rt-trail ${nodes[picked]?.state ?? ""}`;
+    // A pin over the Call the way ends at, in the way's colour.
+    if (lit.length > 1) {
+      const end = nodes[picked];
+      const tone = new THREE.MeshStandardMaterial({ color: WAYS[end.state] ?? GREEN, roughness: 0.55 });
+      const pin = new THREE.Group();
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 32, 20), tone);
+      head.position.y = 0.66;
+      const point = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.5, 28), tone);
+      point.rotation.x = Math.PI;
+      point.position.y = 0.25;
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 14), new THREE.MeshBasicMaterial({ color: WHITE }));
+      eye.position.set(0.19, 0.72, 0.19);
+      pin.add(head, point, eye);
+      pin.position.set(end.x, end.tall + 0.3, end.z);
+      glow.add(pin);
+    }
+    // The directions: the request it leaves from, each Call it goes through with the words
+    // that sent it on, and the Call it arrives at.
     const steps = [...lit].reverse();
-    steps.forEach((i, k) => {
-      const n = nodes[i];
-      if (steps.length > 1) n.name.dataset.step = k + 1;
-      // A long way keeps its first two and last three, and counts the Calls between.
-      const cut = steps.length > 6 && k >= 2 && k < steps.length - 3;
-      if (cut && k > 2) return;
-      const li = document.createElement("li");
-      if (cut) {
-        li.className = "more";
-        li.textContent = `호출 ${steps.length - 5}개 더`;
-      } else {
-        if (i === picked) li.className = "end";
-        if (n.kind === "words") li.classList.add("words");
-        const no = document.createElement("i");
-        no.textContent = k + 1;
-        const what = document.createElement("b");
-        what.textContent = n.label;
-        li.append(no, what);
-        // What it was, beside its name: the request's words, the Call's own title.
-        if (n.kind !== "words" && n.tip && n.tip !== n.label) {
-          const more = document.createElement("span");
-          more.textContent = n.tip;
-          li.append(more);
+    guide.replaceChildren();
+    guide.hidden = steps.length < 2;
+    guide.className = `rt-guide ${nodes[picked]?.state ?? ""}`;
+    if (steps.length > 1) {
+      const end = nodes[picked];
+      const calls = steps.filter((i) => nodes[i].seq != null).length;
+      const head = document.createElement("header");
+      const title = document.createElement("strong");
+      title.textContent = `${end.label} · ${end.tip}`;
+      const sum = document.createElement("span");
+      const verdict = end.state === "blocked" ? "도착지에서 차단됨" : end.state === "held" ? "도착지에서 확인 요청" : "허용됨";
+      sum.textContent = calls > 1 ? `호출 ${calls - 1}곳을 거쳐 도착 · ${verdict}` : `요청에서 바로 도착 · ${verdict}`;
+      const all = document.createElement("button");
+      all.type = "button";
+      all.textContent = "전체 경로";
+      all.addEventListener("click", () => show(true));
+      head.append(title, sum, all);
+      const list = document.createElement("ol");
+      let no = 0;
+      steps.forEach((i, k) => {
+        const n = nodes[i];
+        const li = document.createElement("li");
+        const mark = document.createElement("i");
+        const body = document.createElement("div");
+        const name = document.createElement("b");
+        const what = document.createElement("span");
+        if (n.kind === "words") {
+          // Not a place but why the way goes on: the words read at the Call before.
+          li.className = "why";
+          name.textContent = "이 결과를 읽고 다음 호출로";
+          what.textContent = `${n.tip} · ${n.note}`;
+        } else {
+          no++;
+          n.name.dataset.step = no;
+          mark.textContent = no;
+          const role = k === 0 ? "출발" : i === picked ? "도착" : "경유";
+          if (i === picked) li.className = "end";
+          name.textContent = `${role} · ${n.label}`;
+          what.textContent = n.tip;
+          li.tabIndex = 0;
+          const go = () => focus(i);
+          li.addEventListener("click", go);
+          li.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && go());
         }
-      }
-      trail.append(li);
-    });
+        body.append(name, what);
+        if (k === 0 && n.intent) {
+          const intent = document.createElement("span");
+          intent.className = "intent";
+          intent.textContent = `의도 · ${n.intent}`;
+          body.append(intent);
+        }
+        li.append(mark, body);
+        list.append(li);
+      });
+      guide.append(head, list);
+    }
     // Which names give way when two would overlap: the lit way first, then the street's own.
     const rank = (i) => (on.has(i) ? 0 : ON_STREET.has(nodes[i].kind) || nodes[i].kind === "many" ? 1 : nodes[i].state ? 2 : 3);
     order = nodes.map((_, i) => i).sort((a, b) => rank(a) - rank(b) || a - b);
@@ -497,29 +544,48 @@ function mount(container) {
     view.z = view.toZ;
     relight();
   };
+  // Brings one block to the middle of the map, near enough to read.
+  function focus(i) {
+    const n = nodes[i];
+    if (!n) return;
+    view.toX = n.x;
+    view.toZ = n.z;
+    view.toZoom = Math.max(view.toZoom, 1.35);
+    wake();
+  }
+
+  // Brings the way lit into view: always when `whole`, else only when some of it is outside.
+  // Across the page by where its blocks stand, up and down by how far they are from the eye.
+  function show(whole) {
+    if (!lit.length) return;
+    const us = lit.map((k) => (nodes[k].x - nodes[k].z) * TURN);
+    const vs = lit.map((k) => (nodes[k].x + nodes[k].z) * TURN);
+    const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)];
+    const zoom = whole ? 1.6 : view.toZoom;
+    const wide = (view.span * canvas.clientWidth) / Math.max(1, canvas.clientHeight) / zoom;
+    const deep = (view.span * 2) / zoom;
+    const u = (view.toX - view.toZ) * TURN;
+    const v = (view.toX + view.toZ) * TURN;
+    // The directions card covers the map's right: the way keeps to the left of it.
+    const card = guide.hidden ? 0 : (guide.offsetWidth + 40) / Math.max(1, canvas.clientWidth);
+    if (whole || u0 < u - wide + 2.5 || u1 > u + wide * (1 - 2 * card) - 2.5 || v0 < v - deep + 5 || v1 > v + deep - 4) {
+      // Zoomed out as far as the way needs, no closer than it was (or than reads well).
+      const need = Math.max((u1 - u0 + 6) / (2 * wide * (1 - card) * zoom), (v1 - v0 + 9) / (2 * deep * zoom), 1);
+      const next = Math.max(0.4, Math.min(zoom, zoom / need));
+      view.toZoom = next;
+      const half = (view.span * canvas.clientWidth) / Math.max(1, canvas.clientHeight) / next;
+      const [cu, cv] = [(u0 + u1) / 2 + half * card, (v0 + v1) / 2];
+      view.toX = (cu + cv) * TURN;
+      view.toZ = (cv - cu) * TURN;
+      wake();
+    }
+  }
+
   api.setPicked = (i) => {
     if (i === picked) return;
     picked = i;
     relight();
-    // The way lit is brought into view when any of it is outside: across the page by where
-    // its blocks stand, up and down by how far they are from the eye.
-    if (i != null && nodes[i] && lit.length) {
-      const us = lit.map((k) => (nodes[k].x - nodes[k].z) * TURN);
-      const vs = lit.map((k) => (nodes[k].x + nodes[k].z) * TURN);
-      const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)];
-      const wide = (view.span * canvas.clientWidth) / Math.max(1, canvas.clientHeight) / view.toZoom;
-      const deep = (view.span * 2) / view.toZoom;
-      const u = (view.toX - view.toZ) * TURN;
-      const v = (view.toX + view.toZ) * TURN;
-      if (u0 < u - wide + 2.5 || u1 > u + wide - 2.5 || v0 < v - deep + 5 || v1 > v + deep - 4) {
-        // Zoomed out as far as the way needs, no closer than it was.
-        const need = Math.max((u1 - u0 + 6) / (2 * wide * view.toZoom), (v1 - v0 + 9) / (2 * deep * view.toZoom), 1);
-        view.toZoom = Math.max(0.4, Math.min(view.toZoom, 1 / need));
-        const [cu, cv] = [(u0 + u1) / 2, (v0 + v1) / 2];
-        view.toX = (cu + cv) * TURN;
-        view.toZ = (cv - cu) * TURN;
-      }
-    }
+    if (i != null && nodes[i]) show(false);
   };
   api.zoomBy = (f) => {
     view.toZoom = THREE.MathUtils.clamp(view.toZoom * f, 0.4, 3.2);
@@ -739,7 +805,7 @@ function mount(container) {
     canvas.remove();
     labels.remove();
     tip.remove();
-    trail.remove();
+    guide.remove();
   };
   return api;
 }
