@@ -3542,6 +3542,7 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-labels span { position: absolute; left: 0; top: 0; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 10.5px; line-height: 18px; color: #6b7178; white-space: nowrap;
   transition: opacity .18s; }
 .rt-labels span.ask { padding: 0 8px; font-size: 11.5px; font-weight: 600; color: #15171a; background: #fff; box-shadow: 0 0 0 1px #cfd4d9; }
+.rt-labels span.many { padding: 0 8px; font-size: 11.5px; font-weight: 600; color: #15171a; background: #fff; box-shadow: 0 0 0 1px #cfd4d9; }
 .rt-labels span.words { font-size: 11px; color: #15171a; }
 .rt-labels span.blocked { color: #b93126; font-weight: 600; } .rt-labels span.held { color: #8a5f06; font-weight: 600; }
 .rt-labels span.on { padding: 0 8px 0 3px; font-weight: 600; color: #fff; background: #15171a; box-shadow: none; }
@@ -3575,7 +3576,7 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-keys { position: absolute; left: 34px; bottom: 26px; z-index: 2; display: flex; gap: 16px; font-size: 12px; color: #4a4f55; pointer-events: none; }
 .rt-keys span { display: inline-flex; align-items: center; gap: 7px; }
 .rt-keys i { width: 14px; height: 14px; border-radius: 3px; }
-.rt-keys i.way { height: 5px; width: 18px; border-radius: 3px; background: #3fc47c; } .rt-keys i.order { height: 1px; width: 18px; background: #8d939a; } .rt-keys i.blocked { background: #f6aaa3; } .rt-keys i.held { background: #f7d488; }
+.rt-keys i.way { height: 5px; width: 18px; border-radius: 3px; background: #3fc47c; } .rt-keys i.blocked { background: #f6aaa3; } .rt-keys i.held { background: #f7d488; }
 .rt-zoom { position: absolute; right: 26px; bottom: 24px; z-index: 2; display: flex; flex-direction: column; overflow: hidden; border-radius: 10px; background: #fff;
   box-shadow: 0 0 0 1px #cfd4d9, 0 6px 18px rgba(21, 23, 26, .08); }
 .rt-stage .rt-zoom button { width: 38px; height: 38px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; background: #fff; color: #15171a;

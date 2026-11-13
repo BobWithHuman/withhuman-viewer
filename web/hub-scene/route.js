@@ -1,16 +1,17 @@
 // 기록 as a map seen from above at an angle, its roads the way the engine traced each Call back
-// to the request. One street runs through the session from left to right; each turn's request,
-// with the agent's intent as a pin on it, stands on it. A Call the engine traced to the request stands
-// off the street at the end of a lane; a Call it traced to an earlier Call stands on from that
-// one, the road carrying on. A thin grey line runs from each Call to the next in the order
-// made, whatever told it; the roads themselves carry no colour. A block picked is drawn round
-// in black, as is the request its way starts at (a request can be picked too, which keeps
-// its whole turn clear and fades the others), and that way alone is lit in a thick band:
-// green, red to a Call the engine stopped, amber to one it held; the words of a tool result
-// that told a Call stand on the road before it. The same way is written out as a line of
-// names at the foot. Calls the engine stopped stand on a red lot, those it held on an amber
-// one. The page gives the blocks, where they stand and what each follows (admin/route.rs);
-// this file only draws them.
+// to the request. Each turn is a street of its own running left to right, its request (with
+// the agent's intent as a pin on it) at the left end; the turns lie one below the next, a road
+// down the left joining their requests. A Call the engine traced to the request stands off
+// its turn's street at the end of a lane; a Call it traced to an earlier Call stands on from
+// that one, the road carrying on. In a long turn the Calls that only followed the request
+// stand folded into one large block, which opens when picked. The roads carry no colour. A
+// block picked is drawn round in black, as is the request its way starts at (a request can be
+// picked too, which keeps its whole turn clear and fades the others), and that way alone is
+// lit in a thick band: green, red to a Call the engine stopped, amber to one it held; the
+// words of a tool result that told a Call stand on the road before it. The same way is
+// written out as a line of names at the foot. Calls the engine stopped stand on a red lot,
+// those it held on an amber one. The page gives the blocks, where they stand and what each
+// follows (admin/route.rs); this file only draws them.
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
@@ -22,7 +23,6 @@ const LOT = 0xf1f3f5;
 const KERB = 0xd3d7dc;
 const MARK = 0xbcc2c9;
 const GREEN = 0x3fc47c;
-const ORDER = 0xb4b9bf;
 // The way lit to a Call the engine stopped or held.
 const WAYS = { blocked: 0xe2574b, held: 0xdb9c1c };
 const GREEN_LOT = 0xa9ebc4;
@@ -91,6 +91,15 @@ function block(kind, pinned) {
   } else if (kind === "delegate") {
     g.add(solid(new RoundedBoxGeometry(1.0, 1.3, 0.5, 6, 0.22), white(), 0, 0.65, 0));
     tall = 1.3;
+  } else if (kind === "many") {
+    // A hall: many Calls under one roof, a row of doors along the two sides seen.
+    g.add(solid(new RoundedBoxGeometry(2.7, 1.0, 2.7, 4, 0.1), white(), 0, 0.5, 0));
+    g.add(solid(new RoundedBoxGeometry(2.0, 0.34, 2.0, 4, 0.08), white(), 0, 1.17, 0));
+    for (let k = -2; k <= 2; k++) {
+      g.add(solid(new RoundedBoxGeometry(0.26, 0.5, 0.03, 1, 0.01), grey(), k * 0.48, 0.3, 1.36));
+      g.add(solid(new RoundedBoxGeometry(0.03, 0.5, 0.26, 1, 0.01), grey(), 1.36, 0.3, k * 0.48));
+    }
+    tall = 1.34;
   } else {
     g.add(solid(new RoundedBoxGeometry(1.0, 0.5, 1.0, 5, 0.16), white(), 0, 0.5, 0));
     for (const sx of [-0.3, 0.3]) g.add(solid(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 12), grey(), sx, 0.15, 0.2));
@@ -254,7 +263,7 @@ function mount(container) {
   const EYE = new THREE.Vector3(1, 0.82, 1).normalize().multiplyScalar(90);
   const still = window.matchMedia("(prefers-reduced-motion: reduce)");
   const view = { x: 0, z: 0, zoom: 1, toX: 0, toZ: 0, toZoom: 1, span: 6 };
-  let data = { nodes: [], street: { from: 0, step: 1, points: [] } };
+  let data = { nodes: [], streets: [] };
   let nodes = [];
   let ways = [];
   let lit = [];
@@ -307,7 +316,8 @@ function mount(container) {
   function way(a, b) {
     if (a.up === b.i || b.up === a.i || a.ghost || b.ghost) return [[a.x, a.z], [b.x, b.z]];
     if (Math.abs(a.u - b.u) < 1e-6) return [...back(a), ...back(b).reverse()];
-    const s = data.street;
+    const s = data.streets.find((street) => street.turn === a.turn);
+    if (!s || a.turn !== b.turn) return [[a.x, a.z], [b.x, b.z]];
     const lo = Math.min(a.u, b.u) + 0.2;
     const hi = Math.max(a.u, b.u) - 0.2;
     const mid = [];
@@ -390,7 +400,7 @@ function mount(container) {
       trail.append(li);
     });
     // Which names give way when two would overlap: the lit way first, then the street's own.
-    const rank = (i) => (on.has(i) ? 0 : ON_STREET.has(nodes[i].kind) ? 1 : nodes[i].state ? 2 : 3);
+    const rank = (i) => (on.has(i) ? 0 : ON_STREET.has(nodes[i].kind) || nodes[i].kind === "many" ? 1 : nodes[i].state ? 2 : 3);
     order = nodes.map((_, i) => i).sort((a, b) => rank(a) - rank(b) || a - b);
     ways.forEach((w) => (w.goal = (lit.length ? 0.7 : 1) * (w.most ?? 1)));
     stale = true;
@@ -433,16 +443,20 @@ function mount(container) {
       root.add(mesh);
       ways.push({ way: mesh, at: 1, goal: 1 });
     };
-    // The street through the session, and marks on it pointing the way it runs.
-    const pts = next.street.points;
-    const run = trace(pts);
-    add(ribbon(run, 1.02, 0.002, KERB, 0));
-    add(ribbon(run, 0.92, 0.004, STREET, 1));
-    const onStreet = next.nodes.filter((n) => ON_STREET.has(n.kind)).map((n) => n.u);
-    for (let k = 3; k + 1 < pts.length; k += 6) {
-      const u = next.street.from + k * next.street.step;
-      if (onStreet.some((s) => Math.abs(s - u) < 1.5)) continue;
-      add(arrow(pts[k][0], pts[k][1], pts[k + 1][0] - pts[k - 1][0], pts[k + 1][1] - pts[k - 1][1]));
+    // The road down the left that joins the turns' requests.
+    const asks = next.nodes.filter((n) => n.kind === "ask").map((n) => [n.x, n.z]);
+    if (asks.length > 1) {
+      const spine = trace(asks);
+      add(ribbon(spine, 1.02, 0.002, KERB, 0));
+      add(ribbon(spine, 0.92, 0.004, STREET, 1));
+    }
+    // Each turn's street, and marks on it pointing the way it runs.
+    for (const street of next.streets) {
+      const pts = street.points;
+      const run = trace(pts);
+      add(ribbon(run, 1.02, 0.002, KERB, 0));
+      add(ribbon(run, 0.92, 0.004, STREET, 1));
+      for (let k = 6; k + 1 < pts.length; k += 8) add(arrow(pts[k][0], pts[k][1], pts[k + 1][0] - pts[k - 1][0], pts[k + 1][1] - pts[k - 1][1]));
     }
     nodes = next.nodes.map((n, i) => {
       const b = block(n.kind, !!n.intent);
@@ -450,7 +464,7 @@ function mount(container) {
       b.g.traverse((o) => (o.userData.at = i));
       root.add(b.g);
       const street = ON_STREET.has(n.kind);
-      const size = street ? 1.9 : 1.84;
+      const size = street ? 1.9 : n.kind === "many" ? 3.5 : 1.84;
       if (!n.ghost) {
         // Its lane to the street, and the lot it stands on.
         if (!street) {
@@ -473,22 +487,10 @@ function mount(container) {
       }
       const name = document.createElement("span");
       name.textContent = n.label;
-      name.classList.add(street || n.ghost ? n.kind : "call");
+      name.classList.add(street || n.ghost || n.kind === "many" ? n.kind : "call");
       if (n.state) name.classList.add(n.state);
       labels.append(name);
       return { ...n, ...b, i, name, size, wide: name.offsetWidth, at: n.ghost ? 0 : 1, goal: n.ghost ? 0 : 1, shown: true };
-    });
-    // The order made: a thin grey line from each block of a turn to the next, where the
-    // street or the engine's own link does not already run between the two.
-    const made = nodes.filter((n) => !n.ghost);
-    made.forEach((a, k) => {
-      const b = made[k + 1];
-      if (!b || b.turn !== a.turn || b.up === a.i) return;
-      if (ON_STREET.has(a.kind) && ON_STREET.has(b.kind)) return;
-      const line = ribbon(trace([[a.x, a.z], [b.x, b.z]]), 0.05, 0.0105, ORDER, 4);
-      if (!line) return;
-      root.add(line);
-      ways.push({ way: line, at: 0.6, goal: 0.6, most: 0.6 });
     });
     fit();
     view.x = view.toX;
@@ -565,7 +567,7 @@ function mount(container) {
     const i = under(e);
     if (i === hover) return;
     hover = i;
-    canvas.style.cursor = i == null ? "" : nodes[i].seq != null || nodes[i].kind === "ask" ? "pointer" : "default";
+    canvas.style.cursor = i == null ? "" : nodes[i].pick != null ? "pointer" : "default";
     tip.hidden = i == null;
     if (i != null) {
       tip.replaceChildren();
@@ -584,9 +586,9 @@ function mount(container) {
   canvas.addEventListener("pointerup", (e) => {
     if (drag && moved < 5) {
       const i = under(e);
-      // A Call by its seq; a request by what the page calls its turn.
-      if (i != null && nodes[i].seq != null) api.onPick?.(nodes[i].seq);
-      else if (i != null && nodes[i].kind === "ask" && api.askKey) api.onPick?.(api.askKey(nodes[i].turn));
+      // What the page gave the block to be picked by: a Call's seq, a request's or a large
+      // block's own key.
+      if (i != null && nodes[i].pick != null) api.onPick?.(nodes[i].pick);
     }
     drag = null;
     container.classList.remove("moving");
@@ -647,14 +649,15 @@ function mount(container) {
       n.g.visible = n.at > 0.02;
       n.g.traverse((o) => o.material && o.material.transparent && (o.material.opacity = n.at));
       // Its name sits under it on the page; the words' name beside them, clear of the lane.
-      const [sx, sy] = n.ghost ? project(n.x + 0.42, 0, n.z + 0.42) : project(n.x + 0.72, 0, n.z + 0.72);
+      const [sx, sy] = n.ghost ? project(n.x + 0.42, 0, n.z + 0.42) : project(n.x + (n.kind === "many" ? 1.5 : 0.72), 0, n.z + (n.kind === "many" ? 1.5 : 0.72));
       n.sx = sx;
       n.sy = sy;
       n.name.style.transform = `translate(-50%, 0) translate(${n.sx}px, ${n.sy}px)`;
       // Where the block itself is on the page, from its top to its foot.
       const [bx, top] = project(n.x, n.tall, n.z);
-      const foot = project(n.x + 0.5, 0, n.z + 0.5)[1];
-      const half = (project(n.x + 0.5, 0, n.z - 0.5)[0] - bx) * 1.05;
+      const reach = n.kind === "many" ? 1.35 : 0.5;
+      const foot = project(n.x + reach, 0, n.z + reach)[1];
+      const half = (project(n.x + reach, 0, n.z - reach)[0] - bx) * 1.05;
       n.box = [bx - half, top, bx + half, foot];
       if (i === hover) {
         const [tx, ty] = project(n.x, n.tall + 0.35, n.z);
