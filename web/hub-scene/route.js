@@ -203,15 +203,21 @@ function block(kind, pinned) {
 }
 
 // Evenly spaced places along the floor through the points given, the corners rounded.
-function trace(points) {
+function trace(points, round = 0.42) {
   const v = [];
   for (const [x, z] of points) {
     const p = new THREE.Vector3(x, 0, z);
     if (!v.length || v[v.length - 1].distanceTo(p) > 0.04) v.push(p);
   }
+  // Only the corners: a place on the straight between two others would hold its corner's
+  // rounding to the short stretch beside it.
+  for (let i = v.length - 2; i > 0; i--) {
+    const [a, b, c] = [v[i - 1], v[i], v[i + 1]];
+    if (Math.abs((b.x - a.x) * (c.z - b.z) - (b.z - a.z) * (c.x - b.x)) < 1e-9) v.splice(i, 1);
+  }
   if (v.length < 2) return [];
   const path = new THREE.CurvePath();
-  const r = 0.42;
+  const r = round;
   let from = v[0];
   for (let i = 1; i < v.length; i++) {
     const here = v[i];
@@ -431,7 +437,7 @@ function mount(container) {
     });
     // The way to the Call picked down the roads, as the page gave it: the line on its casing,
     // and the places along it.
-    flow = lit.length > 1 && nodes[picked].route ? trace(nodes[picked].route) : [];
+    flow = lit.length > 1 && nodes[picked].route ? trace(nodes[picked].route, 0.9) : [];
     const casing = ribbon(flow, 0.86, 0.014, CASING, 6);
     const line = ribbon(flow, 0.66, 0.017, ROUTE, 7);
     if (casing) glow.add(casing, line);
@@ -578,7 +584,8 @@ function mount(container) {
     // The road up the left that joins the turns' requests, then every turn's street and forks.
     const asks = next.nodes.filter((n) => n.kind === "ask").map((n) => [n.x, n.z]);
     if (asks.length > 1) road(trace(asks), 2.1).forEach(add);
-    for (const r of next.roads) road(trace(r.points), r.wide).forEach(add);
+    // Its corners round enough that the inside of the bend does not fold over.
+    for (const r of next.roads) road(trace(r.points, r.wide / 2 + 0.7), r.wide).forEach(add);
     nodes = next.nodes.map((n, i) => {
       const b = block(n.kind, !!n.intent);
       b.g.position.set(n.x, 0, n.z);
