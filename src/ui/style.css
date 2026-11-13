@@ -3452,3 +3452,10 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
   .station-arrow { font-size: 18px; }
   .station-neighbor strong { font-size: 11px; }
 }
+
+/* Tool verdicts live on the map, at the same offset as answer bubbles. */
+.fx-prompt.tool-verdict { width: 640px; max-width: none; max-height: none; padding: 0; overflow: visible; background: transparent; box-shadow: none; z-index: 8; }
+.fx-prompt.tool-verdict::before { content: ""; position: absolute; top: -9px; left: 28px; width: 18px; height: 18px; transform: rotate(45deg); background: var(--af-tab); border-top: 1px solid var(--af-raise); border-left: 1px solid var(--af-raise); }
+.tool-verdict .call-verdict-dialog { position: relative; width: 100%; max-height: none; margin: 0; overflow: hidden; border-radius: 10px; }
+.tool-verdict .call-verdict-content { max-height: 560px; }
+.tool-verdict .station-current h2 { font-size: 21px; }

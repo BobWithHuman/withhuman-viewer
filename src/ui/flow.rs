@@ -1659,6 +1659,26 @@ fn LineMap(
                     }
                 }
             }
+            // The selected tool opens its verdict at the station, like an answer bubble.
+            if (state.call_details_open)() {
+                if let Selection::Node(seq) = (state.selected)() {
+                    if let Some(st) = line.stops.iter().find(|s| s.is(seq)) {
+                        {
+                            let left = (st.x - 40.0).max(8.0).min((line.width - 660.0).max(8.0));
+                            let top = st.y + 44.0;
+                            rsx! {
+                                div { class: "fx-prompt tool-verdict",
+                                    style: "left: {left}px; top: {top}px",
+                                    onmousedown: move |e| e.stop_propagation(),
+                                    onwheel: move |e| e.stop_propagation(),
+                                    onclick: move |e| e.stop_propagation(),
+                                    super::inspector::CallBubble {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             // An answer opened: the agent's last message whole, and before it what else it said.
             if let Some(st) = say_open().and_then(|n| line.stops.iter().find(|s| s.turn == n && s.kind == Kind::Say)) {
                 {

@@ -602,13 +602,10 @@ fn hidden_rules(rules: &serde_json::Value) -> String {
     }
 }
 
-/// Native dialog provides focus trapping and restores focus when dismissed.
+/// Verdict content embedded next to its station on the route map.
 #[component]
-pub fn CallModal() -> Element {
+pub fn CallBubble() -> Element {
     let mut state = use_context::<AppState>();
-    use_effect(move || {
-        document::eval("document.getElementById('call-verdict-dialog')?.showModal()");
-    });
     // Use the same unfolded map and turn order as the record view.
     let stations = use_memo(move || {
         let Load::Ready(model) = (state.graph)() else {
@@ -639,20 +636,20 @@ pub fn CallModal() -> Element {
     let number = current.map_or(String::new(), |i| format!("{:02}", i + 1));
     let progress = current.map_or(String::new(), |i| format!("{} / {}", i + 1, stops.len()));
     rsx! {
-        dialog {
-            id: "call-verdict-dialog",
+        section {
             class: "call-verdict-dialog",
             aria_labelledby: "call-verdict-title",
-            oncancel: move |e| {
-                e.prevent_default();
-                state.call_modal.set(false);
+            onkeydown: move |e| {
+                if e.key() == Key::Escape {
+                    e.stop_propagation();
+                    state.call_details_open.set(false);
+                }
             },
-            onclick: move |_| state.call_modal.set(false),
             div { class: "call-verdict-content", onclick: move |e| e.stop_propagation(),
                 header { class: "station-sign", style: "--station-color: {color}",
                     div { class: "station-sign-top",
                         span { "WITHHUMAN · 기록 노선 · {progress}" }
-                        button { class: "station-close", autofocus: true, aria_label: "닫기", onclick: move |_| state.call_modal.set(false), "✕" }
+                        button { class: "station-close", aria_label: "닫기", onclick: move |_| state.call_details_open.set(false), "✕" }
                     }
                     nav { class: "station-navigation", aria_label: "기록 노선 역 이동",
                         button { disabled: previous_seq.is_none(),

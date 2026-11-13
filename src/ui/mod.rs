@@ -189,7 +189,7 @@ pub struct AppState {
     pub selected: Signal<Selection>,
     /// The inspector beside the map: closed until the route's detail asks for it.
     pub inspect: Signal<bool>,
-    pub call_modal: Signal<bool>,
+    pub call_details_open: Signal<bool>,
     /// A node for the canvas to bring into view.
     pub focus: Signal<Option<i64>>,
     pub settings_open: Signal<bool>,
@@ -212,7 +212,7 @@ impl AppState {
 
     pub fn show_call(mut self, seq: i64) {
         self.selected.set(Selection::Node(seq));
-        self.call_modal.set(true);
+        self.call_details_open.set(true);
     }
 
     /// Opens a Call of any session in the graph, from the comparison.
@@ -226,7 +226,7 @@ impl AppState {
         if self.current.peek().as_deref() == Some(id.as_str()) {
             return;
         }
-        self.call_modal.set(false);
+        self.call_details_open.set(false);
         self.selected.set(Selection::None);
         self.prefs.write().last_session = Some(id.clone());
         self.current.set(Some(id));
@@ -264,7 +264,7 @@ pub fn App() -> Element {
         mode: Signal::new(Mode::Graph),
         selected: Signal::new(Selection::None),
         inspect: Signal::new(false),
-        call_modal: Signal::new(false),
+        call_details_open: Signal::new(false),
         focus: Signal::new(None),
         settings_open: Signal::new(false),
         live: Signal::new(false),
@@ -383,9 +383,6 @@ pub fn App() -> Element {
                 }
             }
             }
-            }
-            if (state.call_modal)() {
-                inspector::CallModal {}
             }
             if (state.settings_open)() {
                 settings::SettingsSheet {}

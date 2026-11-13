@@ -907,7 +907,7 @@ pub fn Story(
                 ("segment", Some((result, paragraph, p))) => rsx! {
                     div { class: "cause-quote",
                         button { class: "link", onclick: move |_| {
-                            state.call_modal.set(false);
+                            state.call_details_open.set(false);
                             state.go_to(from_call.unwrap_or(result));
                         },
                             "{from_call.unwrap_or(result)}번 노드"
