@@ -19,12 +19,16 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
 const WHITE = 0xffffff;
-const EDGE = 0xb9bfc6;
+const EDGE = 0xbcbee0;
 const INK = 0x15171a;
-const STREET = 0xfbfcfc;
-const LOT = 0xf1f3f5;
-const KERB = 0xd3d7dc;
-const MARK = 0xbcc2c9;
+// The floor as a driving map paints it: lavender-grey roadway with white markings, a pale
+// pavement along it, lots the pavement's colour edged a little darker.
+const ROAD = 0xb3b5d9;
+const PAVE = 0xf3f2f8;
+const PAINT = 0xfbfbff;
+const LOT = 0xf3f2f8;
+const KERB = 0xd9d9ea;
+const MARK = 0xdfe0f1;
 // The way lit, as a route finder draws one: a blue line on a wider, darker one.
 const ROUTE = 0x3b82f6;
 const CASING = 0x1d4fbf;
@@ -39,7 +43,8 @@ const TURN = Math.SQRT1_2;
 const ON_STREET = new Set(["ask"]);
 
 const white = () => new THREE.MeshStandardMaterial({ color: WHITE, roughness: 0.86, metalness: 0, transparent: true });
-const grey = () => new THREE.MeshStandardMaterial({ color: 0xd5d9de, roughness: 0.9, metalness: 0, transparent: true });
+// A block's doors, dials and slits: the lavender glass of the buildings on a driving map.
+const grey = () => new THREE.MeshStandardMaterial({ color: 0xb4b8e2, roughness: 0.7, metalness: 0, transparent: true });
 
 function solid(geometry, material, x, y, z) {
   const m = new THREE.Mesh(geometry, material);
@@ -206,6 +211,17 @@ function rounded(side, r) {
   return s;
 }
 
+// A road along the places given: pavement under roadway, and down the middle of a street
+// (not a lane) a broken white line. Returns its flat pieces.
+function road(pts, wide) {
+  const out = [ribbon(pts, wide + 0.34, 0.002, PAVE, 0), ribbon(pts, wide, 0.004, ROAD, 1)];
+  if (wide >= 1) {
+    // Seven places painted, six left bare: the places are 0.12 apart.
+    for (let k = 4; k + 7 < pts.length; k += 13) out.push(ribbon(pts.slice(k, k + 7), 0.07, 0.0055, PAINT, 2));
+  }
+  return out.filter(Boolean);
+}
+
 // The ground a block stands on: a square lot off the street, a round one on it.
 function lot(round, size, color, y, order) {
   const m = flat(round ? new THREE.CircleGeometry(size / 2, 56) : new THREE.ShapeGeometry(rounded(size, 0.2)), color, y, order);
@@ -250,15 +266,15 @@ function mount(container) {
   container.append(labels, tip, guide);
 
   const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xdfe3e8, 2.0));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.7);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xc3c2ea, 2.0));
+  const sun = new THREE.DirectionalLight(0xfffaf2, 1.8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.bias = -0.0012;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
   // The shadows lie just over the street and the lots, so a block's shadow falls on them too.
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.ShadowMaterial({ opacity: 0.16 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.ShadowMaterial({ color: 0x4b4d9a, opacity: 0.2 }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = 0.03;
   ground.renderOrder = 10;
@@ -362,8 +378,8 @@ function mount(container) {
     flow = [];
     for (let k = lit.length - 1; k > 0; k--) {
       const pts = trace(way(nodes[lit[k]], nodes[lit[k - 1]]));
-      const casing = ribbon(pts, 0.4, 0.014, CASING, 5);
-      const line = ribbon(pts, 0.28, 0.017, ROUTE, 6);
+      const casing = ribbon(pts, 0.52, 0.014, CASING, 5);
+      const line = ribbon(pts, 0.4, 0.017, ROUTE, 6);
       if (casing) glow.add(casing, line);
       flow.push(...pts);
     }
@@ -511,15 +527,13 @@ function mount(container) {
     const asks = next.nodes.filter((n) => n.kind === "ask").map((n) => [n.x, n.z]);
     if (asks.length > 1) {
       const spine = trace(asks);
-      add(ribbon(spine, 1.02, 0.002, KERB, 0));
-      add(ribbon(spine, 0.92, 0.004, STREET, 1));
+      road(spine, 1.16).forEach(add);
     }
     // Each turn's street, and marks on it pointing the way it runs.
     for (const street of next.streets) {
       const pts = street.points;
       const run = trace(pts);
-      add(ribbon(run, 1.02, 0.002, KERB, 0));
-      add(ribbon(run, 0.92, 0.004, STREET, 1));
+      road(run, 1.16).forEach(add);
       for (let k = 6; k + 1 < pts.length; k += 8) add(arrow(pts[k][0], pts[k][1], pts[k + 1][0] - pts[k - 1][0], pts[k + 1][1] - pts[k - 1][1]));
     }
     nodes = next.nodes.map((n, i) => {
@@ -535,8 +549,7 @@ function mount(container) {
           // From the Call it follows, or from the street.
           const from = n.up != null ? next.nodes[n.up] : null;
           const lane = trace([from ? [from.x, from.z] : [n.jx, n.jz], [n.x, n.z]]);
-          add(ribbon(lane, 0.44, 0.002, KERB, 0));
-          add(ribbon(lane, 0.34, 0.004, STREET, 1));
+          road(lane, 0.52).forEach(add);
         }
         if (!n.state) {
           const kerb = lot(street, size + 0.1, KERB, 0.006, 2);
@@ -544,7 +557,7 @@ function mount(container) {
           kerb.position.z = n.z;
           add(kerb);
         }
-        const ground = lot(street, size, n.state ? LOTS[n.state] : street ? STREET : LOT, 0.008, 3);
+        const ground = lot(street, size, n.state ? LOTS[n.state] : LOT, 0.008, 3);
         ground.position.x = n.x;
         ground.position.z = n.z;
         add(ground);

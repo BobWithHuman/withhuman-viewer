@@ -3533,7 +3533,8 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
    (drawn by three.js into #route-scene), its heading over the top left, the keys beneath it,
    the zoom at the bottom right, and the lit way written out along the foot. Black for what
    is picked, green for what told it. */
-.rt-stage { position: absolute; inset: 0; overflow: hidden; color: #15171a; background: radial-gradient(130% 100% at 38% 22%, #eef0f3 0%, #e2e5e9 100%); }
+/* The land between the roads: the warm pale ground of a driving map, lighter toward the top. */
+.rt-stage { position: absolute; inset: 0; overflow: hidden; color: #15171a; background: linear-gradient(180deg, #ecebf3 0%, #e9e4e4 55%, #e6dfdc 100%); }
 #route-scene { position: absolute; inset: 0; }
 #route-scene canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 #route-scene.moving canvas { cursor: grabbing; }
