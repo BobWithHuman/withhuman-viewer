@@ -1,17 +1,15 @@
 // 기록 as a map seen from above at an angle, its roads the way the engine traced each Call back
 // to the request. One street runs through the session from left to right; each turn's request,
-// the agent's intent and its answer stand on it. A Call the engine traced to the request stands
+// with the agent's intent as a pin on it, and its answer stand on it. A Call the engine traced to the request stands
 // off the street at the end of a lane; a Call it traced to an earlier Call stands on from that
-// one, the road carrying on. So there are two kinds of line. A thin grey one runs from each
-// Call to the next in the order made, whatever told it. A coloured one runs down each road,
-// the engine's link from a Call to what it was traced to: green, or red into a Call the engine
-// stopped and amber into one it held. Where the two part, the agent did other things between
-// a Call and the one that followed from it. A
-// block picked is drawn round in black and its whole way from the request is lit in a thick
-// green band, the words of a tool result that told a Call standing on the road before it; the
-// same way is written out as a line of names at the foot. Calls the engine stopped stand on a
-// red lot, those it held on an amber one. The page gives the blocks, where they stand and
-// what each follows (admin/route.rs); this file only draws them.
+// one, the road carrying on. A thin grey line runs from each Call to the next in the order
+// made, whatever told it; the roads themselves carry no colour. A block picked is drawn round
+// in black, as is the request its way starts at, and that way alone is lit in a thick band:
+// green, red to a Call the engine stopped, amber to one it held; the words of a tool result
+// that told a Call stand on the road before it. The same way is written out as a line of
+// names at the foot. Calls the engine stopped stand on a red lot, those it held on an amber
+// one. The page gives the blocks, where they stand and what each follows (admin/route.rs);
+// this file only draws them.
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
@@ -23,17 +21,15 @@ const LOT = 0xf1f3f5;
 const KERB = 0xd3d7dc;
 const MARK = 0xbcc2c9;
 const GREEN = 0x3fc47c;
-const LINK = 0x86dcab;
-const ORDER = 0xa3a9b0;
-// The engine's link into a Call it stopped or held, thin and lit.
-const LINKS = { blocked: 0xee9087, held: 0xe9bd5a };
+const ORDER = 0xb4b9bf;
+// The way lit to a Call the engine stopped or held.
 const WAYS = { blocked: 0xe2574b, held: 0xdb9c1c };
 const GREEN_LOT = 0xa9ebc4;
 const LOTS = { blocked: 0xf6aaa3, held: 0xf7d488 };
 // The eye looks down a diagonal of the floor: one step to the right on the page is this much
 // along x and back along z.
 const TURN = Math.SQRT1_2;
-const ON_STREET = new Set(["ask", "intent", "say"]);
+const ON_STREET = new Set(["ask", "say"]);
 
 const white = () => new THREE.MeshStandardMaterial({ color: WHITE, roughness: 0.86, metalness: 0, transparent: true });
 const grey = () => new THREE.MeshStandardMaterial({ color: 0xd5d9de, roughness: 0.9, metalness: 0, transparent: true });
@@ -46,22 +42,22 @@ function solid(geometry, material, x, y, z) {
 }
 
 // Each kind of block, standing at its own origin; returns its meshes' group and its height.
-function block(kind) {
+function block(kind, pinned) {
   const g = new THREE.Group();
   let tall = 1;
   if (kind === "ask") {
-    for (const [r, h, y] of [[0.78, 0.26, 0.13], [0.5, 0.2, 0.36]]) {
+    for (const [r, h, y] of [[0.82, 0.26, 0.13], [0.54, 0.2, 0.36]]) {
       const hex = solid(new THREE.CylinderGeometry(r, r, h, 6), white(), 0, y, 0);
       hex.rotation.y = Math.PI / 6;
       g.add(hex);
     }
     tall = 0.46;
-  } else if (kind === "intent") {
-    // A pin stood in the street: where the agent said it was going.
-    g.add(solid(new THREE.CylinderGeometry(0.46, 0.46, 0.1, 40), white(), 0, 0.05, 0));
-    g.add(solid(new THREE.CylinderGeometry(0.035, 0.035, 0.86, 12), grey(), 0, 0.53, 0));
-    g.add(solid(new THREE.SphereGeometry(0.21, 32, 20), white(), 0, 1.08, 0));
-    tall = 1.3;
+    if (pinned) {
+      // A pin stood on the request: where the agent said it was going with it.
+      g.add(solid(new THREE.CylinderGeometry(0.035, 0.035, 0.7, 12), grey(), 0, 0.81, 0));
+      g.add(solid(new THREE.SphereGeometry(0.2, 32, 20), white(), 0, 1.3, 0));
+      tall = 1.5;
+    }
   } else if (kind === "say") {
     g.add(solid(new THREE.CylinderGeometry(0.05, 0.05, 0.34, 12), grey(), 0, 0.17, 0));
     g.add(solid(new RoundedBoxGeometry(1.0, 0.6, 0.6, 6, 0.24), white(), 0, 0.64, 0));
@@ -329,8 +325,10 @@ function mount(container) {
     const on = new Set(lit);
     nodes.forEach((n, i) => {
       n.goal = n.ghost ? (on.has(i) ? 1 : 0) : !lit.length || on.has(i) ? 1 : 0.42;
-      n.hull.forEach((h) => (h.visible = i === picked));
-      n.lines.forEach((l) => l.material.color.setHex(i === picked ? INK : EDGE));
+      // Drawn round in black: the Call picked, and the request its way starts at.
+      const marked = i === picked || (on.has(i) && n.kind === "ask");
+      n.hull.forEach((h) => (h.visible = marked));
+      n.lines.forEach((l) => l.material.color.setHex(marked ? INK : EDGE));
       n.name.classList.toggle("on", on.has(i));
       n.name.removeAttribute("data-step");
       if (on.has(i) && !n.state) {
@@ -367,22 +365,27 @@ function mount(container) {
     steps.forEach((i, k) => {
       const n = nodes[i];
       n.name.dataset.step = k + 1;
-      // A long way keeps its first three and last three, and counts the Calls between.
-      const cut = steps.length > 8 && k >= 3 && k < steps.length - 3;
-      if (cut && k > 3) return;
+      // A long way keeps its first two and last three, and counts the Calls between.
+      const cut = steps.length > 6 && k >= 2 && k < steps.length - 3;
+      if (cut && k > 2) return;
       const li = document.createElement("li");
-      const what = document.createElement("span");
       if (cut) {
         li.className = "more";
-        what.textContent = `호출 ${steps.length - 6}개`;
-        li.append(what);
+        li.textContent = `호출 ${steps.length - 5}개 더`;
       } else {
         if (i === picked) li.className = "end";
         if (n.kind === "words") li.classList.add("words");
         const no = document.createElement("i");
         no.textContent = k + 1;
+        const what = document.createElement("b");
         what.textContent = n.label;
         li.append(no, what);
+        // What it was, beside its name: the request's words, the Call's own title.
+        if (n.kind !== "words" && n.tip && n.tip !== n.label) {
+          const more = document.createElement("span");
+          more.textContent = n.tip;
+          li.append(more);
+        }
       }
       trail.append(li);
     });
@@ -442,7 +445,7 @@ function mount(container) {
       add(arrow(pts[k][0], pts[k][1], pts[k + 1][0] - pts[k - 1][0], pts[k + 1][1] - pts[k - 1][1]));
     }
     nodes = next.nodes.map((n, i) => {
-      const b = block(n.kind);
+      const b = block(n.kind, !!n.intent);
       b.g.position.set(n.x, 0, n.z);
       b.g.traverse((o) => (o.userData.at = i));
       root.add(b.g);
@@ -451,12 +454,11 @@ function mount(container) {
       if (!n.ghost) {
         // Its lane to the street, and the lot it stands on.
         if (!street) {
-          // From the Call it follows, or from the street; and down it, the engine's link.
+          // From the Call it follows, or from the street.
           const from = n.up != null ? next.nodes[n.up] : null;
           const lane = trace([from ? [from.x, from.z] : [n.jx, n.jz], [n.x, n.z]]);
           add(ribbon(lane, 0.44, 0.002, KERB, 0));
           add(ribbon(lane, 0.34, 0.004, STREET, 1));
-          add(ribbon(lane, 0.09, 0.0055, LINKS[n.state] ?? LINK, 2));
         }
         if (!n.state) {
           const kerb = lot(street, size + 0.1, KERB, 0.006, 2);
@@ -486,7 +488,7 @@ function mount(container) {
       const line = ribbon(trace([[a.x, a.z], [b.x, b.z]]), 0.05, 0.0105, ORDER, 4);
       if (!line) return;
       root.add(line);
-      ways.push({ way: line, at: 0.75, goal: 0.75, most: 0.75 });
+      ways.push({ way: line, at: 0.6, goal: 0.6, most: 0.6 });
     });
     fit();
     view.x = view.toX;
@@ -567,7 +569,10 @@ function mount(container) {
     tip.hidden = i == null;
     if (i != null) {
       tip.replaceChildren();
-      for (const [tag, text] of [["small", nodes[i].kind === "words" ? "도구 결과의 문단" : nodes[i].label], ["strong", nodes[i].tip], ["span", nodes[i].note]]) {
+      const n = nodes[i];
+      const rows = [["small", n.kind === "words" ? "도구 결과의 문단" : n.label], ["strong", n.tip], ["span", n.note]];
+      if (n.intent) rows.push(["small", "에이전트가 적은 의도"], ["strong", n.intent], ["span", "엔진은 호출을 이것과 견줍니다"]);
+      for (const [tag, text] of rows) {
         if (!text) continue;
         const el = document.createElement(tag);
         el.textContent = text;

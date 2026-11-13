@@ -1,7 +1,7 @@
 //! 기록 in the security team's app: a session as a map seen from above at an angle, its roads
 //! the way the engine itself traced each Call back to the request. One street runs through the
-//! whole session from left to right; each turn's request, what the agent wrote it would do and
-//! its last word to the person stand on the street. A Call the engine traced to the request
+//! whole session from left to right; each turn's request (with what the agent wrote it would
+//! do, as one block) and its last word to the person stand on the street. A Call the engine traced to the request
 //! stands off the street at the end of a lane of its own; a Call it traced to an earlier Call
 //! (the one whose result told it, or the last in the SubGraph the engine chose as its parent)
 //! stands on from that Call, the road carrying on. So a road leaving the street is one line of
@@ -269,12 +269,12 @@ fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
 }
 
 /// The session as the scene takes it: the street's points, and the blocks. Along the street
-/// each turn stands in the order it happened: its request, what the agent wrote it would do,
-/// its Calls off to either side, and the agent's last word; the next turn follows on the same
+/// each turn stands in the order it happened: its request (carrying what the agent wrote it
+/// would do), its Calls off to either side, and the agent's last word; the next turn follows on the same
 /// street. Each Call's road comes from where the engine traced it to: from the street for one
 /// it traced to the request, from the Call before it on the engine's path (`up`) for one it
 /// traced to that Call. Each Call that something told also carries its whole way from the
-/// request (`way`): the request, the intent, the Calls its road comes through, the words of
+/// request (`way`): the request, the Calls its road comes through, the words of
 /// the result that told it (a small block on its road that shows only while lit), and itself.
 ///
 /// Also which block each Call's seq is, to light the one picked.
@@ -290,35 +290,22 @@ fn scene(legs: &[Leg]) -> (String, HashMap<i64, usize>) {
     for turn in legs {
         let t = turn.turn;
         let first = nodes.len();
+        // The request and what the agent wrote it would do about it stand as one block: where
+        // the way to every Call of the turn starts.
         let ask = on_street(
             &mut u,
             serde_json::json!({
                 "kind": "ask", "turn": t, "seq": null, "up": null, "state": null,
                 "label": format!("요청 {}", turn.n),
                 "tip": cut(&turn.req, 110),
+                "intent": turn.intent.as_deref().map(|i| cut(i, 110)),
                 "note": "사용자가 보낸 요청",
             }),
             &mut nodes,
             &mut town,
         );
-        u += 2.4;
-        // Where the way to every Call of the turn starts: the request, then the intent when
-        // the agent wrote one.
-        let mut start = vec![ask];
-        if let Some(intent) = &turn.intent {
-            start.push(on_street(
-                &mut u,
-                serde_json::json!({
-                    "kind": "intent", "turn": t, "seq": null, "up": null, "state": null,
-                    "label": "의도",
-                    "tip": cut(intent, 110),
-                    "note": "에이전트가 적은 의도. 엔진은 호출을 이것과 견줍니다",
-                }),
-                &mut nodes,
-                &mut town,
-            ));
-            u += 2.4;
-        }
+        u += 2.6;
+        let start = vec![ask];
         for call in &turn.calls {
             // The Call it follows, when that one stands in this turn.
             let up = call
@@ -595,12 +582,11 @@ pub fn RouteScene(
             div { id: "route-scene" }
             header { class: "rt-head",
                 h2 { "{title}" }
-                p { "요청 {turns.len()}개와 호출 {calls}개입니다. 회색 선은 일어난 순서이고, 색 선은 엔진이 그 호출을 어디서 이어진 것으로 봤는지입니다. 호출을 누르면 요청에서 그 호출까지 엔진이 고른 길만 굵게 켜집니다." }
+                p { "요청 {turns.len()}개와 호출 {calls}개입니다. 회색 선은 일어난 순서입니다. 호출을 누르면 요청에서 그 호출까지 엔진이 고른 길만 색으로 켜집니다." }
             }
             div { class: "rt-keys",
                 span { i { class: "order" } "일어난 순서" }
-                span { i { class: "link" } "엔진이 이은 길" }
-                span { i { class: "stop" } "차단된 호출로 이은 길" }
+                span { i { class: "way" } "엔진이 고른 길" }
                 span { i { class: "blocked" } "차단" }
                 span { i { class: "held" } "확인 요청" }
             }
@@ -667,8 +653,8 @@ mod tests {
         let nodes = told(&json);
         assert_eq!(
             nodes.len(),
-            2 * 43,
-            "each turn's request, intent, forty Calls and answer"
+            2 * 42,
+            "each turn's request, forty Calls and answer"
         );
         // Further along the street is further right on the page; what stands on the street
         // and the Calls leaving it are in the order made, the second turn after the first.
@@ -682,9 +668,9 @@ mod tests {
             let right = (num(n, "jx") - num(n, "jz")) * TURN;
             assert!((right - num(n, "u")).abs() < 1e-9);
         }
-        assert_eq!(nodes[42]["kind"], "say");
+        assert_eq!(nodes[41]["kind"], "say");
         assert_eq!(
-            (nodes[43]["kind"].as_str(), nodes[43]["turn"].as_u64()),
+            (nodes[42]["kind"].as_str(), nodes[42]["turn"].as_u64()),
             (Some("ask"), Some(1))
         );
         // Calls stand off the street on both sides; the turn's own words stand on it.
@@ -693,7 +679,7 @@ mod tests {
             .map(|n| (num(n, "x") - num(n, "jx")) - (num(n, "jz") - num(n, "z")))
             .collect();
         assert!(sides.iter().any(|s| *s > 2.0) && sides.iter().any(|s| *s < -2.0));
-        assert_eq!((sides[0], sides[1], sides[42]), (0.0, 0.0, 0.0));
+        assert_eq!((sides[0], sides[41]), (0.0, 0.0));
         for (i, a) in nodes.iter().enumerate() {
             for b in &nodes[i + 1..] {
                 let apart = (num(a, "x") - num(b, "x")).hypot(num(a, "z") - num(b, "z"));
@@ -767,16 +753,15 @@ mod tests {
         let kinds: Vec<&str> = nodes.iter().map(|n| n["kind"].as_str().unwrap()).collect();
         assert_eq!(
             kinds,
-            [
-                "ask", "intent", "run", "run", "run", "run", "run", "say", "words"
-            ]
+            ["ask", "run", "run", "run", "run", "run", "say", "words"]
         );
-        let words = 8;
+        let words = 7;
+        assert_eq!(nodes[0]["intent"], "테스트를 고친다");
         assert_eq!(nodes[words]["ghost"], true);
-        assert_eq!(way(&nodes[at[&1]]), [0, 1, at[&1]]);
-        assert_eq!(way(&nodes[at[&2]]), [0, 1, at[&2]]);
-        assert_eq!(way(&nodes[at[&3]]), [0, 1, at[&1], words, at[&3]]);
-        assert_eq!(way(&nodes[at[&4]]), [0, 1, at[&1], words, at[&3], at[&4]]);
+        assert_eq!(way(&nodes[at[&1]]), [0, at[&1]]);
+        assert_eq!(way(&nodes[at[&2]]), [0, at[&2]]);
+        assert_eq!(way(&nodes[at[&3]]), [0, at[&1], words, at[&3]]);
+        assert_eq!(way(&nodes[at[&4]]), [0, at[&1], words, at[&3], at[&4]]);
         assert!(
             way(&nodes[at[&5]]).is_empty(),
             "a Call nothing told has no way to it"
