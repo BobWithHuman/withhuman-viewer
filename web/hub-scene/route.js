@@ -1,20 +1,20 @@
-// 기록 as a map seen from above at an angle, its roads the way the engine traced each Call back
-// to the request. Each turn is a street of its own running left to right, its request (with
-// the agent's intent as a pin on it) at the left end; the turns lie one above the last, a road
-// up the left joining their requests. A Call the engine traced to the request stands off
-// its turn's street at the end of a lane; a Call it traced to an earlier Call stands on from
-// that one, the road carrying on. In a long turn the Calls that only followed the request
-// stand folded into one large block, which opens when picked. The roads carry no colour. A
-// block picked is drawn round in black, as is the request its way starts at (a request can be
-// picked too, which keeps its whole turn clear and fades the others), and that way alone is
-// lit as a route finder draws a route: a blue line on a darker casing, marks moving along it
-// the way it goes, a ring round the request it leaves from and a pin over the Call it arrives
-// at (green, red for a Call the engine stopped, amber for one it held); the words of a tool
-// result that told a Call stand on the road before it. The same way is given as directions in a card: where it leaves
-// from, what it goes through and why, where it arrives; a line of it picked brings that block
-// to the middle. Calls the engine stopped stand on a red lot,
-// those it held on an amber one. The page gives the blocks, where they stand and what each
-// follows (admin/route.rs); this file only draws them.
+// 기록 as a town seen from above at an angle, its roads the way the engine traced each Call back
+// to the request. Each turn has a wide street of its own that runs round the town's blocks,
+// its request (the agent's intent a pin on it) where it starts; the turns lie one above the
+// last, a road up the left joining their requests. Every Call is a building at the side of a
+// road: along its turn's street when the engine traced it to the request, along the road that
+// forks off beside another Call's building when the engine traced it to that Call. In a long
+// turn the Calls that only followed the request stand folded into one large building, which
+// opens when picked. The roads are a driving map's: lavender roadway with painted lines, pale
+// pavement, white buildings with lavender glass. A building picked is drawn round in black,
+// as is the request its way starts at (a request can be picked too, which keeps its whole
+// turn clear and fades the others), and the way to it is lit as a route finder draws a route:
+// a blue line on a darker casing down the roads, fork by fork, marks moving along it, a ring
+// round the request and a pin over the Call it arrives at (green, red for a Call the engine
+// stopped, amber for one it held); the words of a tool result that told a Call stand at the
+// corner where its fork leaves. The same way is given as directions in a card; a line of it
+// picked brings that building to the middle. The page gives the buildings, the roads and each
+// Call's way (admin/route.rs); this file only draws them.
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
@@ -26,6 +26,7 @@ const INK = 0x15171a;
 const ROAD = 0xb3b5d9;
 const PAVE = 0xf3f2f8;
 const PAINT = 0xfbfbff;
+const CENTRE = 0xf3dc8a;
 const LOT = 0xf3f2f8;
 const KERB = 0xd9d9ea;
 const MARK = 0xdfe0f1;
@@ -53,94 +54,152 @@ function solid(geometry, material, x, y, z) {
   return m;
 }
 
-// Each kind of block, standing at its own origin; returns its meshes' group and its height.
+// Each kind of building, standing at its own origin with its front toward the eye. Returns its
+// group, its height, its drawn edges and black outline, and the three materials it is made of
+// (walls, glass, edges), which fade together.
 function block(kind, pinned) {
   const g = new THREE.Group();
+  const wall = white();
+  const glass = grey();
+  const line = new THREE.LineBasicMaterial({ color: EDGE, transparent: true });
+  // A part of the walls: edged, and outlined when the building is picked.
+  const box = (w, h, d, x, y, z, r = 0.035) => {
+    const m = solid(new RoundedBoxGeometry(w, h, d, 3, Math.min(r, w / 2.2, h / 2.2, d / 2.2)), wall, x, y, z);
+    g.add(m);
+    return m;
+  };
+  // A detail of glass or metal: neither edged nor outlined.
+  const part = (geometry, x, y, z) => {
+    const m = solid(geometry, glass, x, y, z);
+    m.userData.detail = true;
+    g.add(m);
+    return m;
+  };
+  // Bands of windows round the two walls seen, on a body w by d standing from `foot` to `top`.
+  const windows = (w, d, foot, top, rows, x = 0, z = 0) => {
+    for (let k = 0; k < rows; k++) {
+      const y = foot + ((k + 0.5) * (top - foot)) / rows;
+      part(new THREE.BoxGeometry(w * 0.8, Math.min(0.11, (top - foot) / rows / 2), 0.02), x, y, z + d / 2 + 0.006);
+      part(new THREE.BoxGeometry(0.02, Math.min(0.11, (top - foot) / rows / 2), d * 0.8), x + w / 2 + 0.006, y, z);
+    }
+  };
   let tall = 1;
   if (kind === "ask") {
-    for (const [r, h, y] of [[0.82, 0.26, 0.13], [0.54, 0.2, 0.36]]) {
-      const hex = solid(new THREE.CylinderGeometry(r, r, h, 6), white(), 0, y, 0);
+    for (const [r, h, y] of [[0.86, 0.26, 0.13], [0.56, 0.2, 0.36]]) {
+      const hex = solid(new THREE.CylinderGeometry(r, r, h, 6), wall, 0, y, 0);
       hex.rotation.y = Math.PI / 6;
       g.add(hex);
     }
     tall = 0.46;
     if (pinned) {
       // A pin stood on the request: where the agent said it was going with it.
-      g.add(solid(new THREE.CylinderGeometry(0.035, 0.035, 0.7, 12), grey(), 0, 0.81, 0));
-      g.add(solid(new THREE.SphereGeometry(0.2, 32, 20), white(), 0, 1.3, 0));
+      part(new THREE.CylinderGeometry(0.035, 0.035, 0.7, 12), 0, 0.81, 0);
+      g.add(solid(new THREE.SphereGeometry(0.2, 32, 20), wall, 0, 1.3, 0));
       tall = 1.5;
     }
   } else if (kind === "words") {
     // A page stood on its edge: the words read out of a tool result.
-    const page = solid(new RoundedBoxGeometry(0.5, 0.64, 0.05, 3, 0.02), white(), 0, 0.34, 0);
+    const page = box(0.5, 0.64, 0.05, 0, 0.34, 0, 0.02);
     page.rotation.y = Math.PI / 4;
-    g.add(page);
     for (let k = 0; k < 3; k++) {
-      const row = solid(new RoundedBoxGeometry(0.3 - k * 0.06, 0.03, 0.012, 1, 0.004), grey(), 0.022, 0.5 - k * 0.12, 0.022);
+      const row = part(new THREE.BoxGeometry(0.3 - k * 0.06, 0.03, 0.012), 0.022, 0.5 - k * 0.12, 0.022);
       row.rotation.y = Math.PI / 4;
-      g.add(row);
     }
     tall = 0.66;
   } else if (kind === "read") {
-    g.add(solid(new RoundedBoxGeometry(1.0, 0.16, 1.3, 3, 0.04), white(), 0, 0.08, 0));
-    g.add(solid(new RoundedBoxGeometry(0.9, 0.12, 1.18, 3, 0.04), white(), 0.06, 0.24, -0.05));
-    tall = 0.3;
+    // A reading room: a low hall behind a row of columns, a lantern on its roof.
+    box(1.36, 0.1, 1.36, 0, 0.05, 0, 0.02);
+    box(1.1, 0.52, 0.96, 0, 0.36, -0.07);
+    for (let k = -1.5; k <= 1.5; k++) part(new THREE.CylinderGeometry(0.035, 0.035, 0.52, 10), k * 0.3, 0.36, 0.55);
+    part(new THREE.BoxGeometry(0.02, 0.26, 0.6), 0.556, 0.38, -0.07);
+    box(1.28, 0.08, 1.28, 0, 0.66, 0, 0.02);
+    box(0.62, 0.2, 0.5, 0, 0.8, -0.07);
+    windows(0.62, 0.5, 0.72, 0.9, 1, 0, -0.07);
+    tall = 0.92;
   } else if (kind === "change") {
-    g.add(solid(new RoundedBoxGeometry(0.95, 1.55, 0.95, 4, 0.07), white(), 0, 0.775, 0));
-    g.add(solid(new RoundedBoxGeometry(0.03, 0.5, 0.05, 1, 0.01), grey(), -0.34, 1.05, 0.49));
-    tall = 1.55;
+    // An office: a tower of floors on a wider ground floor, a stair head on its roof.
+    box(1.12, 0.26, 1.12, 0, 0.13, 0);
+    part(new THREE.BoxGeometry(0.3, 0.2, 0.02), 0, 0.1, 0.566);
+    box(0.92, 1.36, 0.92, 0, 0.94, 0);
+    windows(0.92, 0.92, 0.3, 1.58, 5);
+    box(0.98, 0.06, 0.98, 0, 1.65, 0, 0.02);
+    box(0.32, 0.16, 0.32, -0.18, 1.76, -0.18, 0.02);
+    tall = 1.84;
   } else if (kind === "run") {
-    g.add(solid(new RoundedBoxGeometry(1.1, 1.0, 1.1, 4, 0.1), white(), 0, 0.5, 0));
-    const dial = solid(new THREE.CylinderGeometry(0.26, 0.26, 0.03, 40), grey(), 0, 0.5, 0.56);
-    dial.rotation.x = Math.PI / 2;
-    g.add(dial);
+    // A machine hall: a wide shed with a shutter, a strip of high windows and vents on the roof.
+    box(1.26, 0.78, 1.14, 0, 0.39, 0);
+    part(new THREE.BoxGeometry(0.5, 0.48, 0.02), -0.2, 0.24, 0.576);
+    for (let k = 0; k < 4; k++) part(new THREE.BoxGeometry(0.44, 0.012, 0.024), -0.2, 0.1 + k * 0.11, 0.578);
+    part(new THREE.BoxGeometry(1.0, 0.09, 0.02), 0, 0.64, 0.576);
+    part(new THREE.BoxGeometry(0.02, 0.09, 0.9), 0.636, 0.64, 0);
+    box(1.32, 0.06, 1.2, 0, 0.81, 0, 0.02);
+    for (const x of [-0.3, 0.14]) part(new THREE.CylinderGeometry(0.1, 0.1, 0.16, 20), x, 0.92, -0.2);
+    box(0.34, 0.14, 0.3, 0.38, 0.91, 0.24, 0.02);
     tall = 1.0;
   } else if (kind === "outside") {
-    g.add(solid(new RoundedBoxGeometry(0.8, 1.8, 0.8, 4, 0.06), white(), 0, 0.9, 0));
-    for (let k = 0; k < 3; k++) g.add(solid(new RoundedBoxGeometry(0.46, 0.04, 0.03, 1, 0.01), grey(), 0, 1.5 - k * 0.14, 0.41));
-    tall = 1.8;
+    // A tower out to the world: a slim shaft on a podium, a mast and a dish on top.
+    box(1.16, 0.3, 1.16, 0, 0.15, 0);
+    part(new THREE.BoxGeometry(0.9, 0.1, 0.02), 0, 0.16, 0.586);
+    part(new THREE.BoxGeometry(0.02, 0.1, 0.9), 0.586, 0.16, 0);
+    box(0.72, 1.7, 0.72, 0, 1.15, 0);
+    windows(0.72, 0.72, 0.36, 1.96, 6);
+    box(0.78, 0.06, 0.78, 0, 2.03, 0, 0.02);
+    part(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 8), -0.14, 2.31, -0.14);
+    const dish = part(new THREE.SphereGeometry(0.17, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), 0.14, 2.16, 0.12);
+    dish.rotation.set(Math.PI / 2.6, 0, -Math.PI / 5);
+    tall = 2.56;
   } else if (kind === "delegate") {
-    g.add(solid(new RoundedBoxGeometry(1.0, 1.3, 0.5, 6, 0.22), white(), 0, 0.65, 0));
-    tall = 1.3;
+    // Two wings joined by a bridge: work handed to another.
+    box(0.5, 1.3, 1.0, -0.36, 0.65, 0);
+    box(0.5, 1.0, 1.0, 0.36, 0.5, 0);
+    windows(0.5, 1.0, 0.1, 1.24, 4, -0.36, 0);
+    windows(0.5, 1.0, 0.1, 0.94, 3, 0.36, 0);
+    box(0.3, 0.16, 0.4, 0, 0.7, 0, 0.02);
+    box(0.56, 0.05, 1.06, -0.36, 1.32, 0, 0.02);
+    box(0.56, 0.05, 1.06, 0.36, 1.02, 0, 0.02);
+    tall = 1.36;
   } else if (kind === "many") {
-    // A hall: many Calls under one roof, a row of doors along the two sides seen.
-    g.add(solid(new RoundedBoxGeometry(2.7, 1.0, 2.7, 4, 0.1), white(), 0, 0.5, 0));
-    g.add(solid(new RoundedBoxGeometry(2.0, 0.34, 2.0, 4, 0.08), white(), 0, 1.17, 0));
+    // A hall: many Calls under one roof, doors along the two sides seen, a raised middle.
+    box(2.8, 0.1, 2.8, 0, 0.05, 0, 0.02);
+    box(2.6, 0.9, 2.6, 0, 0.55, 0);
     for (let k = -2; k <= 2; k++) {
-      g.add(solid(new RoundedBoxGeometry(0.26, 0.5, 0.03, 1, 0.01), grey(), k * 0.48, 0.3, 1.36));
-      g.add(solid(new RoundedBoxGeometry(0.03, 0.5, 0.26, 1, 0.01), grey(), 1.36, 0.3, k * 0.48));
+      part(new THREE.BoxGeometry(0.28, 0.46, 0.02), k * 0.48, 0.33, 1.306);
+      part(new THREE.BoxGeometry(0.02, 0.46, 0.28), 1.306, 0.33, k * 0.48);
     }
-    tall = 1.34;
+    part(new THREE.BoxGeometry(2.2, 0.08, 0.02), 0, 0.8, 1.306);
+    part(new THREE.BoxGeometry(0.02, 0.08, 2.2), 1.306, 0.8, 0);
+    box(2.68, 0.07, 2.68, 0, 1.03, 0, 0.02);
+    box(1.8, 0.36, 1.8, 0, 1.24, 0);
+    windows(1.8, 1.8, 1.1, 1.38, 1);
+    box(1.88, 0.06, 1.88, 0, 1.45, 0, 0.02);
+    tall = 1.5;
   } else {
-    g.add(solid(new RoundedBoxGeometry(1.0, 0.5, 1.0, 5, 0.16), white(), 0, 0.5, 0));
-    for (const sx of [-0.3, 0.3]) g.add(solid(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 12), grey(), sx, 0.15, 0.2));
-    tall = 0.75;
+    // A kiosk: one room under an overhanging roof, a door and a window.
+    box(0.96, 0.56, 0.96, 0, 0.28, 0);
+    part(new THREE.BoxGeometry(0.24, 0.36, 0.02), -0.2, 0.18, 0.486);
+    part(new THREE.BoxGeometry(0.3, 0.16, 0.02), 0.2, 0.34, 0.486);
+    part(new THREE.BoxGeometry(0.02, 0.16, 0.6), 0.486, 0.34, 0);
+    box(1.16, 0.07, 1.16, 0, 0.6, 0, 0.02);
+    tall = 0.66;
   }
-  // Drawn edges, so a white block reads on a pale floor; black and doubled when picked.
+  // Drawn edges, so a white wall reads against a white wall; black and doubled when picked.
   const lines = [];
-  g.traverse((o) => {
-    if (!o.isMesh) return;
-    const e = new THREE.LineSegments(
-      new THREE.EdgesGeometry(o.geometry, 28),
-      new THREE.LineBasicMaterial({ color: EDGE, transparent: true }),
-    );
+  const hull = [];
+  for (const o of [...g.children]) {
+    if (!o.isMesh || o.userData.detail) continue;
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 28), line);
     e.position.copy(o.position);
     e.rotation.copy(o.rotation);
     lines.push(e);
-  });
-  lines.forEach((e) => g.add(e));
-  const hull = [];
-  g.traverse((o) => {
-    if (!o.isMesh) return;
     const h = new THREE.Mesh(o.geometry, new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }));
     h.position.copy(o.position);
     h.rotation.copy(o.rotation);
-    h.scale.setScalar(1.05);
+    h.scale.setScalar(1.045);
     h.visible = false;
     hull.push(h);
-  });
-  hull.forEach((h) => g.add(h));
-  return { g, tall, lines, hull };
+  }
+  g.add(...lines, ...hull);
+  return { g, tall, lines, hull, line, mats: [wall, glass, line] };
 }
 
 // Evenly spaced places along the floor through the points given, the corners rounded.
@@ -211,13 +270,36 @@ function rounded(side, r) {
   return s;
 }
 
-// A road along the places given: pavement under roadway, and down the middle of a street
-// (not a lane) a broken white line. Returns its flat pieces.
+// The places a way off to one side of the places given.
+function beside(pts, off) {
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)];
+    const b = pts[Math.min(pts.length - 1, i + 1)];
+    const n = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    return new THREE.Vector3(p.x - ((b.z - a.z) / n) * off, 0, p.z + ((b.x - a.x) / n) * off);
+  });
+}
+
+// A road along the places given: pavement under roadway, and the paint on it. A street has a
+// yellow line down its middle and a broken white line down each half; a road forking off, one
+// broken white line. Returns its flat pieces.
 function road(pts, wide) {
-  const out = [ribbon(pts, wide + 0.34, 0.002, PAVE, 0), ribbon(pts, wide, 0.004, ROAD, 1)];
-  if (wide >= 1) {
-    // Seven places painted, six left bare: the places are 0.12 apart.
-    for (let k = 4; k + 7 < pts.length; k += 13) out.push(ribbon(pts.slice(k, k + 7), 0.07, 0.0055, PAINT, 2));
+  const out = [ribbon(pts, wide + 0.64, 0.002, PAVE, 0), ribbon(pts, wide, 0.004, ROAD, 1)];
+  // Seven places painted, six left bare: the places are 0.12 apart.
+  const broken = (line) => {
+    for (let k = 4; k + 7 < line.length; k += 13) {
+      // Not round a corner, where a line set to one side folds over itself.
+      const [a, b, c, d] = [line[k], line[k + 1], line[k + 5], line[k + 6]];
+      const straight = (b.x - a.x) * (d.x - c.x) + (b.z - a.z) * (d.z - c.z) > 0.985 * Math.hypot(b.x - a.x, b.z - a.z) * Math.hypot(d.x - c.x, d.z - c.z);
+      if (straight) out.push(ribbon(line.slice(k, k + 7), 0.06, 0.0055, PAINT, 2));
+    }
+  };
+  if (wide >= 1.8) {
+    out.push(ribbon(pts, 0.07, 0.0055, CENTRE, 2));
+    broken(beside(pts, wide / 4));
+    broken(beside(pts, -wide / 4));
+  } else {
+    broken(pts);
   }
   return out.filter(Boolean);
 }
@@ -288,7 +370,7 @@ function mount(container) {
   const EYE = new THREE.Vector3(1, 0.82, 1).normalize().multiplyScalar(90);
   const still = window.matchMedia("(prefers-reduced-motion: reduce)");
   const view = { x: 0, z: 0, zoom: 1, toX: 0, toZ: 0, toZoom: 1, span: 6 };
-  let data = { nodes: [], streets: [] };
+  let data = { nodes: [], roads: [] };
   let nodes = [];
   let ways = [];
   let lit = [];
@@ -325,32 +407,6 @@ function mount(container) {
     return seen;
   }
 
-  // A block's road back to the street: through the blocks it follows, to where it leaves it.
-  function back(n) {
-    const pts = [[n.x, n.z]];
-    for (let c = n; c.up != null && nodes[c.up]; ) {
-      c = nodes[c.up];
-      pts.push([c.x, c.z]);
-    }
-    pts.push([n.jx, n.jz]);
-    return pts;
-  }
-
-  // The way from one block to another. Straight along the road when one follows the other
-  // (or is the words on that road); else back to the street, along it, and out again.
-  function way(a, b) {
-    if (a.up === b.i || b.up === a.i || a.ghost || b.ghost) return [[a.x, a.z], [b.x, b.z]];
-    if (Math.abs(a.u - b.u) < 1e-6) return [...back(a), ...back(b).reverse()];
-    const s = data.streets.find((street) => street.turn === a.turn);
-    if (!s || a.turn !== b.turn) return [[a.x, a.z], [b.x, b.z]];
-    const lo = Math.min(a.u, b.u) + 0.2;
-    const hi = Math.max(a.u, b.u) - 0.2;
-    const mid = [];
-    for (let k = Math.max(0, Math.ceil((lo - s.from) / s.step)); k < s.points.length && s.from + k * s.step <= hi; k++) mid.push(s.points[k]);
-    if (a.u > b.u) mid.reverse();
-    return [...back(a), ...mid, ...back(b).reverse()];
-  }
-
   function relight() {
     clear(glow);
     lit = picked != null && nodes[picked] ? chain(picked) : [];
@@ -363,34 +419,30 @@ function mount(container) {
       // Drawn round in black: the Call picked, and the request its way starts at.
       const marked = i === picked || (on.has(i) && n.kind === "ask");
       n.hull.forEach((h) => (h.visible = marked));
-      n.lines.forEach((l) => l.material.color.setHex(marked ? INK : EDGE));
+      n.line.color.setHex(marked ? INK : EDGE);
       n.name.classList.toggle("on", on.has(i));
       n.name.removeAttribute("data-step");
       if (on.has(i) && !n.state) {
-        const p = n.ghost ? lot(true, 0.9, ROUTE_LOT, 0.012, 4) : lot(ON_STREET.has(n.kind), n.size, ROUTE_LOT, 0.012, 4);
+        const p = n.ghost ? lot(true, 0.9, ROUTE_LOT, 0.012, 5) : lot(ON_STREET.has(n.kind), n.size, ROUTE_LOT, 0.012, 5);
         p.position.x = n.x;
         p.position.z = n.z;
         glow.add(p);
       }
     });
-    // From the request to the Call picked, as one way: the line on its casing, and the
-    // places along it.
-    flow = [];
-    for (let k = lit.length - 1; k > 0; k--) {
-      const pts = trace(way(nodes[lit[k]], nodes[lit[k - 1]]));
-      const casing = ribbon(pts, 0.52, 0.014, CASING, 5);
-      const line = ribbon(pts, 0.4, 0.017, ROUTE, 6);
-      if (casing) glow.add(casing, line);
-      flow.push(...pts);
-    }
+    // The way to the Call picked down the roads, as the page gave it: the line on its casing,
+    // and the places along it.
+    flow = lit.length > 1 && nodes[picked].route ? trace(nodes[picked].route) : [];
+    const casing = ribbon(flow, 0.86, 0.014, CASING, 6);
+    const line = ribbon(flow, 0.66, 0.017, ROUTE, 7);
+    if (casing) glow.add(casing, line);
     // Marks on the line pointing the way it goes, moving along it unless motion is unwelcome.
     dots = [];
     if (flow.length > 8) {
       const count = Math.max(1, Math.round((flow.length * 0.12) / 2.6));
       for (let k = 0; k < count; k++) {
-        const d = arrow(0, 0, 1, 0, WHITE, 0.6);
+        const d = arrow(0, 0, 1, 0, WHITE, 1.1);
         d.position.y = 0.021;
-        d.renderOrder = 7;
+        d.renderOrder = 8;
         glow.add(d);
         dots.push(d);
       }
@@ -403,7 +455,7 @@ function mount(container) {
       const tone = new THREE.MeshStandardMaterial({ color: WAYS[end.state] ?? GREEN, roughness: 0.55 });
       // Where it leaves from: a ring round the request, as a route finder marks the start.
       const start = nodes[lit[lit.length - 1]];
-      const ring = flat(new THREE.RingGeometry(1.02, 1.16, 64), ROUTE, 0.019, 6);
+      const ring = flat(new THREE.RingGeometry(1.28, 1.46, 72), ROUTE, 0.019, 8);
       ring.rotation.x = -Math.PI / 2;
       ring.position.x = start.x;
       ring.position.z = start.z;
@@ -523,41 +575,26 @@ function mount(container) {
       root.add(mesh);
       ways.push({ way: mesh, at: 1, goal: 1 });
     };
-    // The road up the left that joins the turns' requests.
+    // The road up the left that joins the turns' requests, then every turn's street and forks.
     const asks = next.nodes.filter((n) => n.kind === "ask").map((n) => [n.x, n.z]);
-    if (asks.length > 1) {
-      const spine = trace(asks);
-      road(spine, 1.16).forEach(add);
-    }
-    // Each turn's street, and marks on it pointing the way it runs.
-    for (const street of next.streets) {
-      const pts = street.points;
-      const run = trace(pts);
-      road(run, 1.16).forEach(add);
-      for (let k = 6; k + 1 < pts.length; k += 8) add(arrow(pts[k][0], pts[k][1], pts[k + 1][0] - pts[k - 1][0], pts[k + 1][1] - pts[k - 1][1]));
-    }
+    if (asks.length > 1) road(trace(asks), 2.1).forEach(add);
+    for (const r of next.roads) road(trace(r.points), r.wide).forEach(add);
     nodes = next.nodes.map((n, i) => {
       const b = block(n.kind, !!n.intent);
       b.g.position.set(n.x, 0, n.z);
       b.g.traverse((o) => (o.userData.at = i));
       root.add(b.g);
+      // A request stands on a round place in its street; a building on a lot beside its road.
       const street = ON_STREET.has(n.kind);
-      const size = street ? 1.9 : n.kind === "many" ? 3.5 : 1.84;
+      const size = street ? 2.5 : n.kind === "many" ? 3.6 : 1.84;
       if (!n.ghost) {
-        // Its lane to the street, and the lot it stands on.
-        if (!street) {
-          // From the Call it follows, or from the street.
-          const from = n.up != null ? next.nodes[n.up] : null;
-          const lane = trace([from ? [from.x, from.z] : [n.jx, n.jz], [n.x, n.z]]);
-          road(lane, 0.52).forEach(add);
-        }
         if (!n.state) {
-          const kerb = lot(street, size + 0.1, KERB, 0.006, 2);
+          const kerb = lot(street, size + 0.12, KERB, 0.006, 3);
           kerb.position.x = n.x;
           kerb.position.z = n.z;
           add(kerb);
         }
-        const ground = lot(street, size, n.state ? LOTS[n.state] : LOT, 0.008, 3);
+        const ground = lot(street, size, n.state ? LOTS[n.state] : LOT, 0.008, 4);
         ground.position.x = n.x;
         ground.position.z = n.z;
         add(ground);
@@ -756,7 +793,7 @@ function mount(container) {
       if (Math.abs(n.goal - n.at) > 0.004) dirty = Math.max(dirty, 2);
       n.at += (n.goal - n.at) * ease;
       n.g.visible = n.at > 0.02;
-      n.g.traverse((o) => o.material && o.material.transparent && (o.material.opacity = n.at));
+      for (const m of n.mats) m.opacity = n.at;
       // Its name sits under it on the page; the words' name beside them, clear of the lane.
       const [sx, sy] = n.ghost ? project(n.x + 0.42, 0, n.z + 0.42) : project(n.x + (n.kind === "many" ? 1.5 : 0.72), 0, n.z + (n.kind === "many" ? 1.5 : 0.72));
       n.sx = sx;
