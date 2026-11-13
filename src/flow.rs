@@ -52,6 +52,10 @@ pub struct Call {
     pub by: Option<i64>,
     /// Nothing in the session told it.
     pub loose: bool,
+    /// The Call the engine's path to this one comes through last: the one whose result told
+    /// it, else the last Call in the SubGraph the engine chose as its parent; none when the
+    /// engine chose the request itself (`Metro::parent_of`).
+    pub parent: Option<i64>,
     pub key: String,
     pub place: String,
 }
@@ -82,6 +86,7 @@ impl Call {
             via: by.and_then(|b| m.station(b)).map(|b| b.cause_name()),
             by: by.filter(|&b| m.station(b).is_some()),
             loose: s.loose || s.unsourced,
+            parent: m.parent_of(s),
             key: place_key(s),
             place: place_label(s),
         }

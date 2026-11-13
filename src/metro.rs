@@ -1558,6 +1558,24 @@ impl Metro {
         out.into_iter().map(|o| o.seq).collect()
     }
 
+    /// The Call the engine's path to a Call comes through last: the one whose result told it,
+    /// else the last Call before it in the SubGraph the engine chose as its parent. None when
+    /// that SubGraph is the request's own, or the engine chose none.
+    pub fn parent_of(&self, s: &Station) -> Option<i64> {
+        if let Some(by) = s.source.as_ref().map(|src| src.by)
+            && by != s.seq
+            && self.station(by).is_some()
+        {
+            return Some(by);
+        }
+        let parent = *s.path.first()?;
+        self.stations
+            .iter()
+            .filter(|o| o.seq != s.seq && o.x < s.x && o.subgraph == Some(parent))
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .map(|o| o.seq)
+    }
+
     /// The main-line station a subagent run started from: the Call that handed it the work.
     fn delegated_at(&self, line: usize) -> Option<&Station> {
         let x0 = self.lines[line].x0;

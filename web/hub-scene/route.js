@@ -1,11 +1,13 @@
-// 기록 as a map seen from above at an angle. One street runs through the session from left to
-// right; each turn's request, the agent's intent and its answer stand on it, and the Calls
-// stand off it on lots of their own, each at the end of a lane. A block picked is drawn round
-// in black, and what told the agent to make that Call is lit in green: the lots under the
-// blocks it followed, the way between them along the street, and, in the Call's lane, the
-// words of the tool result that told it. The same way is written out as a line of names at
-// the foot. Calls the engine stopped stand on a red lot, those it held on an amber one. The
-// page gives the blocks and where they stand (admin/route.rs); this file only draws them.
+// 기록 as a map seen from above at an angle, its roads the way the engine traced each Call back
+// to the request. One street runs through the session from left to right; each turn's request,
+// the agent's intent and its answer stand on it. A Call the engine traced to the request stands
+// off the street at the end of a lane; a Call it traced to an earlier Call stands on from that
+// one, the road carrying on. Every such link is drawn as a thin green line down its road. A
+// block picked is drawn round in black and its whole way from the request is lit in a thick
+// green band, the words of a tool result that told a Call standing on the road before it; the
+// same way is written out as a line of names at the foot. Calls the engine stopped stand on a
+// red lot, those it held on an amber one. The page gives the blocks, where they stand and
+// what each follows (admin/route.rs); this file only draws them.
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
@@ -17,6 +19,7 @@ const LOT = 0xf1f3f5;
 const KERB = 0xd3d7dc;
 const MARK = 0xbcc2c9;
 const GREEN = 0x3fc47c;
+const LINK = 0x86dcab;
 const GREEN_LOT = 0xa9ebc4;
 const LOTS = { blocked: 0xf6aaa3, held: 0xf7d488 };
 // The eye looks down a diagonal of the floor: one step to the right on the page is this much
@@ -274,8 +277,10 @@ function mount(container) {
     group.clear();
   }
 
-  // What told the agent to make the Call picked, each block naming the one before it.
+  // The way to the Call picked, the Call first and the request last.
   function chain(i) {
+    // A Call carries the engine's whole way to it, from the request.
+    if (data.nodes[i]?.way) return [...data.nodes[i].way].reverse();
     const seen = [];
     let at = i;
     while (at != null && data.nodes[at] && !seen.includes(at)) {
@@ -285,16 +290,29 @@ function mount(container) {
     return seen;
   }
 
-  // The way from one block to another: down its lane, along the street, up the other's lane.
+  // A block's road back to the street: through the blocks it follows, to where it leaves it.
+  function back(n) {
+    const pts = [[n.x, n.z]];
+    for (let c = n; c.up != null && nodes[c.up]; ) {
+      c = nodes[c.up];
+      pts.push([c.x, c.z]);
+    }
+    pts.push([n.jx, n.jz]);
+    return pts;
+  }
+
+  // The way from one block to another. Straight along the road when one follows the other
+  // (or is the words on that road); else back to the street, along it, and out again.
   function way(a, b) {
-    if (Math.abs(a.u - b.u) < 1e-6) return [[a.x, a.z], [b.x, b.z]];
+    if (a.up === b.i || b.up === a.i || a.ghost || b.ghost) return [[a.x, a.z], [b.x, b.z]];
+    if (Math.abs(a.u - b.u) < 1e-6) return [...back(a), ...back(b).reverse()];
     const s = data.street;
     const lo = Math.min(a.u, b.u) + 0.2;
     const hi = Math.max(a.u, b.u) - 0.2;
     const mid = [];
     for (let k = Math.max(0, Math.ceil((lo - s.from) / s.step)); k < s.points.length && s.from + k * s.step <= hi; k++) mid.push(s.points[k]);
     if (a.u > b.u) mid.reverse();
-    return [[a.x, a.z], [a.jx, a.jz], ...mid, [b.jx, b.jz], [b.x, b.z]];
+    return [...back(a), ...mid, ...back(b).reverse()];
   }
 
   function relight() {
@@ -336,17 +354,27 @@ function mount(container) {
     // The same way written out, from the request to the Call picked.
     trail.replaceChildren();
     trail.hidden = lit.length < 2;
-    [...lit].reverse().forEach((i, k) => {
+    const steps = [...lit].reverse();
+    steps.forEach((i, k) => {
       const n = nodes[i];
       n.name.dataset.step = k + 1;
+      // A long way keeps its first three and last three, and counts the Calls between.
+      const cut = steps.length > 8 && k >= 3 && k < steps.length - 3;
+      if (cut && k > 3) return;
       const li = document.createElement("li");
-      if (i === picked) li.className = "end";
-      if (n.kind === "words") li.classList.add("words");
-      const no = document.createElement("i");
-      no.textContent = k + 1;
       const what = document.createElement("span");
-      what.textContent = n.label;
-      li.append(no, what);
+      if (cut) {
+        li.className = "more";
+        what.textContent = `호출 ${steps.length - 6}개`;
+        li.append(what);
+      } else {
+        if (i === picked) li.className = "end";
+        if (n.kind === "words") li.classList.add("words");
+        const no = document.createElement("i");
+        no.textContent = k + 1;
+        what.textContent = n.label;
+        li.append(no, what);
+      }
       trail.append(li);
     });
     // Which names give way when two would overlap: the lit way first, then the street's own.
@@ -360,15 +388,21 @@ function mount(container) {
   // The whole session when it fits; when it is longer than that, its start.
   function fit() {
     if (!nodes.length) return;
-    const us = nodes.map((n) => n.u);
+    const us = nodes.map((n) => (n.x - n.z) * TURN);
     const lo = Math.min(...us);
     const hi = Math.max(...us);
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
     const need = ((hi - lo) / 2 + 3) / aspect;
-    view.span = THREE.MathUtils.clamp(need, 5.4, 8.2);
-    const u = need <= 8.2 ? (lo + hi) / 2 : lo + view.span * aspect - 3.5;
-    view.toX = u * TURN;
-    view.toZ = -u * TURN;
+    // How far the roads reach from the street, toward the eye and away; half as tall on the page.
+    const vs = nodes.map((n) => (n.x + n.z) * TURN);
+    const near = Math.max(...vs);
+    const far = Math.min(...vs);
+    const deep = (near - far) / 4 + 2.4;
+    view.span = THREE.MathUtils.clamp(Math.max(need, deep), 5.4, 9.5);
+    const u = need <= view.span ? (lo + hi) / 2 : lo + view.span * aspect - 3.5;
+    const v = (near + far) / 2;
+    view.toX = (u + v) * TURN;
+    view.toZ = (v - u) * TURN;
     view.toZoom = 1;
     wake();
   }
@@ -408,9 +442,12 @@ function mount(container) {
       if (!n.ghost) {
         // Its lane to the street, and the lot it stands on.
         if (!street) {
-          const lane = trace([[n.jx, n.jz], [n.x, n.z]]);
-          add(ribbon(lane, 0.4, 0.002, KERB, 0));
-          add(ribbon(lane, 0.3, 0.004, STREET, 1));
+          // From the Call it follows, or from the street; and down it, the engine's link.
+          const from = n.up != null ? next.nodes[n.up] : null;
+          const lane = trace([from ? [from.x, from.z] : [n.jx, n.jz], [n.x, n.z]]);
+          add(ribbon(lane, 0.44, 0.002, KERB, 0));
+          add(ribbon(lane, 0.34, 0.004, STREET, 1));
+          add(ribbon(lane, 0.09, 0.0055, LINK, 2));
         }
         if (!n.state) {
           const kerb = lot(street, size + 0.1, KERB, 0.006, 2);
@@ -428,7 +465,7 @@ function mount(container) {
       name.classList.add(street || n.ghost ? n.kind : "call");
       if (n.state) name.classList.add(n.state);
       labels.append(name);
-      return { ...n, ...b, name, size, wide: name.offsetWidth, at: n.ghost ? 0 : 1, goal: n.ghost ? 0 : 1, shown: true };
+      return { ...n, ...b, i, name, size, wide: name.offsetWidth, at: n.ghost ? 0 : 1, goal: n.ghost ? 0 : 1, shown: true };
     });
     fit();
     view.x = view.toX;
@@ -439,15 +476,23 @@ function mount(container) {
     if (i === picked) return;
     picked = i;
     relight();
-    // On a map too long to see whole, the way lit is brought to the middle.
+    // The way lit is brought into view when any of it is outside: across the page by where
+    // its blocks stand, up and down by how far they are from the eye.
     if (i != null && nodes[i] && lit.length) {
-      const us = lit.map((k) => nodes[k].u);
-      const u = (Math.min(...us) + Math.max(...us)) / 2;
-      const half = (view.span * canvas.clientWidth) / Math.max(1, canvas.clientHeight) / view.zoom;
-      const at = (view.toX - view.toZ) * TURN;
-      if (Math.min(...us) < at - half + 2 || Math.max(...us) > at + half - 2) {
-        view.toX = u * TURN;
-        view.toZ = -u * TURN;
+      const us = lit.map((k) => (nodes[k].x - nodes[k].z) * TURN);
+      const vs = lit.map((k) => (nodes[k].x + nodes[k].z) * TURN);
+      const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)];
+      const wide = (view.span * canvas.clientWidth) / Math.max(1, canvas.clientHeight) / view.toZoom;
+      const deep = (view.span * 2) / view.toZoom;
+      const u = (view.toX - view.toZ) * TURN;
+      const v = (view.toX + view.toZ) * TURN;
+      if (u0 < u - wide + 2.5 || u1 > u + wide - 2.5 || v0 < v - deep + 5 || v1 > v + deep - 4) {
+        // Zoomed out as far as the way needs, no closer than it was.
+        const need = Math.max((u1 - u0 + 6) / (2 * wide * view.toZoom), (v1 - v0 + 9) / (2 * deep * view.toZoom), 1);
+        view.toZoom = Math.max(0.4, Math.min(view.toZoom, 1 / need));
+        const [cu, cv] = [(u0 + u1) / 2, (v0 + v1) / 2];
+        view.toX = (cu + cv) * TURN;
+        view.toZ = (cv - cu) * TURN;
       }
     }
   };
@@ -599,7 +644,8 @@ function mount(container) {
         const over = (b) => box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3];
         // Nor where a block nearer the eye stands over it.
         const behind = () => nodes.some((m) => m !== n && m.g.visible && m.x + m.z > n.x + n.z + 0.4 && over(m.box));
-        const show = n.ghost ? lead : lead || !(boxes.some(over) || behind());
+        const must = lead && (i === picked || n.ghost || ON_STREET.has(n.kind));
+        const show = must || (!n.ghost && !boxes.some(over) && (lead || !behind()));
         if (show) boxes.push(box);
         n.name.style.opacity = !show ? 0 : n.goal < 0.7 ? 0.4 : 1;
       }
