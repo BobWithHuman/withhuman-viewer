@@ -15,6 +15,12 @@
 // corner where its fork leaves. The same way is given as directions in a card; a line of it
 // picked brings that building to the middle. The page gives the buildings, the roads and each
 // Call's way (admin/route.rs); this file only draws them.
+//
+// With a way lit the town is seen as from behind a car driving it: low over the road, the sky
+// above and the far end of the town in haze, the car in the right-hand lane on the blue line,
+// a small map of the whole way at the foot. The wheel or a drag moves the car along the way,
+// a line of the directions puts it at that building, and a button goes back to the map seen
+// from above.
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
@@ -333,6 +339,26 @@ function arrow(x, z, dx, dz, color = MARK, scale = 1) {
   return m;
 }
 
+// The car that drives the way lit, its nose toward +z, on a pale round of road.
+function car() {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({ color: 0x34446f, roughness: 0.5 });
+  const pane = new THREE.MeshStandardMaterial({ color: 0xe6edfb, roughness: 0.3 });
+  const lamp = new THREE.MeshBasicMaterial({ color: 0xf2897c });
+  const add = (geometry, material, x, y, z) => g.add(solid(geometry, material, x, y, z));
+  add(new RoundedBoxGeometry(0.6, 0.2, 1.24, 4, 0.08), paint, 0, 0.2, 0);
+  add(new RoundedBoxGeometry(0.52, 0.18, 0.62, 4, 0.07), paint, 0, 0.37, -0.08);
+  add(new RoundedBoxGeometry(0.46, 0.13, 0.03, 2, 0.01), pane, 0, 0.38, -0.395);
+  add(new RoundedBoxGeometry(0.46, 0.13, 0.03, 2, 0.01), pane, 0, 0.38, 0.235);
+  add(new RoundedBoxGeometry(0.44, 0.03, 0.4, 2, 0.01), pane, 0, 0.465, -0.08);
+  for (const x of [-0.2, 0.2]) add(new THREE.BoxGeometry(0.12, 0.05, 0.02), lamp, x, 0.24, -0.622);
+  const round = flat(new THREE.CircleGeometry(1.3, 56), WHITE, 0.022, 9);
+  round.material.opacity = 0.34;
+  round.rotation.x = -Math.PI / 2;
+  g.add(round);
+  return g;
+}
+
 function mount(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -351,7 +377,16 @@ function mount(container) {
   const guide = document.createElement("aside");
   guide.className = "rt-guide";
   guide.hidden = true;
-  container.append(labels, tip, guide);
+  // The small map of the whole way, and the button between the two ways of seeing the town.
+  const mini = document.createElement("canvas");
+  mini.className = "rt-mini";
+  mini.hidden = true;
+  const turnTo = document.createElement("button");
+  turnTo.type = "button";
+  turnTo.className = "rt-mode";
+  turnTo.hidden = true;
+  container.append(labels, tip, guide, mini, turnTo);
+  const stage = container.parentElement;
 
   const scene = new THREE.Scene();
   scene.add(new THREE.HemisphereLight(0xffffff, 0xc3c2ea, 2.0));
@@ -368,7 +403,28 @@ function mount(container) {
   ground.renderOrder = 10;
   ground.receiveShadow = true;
   scene.add(ground);
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+  // The land between the roads, out to where the haze takes it.
+  const land = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshBasicMaterial({ color: 0xe7e0dd }));
+  land.rotation.x = -Math.PI / 2;
+  land.position.y = -0.02;
+  land.renderOrder = -1;
+  scene.add(land);
+  const haze = new THREE.Fog(0xdfe6f6, 26, 150);
+  // The town from above at an angle, and from behind the car; `camera` is the one in use.
+  const above = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+  const behind = new THREE.PerspectiveCamera(46, 1, 0.3, 400);
+  let camera = above;
+  const driven = car();
+  driven.visible = false;
+  scene.add(driven);
+  // Which way the town is seen ("map" or "drive"), which the person asked for, the way lit as
+  // places down its lane, and where along it the car is and is going (in places).
+  let mode = "map";
+  let want = "drive";
+  let path = null;
+  const ride = { at: 0, to: 0, auto: false, hx: 1, hz: 0 };
+  // The last place the car goes: on the road before the building, short of the step to its kerb.
+  const stop = () => Math.max(0, path.length - 15);
   const root = new THREE.Group();
   const glow = new THREE.Group();
   scene.add(root, glow);
@@ -421,7 +477,9 @@ function mount(container) {
     nodes.forEach((n, i) => {
       // A request picked keeps its whole turn in view and lets the other turns fade.
       const whole = asked != null && n.turn === asked;
-      n.goal = n.ghost ? (on.has(i) ? 1 : 0) : !lit.length || on.has(i) || whole ? 1 : 0.42;
+      // From behind the car every building stands solid; from above the others fade.
+      const solidly = want === "drive" && lit.length > 1 && !!nodes[picked].route;
+      n.goal = n.ghost ? (on.has(i) ? 1 : 0) : !lit.length || on.has(i) || whole || solidly ? 1 : 0.42;
       // Drawn round in black: the Call picked, and the request its way starts at.
       const marked = i === picked || (on.has(i) && n.kind === "ask");
       n.hull.forEach((h) => (h.visible = marked));
@@ -435,12 +493,25 @@ function mount(container) {
         glow.add(p);
       }
     });
-    // The way to the Call picked down the roads, as the page gave it: the line on its casing,
-    // and the places along it.
-    flow = lit.length > 1 && nodes[picked].route ? trace(nodes[picked].route, 0.9) : [];
+    // The way to the Call picked down the roads, as the page gave it, kept to the right-hand
+    // lane: the line on its casing, and the places along it.
+    flow = lit.length > 1 && nodes[picked].route ? beside(trace(nodes[picked].route, 0.9), 0.46) : [];
     const casing = ribbon(flow, 0.86, 0.014, CASING, 6);
     const line = ribbon(flow, 0.66, 0.017, ROUTE, 7);
     if (casing) glow.add(casing, line);
+    // A new way is driven from its start; with no way there is only the map.
+    const next = flow.length > 12 ? flow : null;
+    if (next !== path && (next?.length !== path?.length || next?.[next.length - 1].distanceTo(path[path.length - 1]) > 0.01)) {
+      Object.assign(ride, { at: 0, to: 0, auto: !!next && !still.matches });
+    }
+    path = next;
+    mode = path && want === "drive" ? "drive" : "map";
+    stage.classList.toggle("drive", mode === "drive");
+    scene.fog = mode === "drive" ? haze : null;
+    driven.visible = mode === "drive";
+    mini.hidden = mode !== "drive";
+    turnTo.hidden = !path;
+    turnTo.textContent = mode === "drive" ? "위에서 보기" : "주행 시점으로 보기";
     // Marks on the line pointing the way it goes, moving along it unless motion is unwelcome.
     dots = [];
     if (flow.length > 8) {
@@ -631,10 +702,74 @@ function mount(container) {
     });
   }
 
+  // Draws the small map: the turn's roads, the way lit, and the car on it pointing its way.
+  function chart(x, z, hx, hz) {
+    const side = 196;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (mini.width !== side * dpr) mini.width = mini.height = side * dpr;
+    const c = mini.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, side, side);
+    // Laid as the town is from above: to the right on the page is along x and back along z.
+    const flatly = (q) => [(q.x - q.z) * TURN, (q.x + q.z) * TURN];
+    const all = path.map(flatly);
+    const us = all.map((q) => q[0]);
+    const vs = all.map((q) => q[1]);
+    const span = Math.max(Math.max(...us) - Math.min(...us), Math.max(...vs) - Math.min(...vs)) + 9;
+    const mid = [(Math.max(...us) + Math.min(...us)) / 2, (Math.max(...vs) + Math.min(...vs)) / 2];
+    const at = ([u, v]) => [side / 2 + ((u - mid[0]) / span) * side, side / 2 + ((v - mid[1]) / span) * side];
+    const draw = (pts, color, wide) => {
+      c.beginPath();
+      pts.forEach((q, k) => (k ? c.lineTo(...at(q)) : c.moveTo(...at(q))));
+      c.strokeStyle = color;
+      c.lineWidth = wide;
+      c.lineCap = c.lineJoin = "round";
+      c.stroke();
+    };
+    const turn = nodes[picked]?.turn;
+    for (const r of data.roads) {
+      if (r.turn === turn) draw(r.points.map(([px, pz]) => flatly({ x: px, z: pz })), "#d3d4e8", Math.max(3, (r.wide / span) * side));
+    }
+    draw(all, "#5b9bf6", 3.5);
+    const [ex, ey] = at(all[all.length - 1]);
+    c.beginPath();
+    c.arc(ex, ey, 5, 0, Math.PI * 2);
+    c.fillStyle = nodes[picked]?.state === "blocked" ? "#e2574b" : nodes[picked]?.state === "held" ? "#db9c1c" : "#3fc47c";
+    c.fill();
+    const [cx, cy] = at(flatly({ x, z }));
+    const [du, dv] = flatly({ x: hx, z: hz });
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(Math.atan2(dv, du) + Math.PI / 2);
+    c.beginPath();
+    c.arc(0, 0, 8, 0, Math.PI * 2);
+    c.fillStyle = "#26335a";
+    c.fill();
+    c.beginPath();
+    c.moveTo(0, -4.5);
+    c.lineTo(3.6, 3.4);
+    c.lineTo(0, 1.6);
+    c.lineTo(-3.6, 3.4);
+    c.closePath();
+    c.fillStyle = "#fff";
+    c.fill();
+    c.restore();
+  }
+
   // Brings one block to the middle of the map, near enough to read.
   function focus(i) {
     const n = nodes[i];
     if (!n) return;
+    if (mode === "drive") {
+      // The car goes to the place on the way nearest the building.
+      let best = 0;
+      path.forEach((q, k) => {
+        if (Math.hypot(q.x - n.x, q.z - n.z) < Math.hypot(path[best].x - n.x, path[best].z - n.z)) best = k;
+      });
+      Object.assign(ride, { to: Math.min(best, stop()), auto: false });
+      wake();
+      return;
+    }
     view.toX = n.x;
     view.toZ = n.z;
     view.toZoom = Math.max(view.toZoom, 1.35);
@@ -644,7 +779,7 @@ function mount(container) {
   // Brings the way lit into view: always when `whole`, else only when some of it is outside.
   // Across the page by where its blocks stand, up and down by how far they are from the eye.
   function show(whole) {
-    if (!lit.length) return;
+    if (!lit.length || mode === "drive") return;
     const us = lit.map((k) => (nodes[k].x - nodes[k].z) * TURN);
     const vs = lit.map((k) => (nodes[k].x + nodes[k].z) * TURN);
     const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)];
@@ -679,6 +814,11 @@ function mount(container) {
     wake();
   };
   api.fit = fit;
+  turnTo.addEventListener("click", () => {
+    want = mode === "drive" ? "map" : "drive";
+    relight();
+    if (mode === "map") show(true);
+  });
 
   const ray = new THREE.Raycaster();
   const at = new THREE.Vector2();
@@ -694,7 +834,7 @@ function mount(container) {
   const right = new THREE.Vector3();
   const fore = new THREE.Vector3();
   canvas.addEventListener("pointerdown", (e) => {
-    drag = { x: e.clientX, y: e.clientY, cx: view.toX, cz: view.toZ };
+    drag = { x: e.clientX, y: e.clientY, cx: view.toX, cz: view.toZ, at: ride.to };
     moved = 0;
     canvas.setPointerCapture(e.pointerId);
     container.classList.add("moving");
@@ -702,6 +842,13 @@ function mount(container) {
   canvas.addEventListener("pointermove", (e) => {
     if (drag) {
       moved = Math.max(moved, Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y));
+      if (mode === "drive") {
+        // A drag pulls the road toward the eye: the car goes on down the way.
+        Object.assign(ride, { to: THREE.MathUtils.clamp(drag.at + (e.clientY - drag.y) * 0.4, 0, stop()), auto: false });
+        tip.hidden = true;
+        wake();
+        return;
+      }
       // A drag moves the floor under the pointer: across along the eye's right, up along its
       // forward, both laid flat on the floor.
       const per = ((camera.top - camera.bottom) / camera.zoom) / canvas.clientHeight;
@@ -754,7 +901,10 @@ function mount(container) {
     "wheel",
     (e) => {
       e.preventDefault();
-      api.zoomBy(Math.exp(-e.deltaY * 0.0022));
+      if (mode === "drive") {
+        Object.assign(ride, { to: THREE.MathUtils.clamp(ride.to + e.deltaY * 0.22, 0, stop()), auto: false });
+        wake();
+      } else api.zoomBy(Math.exp(-e.deltaY * 0.0022));
     },
     { passive: false },
   );
@@ -777,21 +927,54 @@ function mount(container) {
     view.zoom += (view.toZoom - view.zoom) * ease;
     if (Math.abs(view.toX - view.x) + Math.abs(view.toZ - view.z) + Math.abs(view.toZoom - view.zoom) > 0.002) dirty = Math.max(dirty, 2);
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
-    camera.left = -view.span * aspect;
-    camera.right = view.span * aspect;
-    camera.top = view.span;
-    camera.bottom = -view.span;
-    camera.zoom = view.zoom;
-    camera.position.set(view.x + EYE.x, EYE.y, view.z + EYE.z);
-    camera.lookAt(view.x, 0, view.z);
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld();
-    sun.position.set(view.x - 16, 30, view.z + 6);
-    sun.target.position.set(view.x, 0, view.z);
-    const reach = (view.span * Math.max(1, aspect)) / view.zoom + 6;
+    let spot = [view.x, view.z];
+    if (mode === "drive") {
+      // The car goes on by itself to the end of the way until the person takes it.
+      if (ride.auto) {
+        ride.to = Math.min(stop(), ride.to + (dt * 4.2) / 0.12);
+        ride.auto = ride.to < stop();
+      }
+      ride.at += (ride.to - ride.at) * (ride.auto ? 1 : ease);
+      if (ride.auto || Math.abs(ride.to - ride.at) > 0.02) dirty = Math.max(dirty, 2);
+      const k = THREE.MathUtils.clamp(Math.floor(ride.at), 0, path.length - 2);
+      const f = ride.at - k;
+      const [x, z] = [path[k].x + (path[k + 1].x - path[k].x) * f, path[k].z + (path[k + 1].z - path[k].z) * f];
+      // Its heading is the way's a little behind and ahead, so it turns a corner smoothly.
+      const [from, to] = [path[Math.max(0, k - 6)], path[Math.min(stop() + 6, k + 14)]];
+      const long = Math.hypot(to.x - from.x, to.z - from.z) || 1;
+      ride.hx += ((to.x - from.x) / long - ride.hx) * Math.min(1, ease * 0.8);
+      ride.hz += ((to.z - from.z) / long - ride.hz) * Math.min(1, ease * 0.8);
+      const h = Math.hypot(ride.hx, ride.hz) || 1;
+      const [hx, hz] = [ride.hx / h, ride.hz / h];
+      if (Math.abs((to.x - from.x) / long - hx) + Math.abs((to.z - from.z) / long - hz) > 0.002) dirty = Math.max(dirty, 2);
+      driven.position.set(x, 0, z);
+      driven.rotation.y = Math.atan2(hx, hz);
+      behind.aspect = aspect;
+      behind.position.set(x - hx * 7.6, 4.1, z - hz * 7.6);
+      behind.lookAt(x + hx * 8.5, 0.6, z + hz * 8.5);
+      behind.updateProjectionMatrix();
+      behind.updateMatrixWorld();
+      camera = behind;
+      spot = [x + hx * 10, z + hz * 10];
+      chart(x, z, hx, hz);
+    } else {
+      above.left = -view.span * aspect;
+      above.right = view.span * aspect;
+      above.top = view.span;
+      above.bottom = -view.span;
+      above.zoom = view.zoom;
+      above.position.set(view.x + EYE.x, EYE.y, view.z + EYE.z);
+      above.lookAt(view.x, 0, view.z);
+      above.updateProjectionMatrix();
+      above.updateMatrixWorld();
+      camera = above;
+    }
+    sun.position.set(spot[0] - 16, 30, spot[1] + 6);
+    sun.target.position.set(spot[0], 0, spot[1]);
+    const reach = mode === "drive" ? 38 : (view.span * Math.max(1, aspect)) / view.zoom + 6;
     Object.assign(sun.shadow.camera, { left: -reach, right: reach, top: reach, bottom: -reach, near: 1, far: 90 });
     sun.shadow.camera.updateProjectionMatrix();
-    const here = `${view.x.toFixed(3)} ${view.z.toFixed(3)} ${view.zoom.toFixed(4)} ${canvas.clientWidth} ${canvas.clientHeight}`;
+    const here = `${mode} ${ride.at.toFixed(1)} ${ride.hx.toFixed(2)} ${view.x.toFixed(3)} ${view.z.toFixed(3)} ${view.zoom.toFixed(4)} ${canvas.clientWidth} ${canvas.clientHeight}`;
     if (here !== seenAt) {
       seenAt = here;
       stale = true;
@@ -805,6 +988,8 @@ function mount(container) {
       const [sx, sy] = n.ghost ? project(n.x + 0.42, 0, n.z + 0.42) : project(n.x + (n.kind === "many" ? 1.5 : 0.72), 0, n.z + (n.kind === "many" ? 1.5 : 0.72));
       n.sx = sx;
       n.sy = sy;
+      // From behind the car: no name for what is behind the eye or far off in the haze.
+      n.away = mode === "drive" && (p.z > 1 || Math.hypot(n.x - driven.position.x, n.z - driven.position.z) > 34);
       n.name.style.transform = `translate(-50%, 0) translate(${n.sx}px, ${n.sy}px)`;
       // Where the block itself is on the page, from its top to its foot.
       const [bx, top] = project(n.x, n.tall, n.z);
@@ -827,9 +1012,9 @@ function mount(container) {
         const box = [n.sx - n.wide / 2 - 3, n.sy - 1, n.sx + n.wide / 2 + (lead ? 22 : 3), n.sy + 19];
         const over = (b) => box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3];
         // Nor where a block nearer the eye stands over it.
-        const behind = () => nodes.some((m) => m !== n && m.g.visible && m.x + m.z > n.x + n.z + 0.4 && over(m.box));
+        const hidden = () => mode !== "drive" && nodes.some((m) => m !== n && m.g.visible && m.x + m.z > n.x + n.z + 0.4 && over(m.box));
         const must = lead && (i === picked || n.ghost || ON_STREET.has(n.kind));
-        const show = must || (!n.ghost && !boxes.some(over) && (lead || !behind()));
+        const show = !n.away && (must || (!n.ghost && !boxes.some(over) && (lead || !hidden())));
         if (show) boxes.push(box);
         n.name.style.opacity = !show ? 0 : n.goal < 0.7 ? 0.4 : 1;
       }
@@ -886,6 +1071,9 @@ function mount(container) {
     labels.remove();
     tip.remove();
     guide.remove();
+    mini.remove();
+    turnTo.remove();
+    stage.classList.remove("drive");
   };
   return api;
 }
