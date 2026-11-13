@@ -1,13 +1,14 @@
 {
   "name": "withhuman-hub-scene",
   "private": true,
-  "description": "The 3D model on the security team's main page, bundled into src/admin/hub_scene.js",
+  "description": "The security team's main-page model and 기록 map, bundled into src/admin/hub_scene.js",
   "type": "module",
   "scripts": {
-    "build": "esbuild main.js --bundle --minify --format=iife --target=safari16 --legal-comments=inline --outfile=../../src/admin/hub_scene.js"
+    "build": "esbuild main.js --bundle --minify --format=iife --target=safari16 --legal-comments=inline --loader:.css=text --outfile=../../src/admin/hub_scene.js"
   },
   "devDependencies": {
     "esbuild": "0.25.0",
+    "maplibre-gl": "4.7.1",
     "three": "0.186.1"
   }
 }
