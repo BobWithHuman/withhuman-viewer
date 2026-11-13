@@ -3408,3 +3408,123 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .fill { display: block; height: 100%; min-width: 3px; border-radius: 4px; }
 button.vz-rank:disabled { cursor: default; opacity: 1; }
 .cs-list-row.sx-value .meta { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 메인, the hub: a warm grey ground that runs to cream at the foot, the model of who is joined
+   to what standing in its middle (drawn by three.js into #hub-scene), frosted cards over its
+   lower edge, thin dark type, orange and yellow only where something needs a look. The window's
+   bar and rail sit on the same ground while this page is up. */
+.app:has(.hub) { color-scheme: light; background: #d4d4d1; }
+.app:has(.hub) .app-main { background: none; }
+.app:has(.hub) .topbar { background: none; border-bottom: 0; }
+.app:has(.hub) .tb-logo { color: #2b2b2b; }
+.app:has(.hub) .tb-seg { background: rgba(255, 255, 255, .34); }
+.app:has(.hub) .tb-seg button { color: #55554f; }
+.app:has(.hub) .tb-seg button svg { color: #8a8983; }
+.app:has(.hub) .tb-seg button:hover:not(:disabled) { background: rgba(255, 255, 255, .4); }
+.app:has(.hub) .tb-seg button.on, .app:has(.hub) .tb-seg button.on:hover:not(:disabled) { background: #f7f6f2; color: #2b2b2b; font-weight: 500;
+  box-shadow: 0 1px 2px rgba(60, 50, 20, .1); }
+.app:has(.hub) .tb-seg button.on svg { color: #e8622a; }
+.app:has(.hub) .tb-status { background: rgba(255, 255, 255, .34); color: #55554f; }
+.app:has(.hub) .tb-btn { padding-left: 12px; background: rgba(255, 255, 255, .5); color: #2b2b2b; }
+.app:has(.hub) .tb-btn::before { display: none; }
+.app:has(.hub) .tb-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .8); }
+.app:has(.hub) .rail { background: none; border-right: 0; color: #6f6e68; }
+.app:has(.hub) .rail button:hover:not(:disabled) { background: rgba(255, 255, 255, .45); color: #2b2b2b; }
+.app:has(.hub) .rail button.demo { color: #b7791f; }
+.app:has(.hub) .rail .sep { background: rgba(0, 0, 0, .1); }
+.app:has(.hub) .rail .rail-head.line { background: none; border-bottom: 0; }
+.app:has(.hub) .app-body { background: linear-gradient(180deg, #d4d4d1 0%, #d9d8d3 46%, #e7dfc4 100%); }
+
+.hub { position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: #2b2b2b;
+  --hub-sub: #6f6e68; --hub-mute: #8d8c84; --hub-hot: #e8622a; --hub-sun: #f0b429; }
+.hub-stage { position: relative; flex: 1; min-height: 0; }
+#hub-scene { position: absolute; inset: -46px 0 -120px 0; }
+#hub-scene canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+#hub-scene.turning canvas { cursor: grabbing; }
+#hub-scene.lost::after { content: "3D 장면을 그리지 못했습니다. 창을 다시 열어 보세요."; position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 13px; color: var(--hub-sub); }
+.hub-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.hub-labels span { position: absolute; left: 0; top: 0; padding-top: 3px; font-size: 11px; color: #4a4a45; white-space: nowrap; transition: opacity .2s;
+  text-shadow: 0 0 3px #f7f5f0, 0 0 3px #f7f5f0, 0 0 6px #f7f5f0; }
+.hub-labels .tier { font-size: 11.5px; color: var(--hub-mute); }
+.hub-tip { position: absolute; left: 0; top: 0; z-index: 3; display: flex; flex-direction: column; gap: 2px; padding: 11px 15px 12px; border-radius: 16px;
+  background: rgba(255, 255, 255, .78); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 10px 30px rgba(70, 60, 30, .12);
+  pointer-events: none; white-space: nowrap; }
+.hub-tip small { font-size: 10.5px; color: var(--hub-mute); }
+.hub-tip strong { font-size: 14px; font-weight: 500; }
+.hub-tip span { font-size: 11.5px; color: var(--hub-sub); }
+.hub-none { position: absolute; left: 0; right: 0; top: 46%; margin: 0; text-align: center; font-size: 13px; color: var(--hub-sub); }
+
+.hub-lead { position: absolute; left: 30px; top: 22px; z-index: 2; width: 300px; pointer-events: none; }
+.hub-lead h1 { margin: 0; font: 300 40px/1.14 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif; letter-spacing: -.025em; word-break: keep-all; }
+.hub-lead p { margin: 14px 0 0; max-width: 252px; font-size: 12.5px; line-height: 1.55; color: var(--hub-sub); word-break: keep-all; }
+.hub-tools, .hub-period { display: flex; gap: 8px; margin-top: 18px; pointer-events: auto; }
+.hub .hub-tools button { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 13px; background: rgba(255, 255, 255, .42); color: #3a3a37; }
+.hub .hub-tools button:hover:not(:disabled) { background: rgba(255, 255, 255, .7); }
+.hub .hub-tools button.on, .hub .hub-tools button.on:hover:not(:disabled) { background: #f7f6f2; color: var(--hub-hot); box-shadow: 0 2px 8px rgba(70, 60, 30, .1); }
+.hub-period { gap: 2px; margin-top: 10px; width: max-content; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, .34); }
+.hub .hub-period button { height: 26px; padding: 0 11px; border: 0; border-radius: 9px; background: none; font-size: 12px; color: #55554f; }
+.hub .hub-period button:hover:not(:disabled) { background: rgba(255, 255, 255, .4); }
+.hub .hub-period button.on, .hub .hub-period button.on:hover:not(:disabled) { background: #f7f6f2; color: #2b2b2b; box-shadow: 0 1px 2px rgba(60, 50, 20, .1); }
+
+.hub-card { min-width: 0; display: flex; flex-direction: column; padding: 22px 24px 20px; border: 0; border-radius: 26px; background: rgba(255, 255, 255, .5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.1); backdrop-filter: blur(24px) saturate(1.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .75), 0 18px 44px rgba(90, 78, 36, .07); text-align: left; color: #2b2b2b; }
+.hub button.hub-card { cursor: pointer; transition: background .18s, transform .18s; }
+.hub button.hub-card:hover:not(:disabled) { background: rgba(255, 255, 255, .72); transform: translateY(-3px); }
+.hub button.hub-card:focus-visible { outline: 2px solid var(--hub-hot); outline-offset: 2px; }
+.hub-card header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hub-card h3 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 400; letter-spacing: -.01em; }
+.hub-card .go { flex: none; width: 26px; height: 26px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: none; color: #2b2b2b; }
+.hub .hub-card button.go:hover:not(:disabled) { background: rgba(0, 0, 0, .06); }
+.hub-card b { font-weight: 300; font-variant-numeric: tabular-nums; }
+.hub-card small { font-size: 11px; color: var(--hub-mute); }
+.hub-card b.warn { color: #b7791f; } .hub-card b.bad { color: var(--hub-hot); }
+
+.hub-told { position: absolute; right: 22px; top: 21%; z-index: 2; width: 292px; }
+.hub-told .who { margin: 16px 0 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hub-told .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 22px; font-weight: 300; letter-spacing: -.02em; }
+.hub-told .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--hub-mute); }
+.hub-told .nums { display: flex; gap: 22px; margin-top: 14px; }
+.hub-told .nums div, .hub-card .trio div { display: flex; flex-direction: column; gap: 3px; }
+.hub-told .nums b { font-size: 20px; }
+.hub-told .ticks { position: relative; display: grid; grid-template-columns: repeat(24, 1fr); column-gap: 3px; align-items: end; height: 84px; margin-top: 18px;
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, .05) 0 1px, transparent 1px calc(100% / 6)); }
+.hub-told .ticks i { position: relative; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, .1); }
+.hub-told .ticks i.on { background: #8a8983; } .hub-told .ticks i.hot { background: var(--hub-hot); }
+.hub-told .axis { display: flex; justify-content: space-between; margin-top: 8px; font-size: 10.5px; color: var(--hub-mute); }
+
+.hub-cards { position: relative; z-index: 2; flex: none; height: 262px; display: grid; grid-template-columns: 1.4fr 1fr 1.08fr 1.08fr; gap: 10px; padding: 0 20px; }
+.hub-cards > .hub-card { border-radius: 26px 26px 0 0; }
+.hub-pair { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.hub-pair .hub-card { flex: 1; min-height: 0; }
+.hub-pair .hub-card:last-child { border-radius: 26px 26px 0 0; }
+.hub-card .trio { flex: none; display: flex; gap: 28px; margin-top: 22px; }
+.hub-card .trio b { font-size: 22px; }
+.hub-card .trio b small { font-size: 14px; }
+.hub-card .combs { flex: 1; min-height: 0; display: flex; gap: 24px; margin-top: 16px; padding-bottom: 4px; }
+.hub-card .comb { flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: space-between;
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, .045) 0 1px, transparent 1px 9px); }
+.hub-card .comb i { width: 2px; border-radius: 1px; background: #8a8983; }
+.hub-card .comb.hot i { background: var(--hub-hot); } .hub-card .comb.sun i { background: var(--hub-sun); }
+.hub-card .keys { flex: none; display: flex; flex-direction: column; gap: 4px; margin-top: 16px; font-size: 11px; color: var(--hub-mute); }
+.hub-card .keys span { display: flex; align-items: center; gap: 7px; }
+.hub-card .keys i { width: 8px; height: 8px; border-radius: 50%; }
+.hub-card i.hot { background: var(--hub-hot); } .hub-card i.sun { background: var(--hub-sun); }
+.hub-arc, .hub-gauge { flex: 1; min-height: 0; width: 100%; margin-top: 4px; overflow: visible; }
+.hub-arc path { fill: none; stroke-width: 5; stroke-linecap: round; }
+.hub-arc .rail { stroke: rgba(0, 0, 0, .06); } .hub-arc .hot { stroke: var(--hub-hot); } .hub-arc .sun { stroke: var(--hub-sun); }
+.hub-card .ends { flex: none; display: flex; justify-content: space-between; margin-top: -30px; }
+.hub-card .ends b { font-size: 20px; margin-right: 4px; }
+.hub-card .line { flex: 1; display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.hub-card .line .mark { flex: none; width: 15px; height: 15px; border-radius: 5px; background: #c4c3bb; }
+.hub-card .line .mark.hot { background: var(--hub-hot); }
+.hub-card .line b { font-size: 21px; margin-right: 3px; }
+.hub-card .line em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--hub-mute); }
+.hub-gauge line { stroke: #cbcac2; stroke-width: 1.3; stroke-linecap: round; }
+.hub-gauge line.on { stroke: var(--hub-hot); }
+.hub-gauge text { fill: #2b2b2b; font: 300 26px -apple-system, BlinkMacSystemFont, sans-serif; }
+.hub-gauge text tspan { font-size: 13px; fill: var(--hub-mute); }
+.hub-gauge .hand { fill: var(--hub-hot); }
+.hub-card .none { margin: 18px 0 0; font-size: 12px; line-height: 1.5; color: var(--hub-sub); }
+@media (prefers-reduced-motion: reduce) { .hub button.hub-card { transition: none; } .hub button.hub-card:hover:not(:disabled) { transform: none; } }

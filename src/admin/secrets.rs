@@ -31,7 +31,7 @@ static OUTWARD: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Whether a Call sends what it holds outside: a fetch, an MCP tool, or a command that reaches out.
-fn outward(m: &SecretMention) -> bool {
+pub(super) fn outward(m: &SecretMention) -> bool {
     let tool = m.tool.as_deref().unwrap_or("");
     tool == "WebFetch"
         || tool.starts_with("mcp__")
@@ -39,7 +39,7 @@ fn outward(m: &SecretMention) -> bool {
 }
 
 /// A Call the agent put the value in.
-fn in_call(m: &SecretMention) -> bool {
+pub(super) fn in_call(m: &SecretMention) -> bool {
     m.slot.as_deref() == Some("agent") && m.node.as_deref() == Some("Call")
 }
 
@@ -111,7 +111,7 @@ static HOST: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Where an outward Call sends to: its MCP server, the host it names, or else its tool.
-fn destination(m: &SecretMention) -> String {
+pub(super) fn destination(m: &SecretMention) -> String {
     let tool = m.tool.as_deref().unwrap_or("");
     if let Some(rest) = tool.strip_prefix("mcp__") {
         return format!("{} (MCP)", rest.split("__").next().unwrap_or(rest));
@@ -212,7 +212,7 @@ fn trails(mentions: &[SecretMention]) -> Vec<Trail> {
 }
 
 /// Whether a Call holding a value was kept from running: stopped, or held and not let through.
-fn held(m: &SecretMention) -> bool {
+pub(super) fn held(m: &SecretMention) -> bool {
     m.decision.as_deref() == Some("DENY") || (m.decision.as_deref() == Some("REVIEW") && !m.ran)
 }
 

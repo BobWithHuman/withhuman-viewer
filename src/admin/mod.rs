@@ -15,6 +15,7 @@
 mod audit;
 mod charts;
 mod detections;
+mod hub;
 mod inventory;
 mod main_page;
 mod mcp;
@@ -27,11 +28,16 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 pub use audit::Audit;
+pub use hub::Hub;
 pub use inventory::InventoryPage;
 pub use main_page::Main;
 pub use mcp::Mcp;
 pub use policy::Policy;
 pub use secrets::Secrets;
+
+/// The main page's 3D scene: three.js and `web/hub-scene/scene.js`, bundled (`npm run build`
+/// there). The page's head loads it, so the scene is there when the main page mounts.
+pub const HUB_SCENE_JS: &str = include_str!("hub_scene.js");
 
 use crate::api::Backend;
 use crate::model::CallFact;

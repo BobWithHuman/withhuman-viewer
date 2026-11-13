@@ -33,7 +33,7 @@ pub const CSS: &str = include_str!("style.css");
 #[cfg(feature = "admin")]
 #[component]
 fn MainPage() -> Element {
-    rsx! { crate::admin::Main {} }
+    rsx! { crate::admin::Hub {} }
 }
 #[cfg(not(feature = "admin"))]
 #[component]
@@ -48,6 +48,8 @@ fn first_screen() -> Screen {
         Ok("work") => Screen::Work,
         Ok("a") => Screen::FeatureA,
         Ok("b") => Screen::FeatureB,
+        #[cfg(feature = "admin")]
+        Ok("detect") => Screen::Detect,
         #[cfg(feature = "admin")]
         Ok("mcp") => Screen::Mcp,
         #[cfg(feature = "admin")]
@@ -90,6 +92,7 @@ fn FeaturePage(second: bool) -> Element {
 #[component]
 fn ProductPage(screen: Screen) -> Element {
     match screen {
+        Screen::Detect => rsx! { crate::admin::Main {} },
         Screen::Secrets => rsx! { crate::admin::Secrets {} },
         Screen::Inventory => rsx! { crate::admin::InventoryPage {} },
         _ => rsx! { crate::admin::Mcp {} },
@@ -149,7 +152,10 @@ pub enum Screen {
     /// Two features to come, each a screen of its own in the top bar for now.
     FeatureA,
     FeatureB,
-    /// The security team's other products, opened from the rail: MCP 사용, 민감 정보, 인벤토리.
+    /// The security team's products, opened from the rail or the main page's cards: 이상 행위
+    /// 탐지, MCP 사용, 민감 정보, 인벤토리.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    Detect,
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     Mcp,
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
@@ -159,9 +165,12 @@ pub enum Screen {
 }
 
 impl Screen {
-    /// One of the rail's products other than 이상 행위 탐지.
+    /// One of the rail's products.
     pub fn is_product(self) -> bool {
-        matches!(self, Screen::Mcp | Screen::Secrets | Screen::Inventory)
+        matches!(
+            self,
+            Screen::Detect | Screen::Mcp | Screen::Secrets | Screen::Inventory
+        )
     }
 }
 
@@ -313,7 +322,12 @@ pub fn App() -> Element {
                 }
             };
         }
-        Screen::FeatureA | Screen::FeatureB | Screen::Mcp | Screen::Secrets | Screen::Inventory => {
+        Screen::FeatureA
+        | Screen::FeatureB
+        | Screen::Detect
+        | Screen::Mcp
+        | Screen::Secrets
+        | Screen::Inventory => {
             let screen = (state.screen)();
             return rsx! {
                 div { class: "app",
@@ -752,7 +766,7 @@ fn Rail() -> Element {
     let demo = (state.public)().demo;
     let screen = (state.screen)();
     let on = move |s: Screen| if screen == s { "product on" } else { "product" };
-    let on_detect = !screen.is_product();
+    let on_detect = screen == Screen::Detect;
     let icon = |d: &'static str| {
         rsx! {
             svg { width: "18", height: "18", view_box: "0 0 24 24",
@@ -767,8 +781,8 @@ fn Rail() -> Element {
             div { class: if matches!(screen, Screen::Home) || screen.is_product() { "rail-head line" } else { "rail-head" } }
             button {
                 class: if on_detect { "product on" } else { "product" },
-                title: "이상 행위 탐지 · 메인 · 기록 · 감사 · 정책",
-                onclick: move |_| if !on_detect { state.screen.set(Screen::Home) },
+                title: "이상 행위 탐지",
+                onclick: move |_| state.screen.set(Screen::Detect),
                 {icon("M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6zM9 12l2.2 2.2L15.5 10")}
             }
             button {

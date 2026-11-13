@@ -1,0 +1,13 @@
+{
+  "name": "withhuman-hub-scene",
+  "private": true,
+  "description": "The 3D model on the security team's main page, bundled into src/admin/hub_scene.js",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild scene.js --bundle --minify --format=iife --target=safari16 --legal-comments=inline --outfile=../../src/admin/hub_scene.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0",
+    "three": "0.186.1"
+  }
+}

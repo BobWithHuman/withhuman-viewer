@@ -51,7 +51,10 @@ fn main() {
             .with_title_hidden(true)
             .with_fullsize_content_view(true)
     };
-    let head = format!("<meta charset=\"utf-8\"><style>{}</style>", ui::CSS);
+    #[cfg_attr(not(feature = "admin"), allow(unused_mut))]
+    let mut head = format!("<meta charset=\"utf-8\"><style>{}</style>", ui::CSS);
+    #[cfg(feature = "admin")]
+    head.push_str(&format!("<script>{}</script>", admin::HUB_SCENE_JS));
     let config = Config::new()
         .with_window(window)
         .with_menu(menu::build())
