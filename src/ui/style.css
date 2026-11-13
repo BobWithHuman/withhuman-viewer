@@ -3423,3 +3423,24 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .call-verdict-dialog .verdict-extra .extra-hide, .call-verdict-dialog .verdict-extra[open] .extra-show { display: none; }
 .call-verdict-dialog .verdict-extra[open] .extra-hide { display: inline; }
 .call-verdict-dialog .verdict-extra-body { margin-top: 12px; }
+
+/* A station sign above the verdict, using the route's tool color. */
+.call-verdict-dialog .station-sign { flex: none; border-top: 7px solid var(--station-color); background: var(--af-tab); }
+.station-sign-top { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px 0; color: var(--muted); font-size: 11px; letter-spacing: .08em; }
+.call-verdict-dialog .station-close { border: 0; background: transparent; color: var(--muted); }
+.call-verdict-dialog .station-close:hover { background: var(--hover); color: var(--text); }
+.station-current { display: flex; align-items: center; gap: 16px; padding: 10px 24px 22px; }
+.station-number { flex: none; display: grid; place-items: center; width: 54px; height: 54px; border: 5px solid var(--station-color); border-radius: 50%; background: var(--panel); color: var(--text); font-size: 18px; font-weight: 800; }
+.station-current > div { min-width: 0; }
+.station-caption { color: var(--muted); font-size: 11px; }
+.station-current h2 { margin-top: 3px; font-size: 26px; font-weight: 800; overflow-wrap: anywhere; }
+.station-navigation { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; border-top: 3px solid var(--station-color); border-bottom: 1px solid var(--line); background: var(--panel); }
+.call-verdict-dialog .station-navigation button { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 18px; border: 0; border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
+.call-verdict-dialog .station-navigation button:last-child { justify-content: flex-end; text-align: right; }
+.call-verdict-dialog .station-navigation button:hover:not(:disabled) { background: var(--hover); }
+.call-verdict-dialog .station-navigation button:disabled { cursor: default; }
+.station-arrow { flex: none; color: var(--station-color); font-size: 24px; }
+.station-neighbor { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.station-neighbor small { color: var(--muted); font-size: 10px; }
+.station-neighbor strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.station-progress { align-self: center; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; padding: 0 8px; }
