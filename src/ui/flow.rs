@@ -1299,6 +1299,11 @@ fn LineMap(
             .cloned()
             .or(grouped.clone())
     });
+    use_effect(move || {
+        let _ = (state.selected)();
+        let _ = size();
+        document::eval("requestAnimationFrame(() => window.fxMap?.placeVerdict())");
+    });
     let rows = legend_rows(f, &turns, &line.stops);
     // The kinds there are, for the first row's eye: all hidden, or none.
     let present: Vec<&'static str> = rows.iter().map(|r| r.key).filter(|k| *k != "all").collect();
@@ -1662,12 +1667,16 @@ fn LineMap(
             // The selected tool opens its verdict at the station, like an answer bubble.
             if (state.call_details_open)() {
                 if let Selection::Node(seq) = (state.selected)() {
-                    if let Some(st) = line.stops.iter().find(|s| s.is(seq)) {
+                    if let Some(st) = target.as_ref().filter(|s| s.is(seq)) {
                         {
-                            let left = (st.x - 40.0).max(8.0).min((line.width - 660.0).max(8.0));
+                            let left = st.x - 40.0;
                             let top = st.y + 44.0;
                             rsx! {
                                 div { class: "fx-prompt tool-verdict",
+                                    "data-station-x": "{st.x}",
+                                    "data-station-y": "{st.y}",
+                                    onmounted: move |_| { document::eval("requestAnimationFrame(() => window.fxMap?.placeVerdict())"); },
+                                    onresize: move |_| { document::eval("requestAnimationFrame(() => window.fxMap?.placeVerdict())"); },
                                     style: "left: {left}px; top: {top}px",
                                     onmousedown: move |e| e.stop_propagation(),
                                     onwheel: move |e| e.stop_propagation(),

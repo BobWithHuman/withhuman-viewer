@@ -7,10 +7,36 @@
 window.fxMap = window.fxMap || (() => {
   const S = { x: 0, y: 0, k: 1, el: null, layer: null, raf: 0, pinch: false };
   const L = () => window.fxLeft || 0;
+  // Place the verdict against the actual station, within the visible map viewport.
+  const placeVerdict = () => {
+    const bubble = S.layer?.querySelector('.tool-verdict');
+    if (!bubble || !S.el) return;
+    const r = S.el.getBoundingClientRect();
+    const x = Number(bubble.dataset.stationX) * S.k + S.x;
+    const y = Number(bubble.dataset.stationY) * S.k + S.y;
+    const margin = 12, gap = 32 * S.k;
+    const leftEdge = Math.min(L() + margin, Math.max(margin, r.width - 220));
+    const room = Math.max(120, r.width - leftEdge - margin);
+    bubble.style.width = `${Math.min(640, room / S.k)}px`;
+    const content = bubble.querySelector('.call-verdict-content');
+    const below = r.height - y - gap - margin;
+    const above = y - gap - margin;
+    const up = below < Math.min(320 * S.k, above);
+    if (content) content.style.maxHeight = `${Math.max(100, Math.min(560, (up ? above : below) / S.k))}px`;
+    const w = bubble.offsetWidth * S.k;
+    const h = bubble.offsetHeight * S.k;
+    const left = Math.max(leftEdge, Math.min(x - 40 * S.k, r.width - margin - w));
+    const top = Math.max(margin, Math.min(up ? y - gap - h : y + gap, r.height - margin - h));
+    bubble.style.left = `${(left - S.x) / S.k}px`;
+    bubble.style.top = `${(top - S.y) / S.k}px`;
+    bubble.style.setProperty('--tail-x', `${Math.max(16, Math.min(bubble.offsetWidth - 32, (x - left) / S.k - 9))}px`);
+    bubble.dataset.placement = up ? 'above' : 'below';
+  };
   const apply = (glide) => {
     if (!S.layer) return;
     S.layer.style.transition = glide ? 'transform .5s cubic-bezier(.22,.8,.24,1)' : 'none';
     S.layer.style.transform = `translate(${S.x}px, ${S.y}px) scale(${S.k})`;
+    placeVerdict();
   };
   const zoomAt = (f, cx, cy, glide) => {
     const k = Math.min(2.5, Math.max(0.05, S.k * f));
@@ -99,6 +125,7 @@ window.fxMap = window.fxMap || (() => {
   };
   return {
     attach,
+    placeVerdict,
     zoomBy: (f) => {
       if (!attach()) return;
       const r = S.el.getBoundingClientRect();
