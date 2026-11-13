@@ -3453,3 +3453,5 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .judgment-legend small { margin-left: auto; }
 
 .tool-verdict .final-judgment { margin-top: 14px; }
+
+.setup-top img.setup-mark { display: block; width: 32px; height: 32px; object-fit: contain; background: transparent; border-radius: 0; }

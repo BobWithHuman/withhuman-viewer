@@ -590,6 +590,18 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
     use_effect(move || state.prefs.read().save());
 }
 
+fn logo_source() -> &'static str {
+    use base64::Engine;
+    static LOGO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LOGO.get_or_init(|| {
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD
+                .encode(include_bytes!("../../icons/Vienna.png"))
+        )
+    })
+}
+
 /// The bar across the top, as a design app keeps one: the traffic lights at its left, the
 /// sidebar's button, the mark, then the screens as one segmented control whose chosen screen
 /// takes its own colour (the main page lime, the route map cyan, the comparison salmon); at its
@@ -597,14 +609,7 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
 /// zooms it, as a title bar does.
 #[component]
 fn TopBar() -> Element {
-    let logo = use_hook(|| {
-        use base64::Engine;
-        format!(
-            "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD
-                .encode(include_bytes!("../../icons/Vienna.png"))
-        )
-    });
+    let logo = logo_source();
     let mut state = use_context::<AppState>();
     let p = (state.public)();
     let screen = (state.screen)();
