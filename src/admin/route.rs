@@ -607,14 +607,24 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
                 n[key] = (n[key].as_f64().unwrap_or(0.0) + shift).into();
             }
         }
-        let points: Vec<[f64; 2]> = (0..)
-            .map(|k| k as f64 * SAMPLE)
-            .take_while(|&s| s <= u + 1.5)
-            .map(|s| street(s, wide).0)
-            .map(|(x, z)| [x + shift, z + shift])
-            .collect();
-        streets
-            .push(serde_json::json!({ "turn": t, "from": 0.0, "step": SAMPLE, "points": points }));
+        // The street runs as far as the last road leaving it and no further, so no stretch
+        // of it leads nowhere; a turn with no Calls has no street.
+        let last = nodes[first + 1..]
+            .iter()
+            .filter_map(|n| n["u"].as_f64())
+            .fold(0.0, f64::max);
+        if last > 0.0 {
+            let points: Vec<[f64; 2]> = (0..)
+                .map(|k| k as f64 * SAMPLE)
+                .take_while(|&s| s < last)
+                .chain([last])
+                .map(|s| street(s, wide).0)
+                .map(|(x, z)| [x + shift, z + shift])
+                .collect();
+            streets.push(
+                serde_json::json!({ "turn": t, "from": 0.0, "step": SAMPLE, "points": points }),
+            );
+        }
     }
     // The words stand on the road between the Call that read them and the Call they told,
     // and go into that Call's way just before it.
@@ -978,6 +988,25 @@ mod tests {
         );
         assert!(w["note"].as_str().unwrap().contains("90%"));
 
+        // A turn's street ends where its last road leaves it; a turn with no Calls has none.
+        let (json, at) = scene(
+            &[
+                leg(0, vec![call(1, None, false), call(2, None, false)]),
+                leg(1, Vec::new()),
+            ],
+            &HashSet::new(),
+            None,
+        );
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let streets = v["streets"].as_array().unwrap();
+        assert_eq!(streets.len(), 1);
+        let end = streets[0]["points"].as_array().unwrap().last().unwrap();
+        let last = &v["nodes"][at[&2]];
+        assert_eq!(
+            (end[0].as_f64(), end[1].as_f64()),
+            (last["jx"].as_f64(), last["jz"].as_f64())
+        );
+
         // A Call following one of an earlier turn leaves its own turn's street like any other.
         let (nodes, at, _) = drawn(&[
             leg(0, vec![call(1, None, false)]),
@@ -986,6 +1015,32 @@ mod tests {
         assert_eq!(way(&nodes[at[&1]]), [0, at[&1]]);
         assert!(nodes[at[&2]]["up"].is_null());
         assert_eq!(way(&nodes[at[&2]]), [2, at[&2]]);
+    }
+
+    /// Every session of the demo data stands on the map with every block somewhere.
+    #[test]
+    fn every_demo_session_stands_whole() {
+        let demo = crate::demo::Demo::load();
+        for row in demo.sessions().as_array().unwrap() {
+            let id = row["id"].as_str().unwrap();
+            let graph = demo.graph(id).unwrap();
+            let model = crate::layout::Model::build(&serde_json::from_value(graph).unwrap());
+            let all: HashSet<i64> = model.nodes.iter().map(|n| n.seq()).collect();
+            let flow = Flow::build(&crate::metro::Metro::build_with(&model, &all));
+            let turns: Vec<usize> = (0..flow.turns.len()).collect();
+            let (json, _) = scene(&legs(&flow, &turns), &HashSet::new(), None);
+            let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            for n in v["nodes"].as_array().unwrap() {
+                for key in ["x", "z", "jx", "jz", "u"] {
+                    assert!(
+                        n[key].as_f64().is_some_and(f64::is_finite),
+                        "{id}: {key} of {} is {}",
+                        n["label"],
+                        n[key]
+                    );
+                }
+            }
+        }
     }
 
     #[test]

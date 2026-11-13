@@ -7,9 +7,10 @@
 // stand folded into one large block, which opens when picked. The roads carry no colour. A
 // block picked is drawn round in black, as is the request its way starts at (a request can be
 // picked too, which keeps its whole turn clear and fades the others), and that way alone is
-// lit in a thick band: green, red to a Call the engine stopped, amber to one it held; the
-// words of a tool result that told a Call stand on the road before it, and a pin stands over
-// the Call the way ends at. The same way is given as directions in a card: where it leaves
+// lit as a route finder draws a route: a blue line on a darker casing, marks moving along it
+// the way it goes, a ring round the request it leaves from and a pin over the Call it arrives
+// at (green, red for a Call the engine stopped, amber for one it held); the words of a tool
+// result that told a Call stand on the road before it. The same way is given as directions in a card: where it leaves
 // from, what it goes through and why, where it arrives; a line of it picked brings that block
 // to the middle. Calls the engine stopped stand on a red lot,
 // those it held on an amber one. The page gives the blocks, where they stand and what each
@@ -24,10 +25,13 @@ const STREET = 0xfbfcfc;
 const LOT = 0xf1f3f5;
 const KERB = 0xd3d7dc;
 const MARK = 0xbcc2c9;
+// The way lit, as a route finder draws one: a blue line on a wider, darker one.
+const ROUTE = 0x3b82f6;
+const CASING = 0x1d4fbf;
 const GREEN = 0x3fc47c;
 // The way lit to a Call the engine stopped or held.
 const WAYS = { blocked: 0xe2574b, held: 0xdb9c1c };
-const GREEN_LOT = 0xa9ebc4;
+const ROUTE_LOT = 0xbcd6fb;
 const LOTS = { blocked: 0xf6aaa3, held: 0xf7d488 };
 // The eye looks down a diagonal of the floor: one step to the right on the page is this much
 // along x and back along z.
@@ -210,14 +214,15 @@ function lot(round, size, color, y, order) {
 }
 
 // A mark on the street pointing the way it runs.
-function arrow(x, z, dx, dz) {
+function arrow(x, z, dx, dz, color = MARK, scale = 1) {
   const s = new THREE.Shape();
   s.moveTo(0.17, 0);
   s.lineTo(-0.09, 0.15);
   s.lineTo(-0.02, 0);
   s.lineTo(-0.09, -0.15);
   s.closePath();
-  const m = flat(new THREE.ShapeGeometry(s), MARK, 0.006, 3);
+  const m = flat(new THREE.ShapeGeometry(s), color, 0.006, 3);
+  m.scale.setScalar(scale);
   m.rotation.set(-Math.PI / 2, 0, Math.atan2(-dz, dx));
   m.position.x = x;
   m.position.z = z;
@@ -346,35 +351,47 @@ function mount(container) {
       n.name.classList.toggle("on", on.has(i));
       n.name.removeAttribute("data-step");
       if (on.has(i) && !n.state) {
-        const p = n.ghost ? lot(true, 0.9, GREEN_LOT, 0.012, 4) : lot(ON_STREET.has(n.kind), n.size, GREEN_LOT, 0.012, 4);
+        const p = n.ghost ? lot(true, 0.9, ROUTE_LOT, 0.012, 4) : lot(ON_STREET.has(n.kind), n.size, ROUTE_LOT, 0.012, 4);
         p.position.x = n.x;
         p.position.z = n.z;
         glow.add(p);
       }
     });
-    // From the request to the Call picked, as one way: its band, and the places along it.
+    // From the request to the Call picked, as one way: the line on its casing, and the
+    // places along it.
     flow = [];
     for (let k = lit.length - 1; k > 0; k--) {
       const pts = trace(way(nodes[lit[k]], nodes[lit[k - 1]]));
-      const band = ribbon(pts, 0.24, 0.016, WAYS[nodes[picked].state] ?? GREEN, 5);
-      if (band) glow.add(band);
+      const casing = ribbon(pts, 0.4, 0.014, CASING, 5);
+      const line = ribbon(pts, 0.28, 0.017, ROUTE, 6);
+      if (casing) glow.add(casing, line);
       flow.push(...pts);
     }
+    // Marks on the line pointing the way it goes, moving along it unless motion is unwelcome.
     dots = [];
-    if (flow.length > 8 && !still.matches) {
-      const count = Math.max(1, Math.round((flow.length * 0.12) / 4.5));
+    if (flow.length > 8) {
+      const count = Math.max(1, Math.round((flow.length * 0.12) / 2.6));
       for (let k = 0; k < count; k++) {
-        const d = flat(new THREE.CircleGeometry(0.075, 20), WHITE, 0.02, 6);
-        d.rotation.x = -Math.PI / 2;
+        const d = arrow(0, 0, 1, 0, WHITE, 0.6);
+        d.position.y = 0.021;
+        d.renderOrder = 7;
         glow.add(d);
         dots.push(d);
       }
+      point(0);
     }
-    if (!dots.length) flow = null;
+    if (!dots.length || still.matches) flow = dots.length ? flow : null;
     // A pin over the Call the way ends at, in the way's colour.
     if (lit.length > 1) {
       const end = nodes[picked];
       const tone = new THREE.MeshStandardMaterial({ color: WAYS[end.state] ?? GREEN, roughness: 0.55 });
+      // Where it leaves from: a ring round the request, as a route finder marks the start.
+      const start = nodes[lit[lit.length - 1]];
+      const ring = flat(new THREE.RingGeometry(1.02, 1.16, 64), ROUTE, 0.019, 6);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.x = start.x;
+      ring.position.z = start.z;
+      glow.add(ring);
       const pin = new THREE.Group();
       const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 32, 20), tone);
       head.position.y = 0.66;
@@ -544,6 +561,19 @@ function mount(container) {
     view.z = view.toZ;
     relight();
   };
+  // Stands the marks along the lit way as they are `t` seconds on, each pointing the way.
+  function point(t) {
+    if (!flow?.length) return;
+    const long = flow.length * 0.12;
+    dots.forEach((d, k) => {
+      const at = Math.floor((((t * 1.6) / long + k / dots.length) % 1) * (flow.length - 2));
+      const [here, next] = [flow[at], flow[at + 1]];
+      d.position.x = here.x;
+      d.position.z = here.z;
+      if (next.x !== here.x || next.z !== here.z) d.rotation.z = Math.atan2(-(next.z - here.z), next.x - here.x);
+    });
+  }
+
   // Brings one block to the middle of the map, near enough to read.
   function focus(i) {
     const n = nodes[i];
@@ -751,16 +781,9 @@ function mount(container) {
       w.at += (w.goal - w.at) * ease;
       w.way.material.opacity = w.at;
     }
-    if (flow) {
-      // Marks that run along the lit way toward the Call picked.
+    if (flow && dots.length && !still.matches) {
       clock += dt;
-      const long = flow.length * 0.12;
-      dots.forEach((d, k) => {
-        const t = ((clock * 2.4) / long + k / dots.length) % 1;
-        const at = flow[Math.floor(t * (flow.length - 1))];
-        d.position.x = at.x;
-        d.position.z = at.z;
-      });
+      point(clock);
     }
     renderer.render(scene, camera);
   }

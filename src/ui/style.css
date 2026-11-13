@@ -3551,13 +3551,14 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
   line-height: 14px; text-align: center; color: #15171a; background: #fff; font-variant-numeric: tabular-nums; }
 /* The lit way as directions, in a card at the top right: what it arrives at and how, then each
    place in order down a line in the way's colour. */
-.rt-guide { --way: #3fc47c; --soft: #e3f6ea; --deep: #17693f; position: absolute; right: 26px; top: 22px; z-index: 2; width: 292px; max-height: calc(100% - 190px);
+.rt-guide { --way: #3b82f6; --soft: #e4eefe; --deep: #1d4fbf; --end: #2fa868; position: absolute; right: 26px; top: 22px; z-index: 2; width: 292px; max-height: calc(100% - 190px);
   display: flex; flex-direction: column; border-radius: 14px; background: #fff; box-shadow: 0 0 0 1px #d5d9de, 0 12px 32px rgba(21, 23, 26, .12); overflow: hidden; }
-.rt-guide.blocked { --way: #e2574b; --soft: #fde9e7; --deep: #a3271c; } .rt-guide.held { --way: #db9c1c; --soft: #fbf0d6; --deep: #7d5606; }
+.rt-guide.blocked { --end: #e2574b; } .rt-guide.held { --end: #db9c1c; }
 .rt-guide[hidden] { display: none; }
 .rt-guide header { flex: none; display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 14px 16px 12px; border-bottom: 1px solid #e6e9ec; }
 .rt-guide header strong { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; color: #15171a; }
-.rt-guide header span { align-self: center; font-size: 11.5px; color: var(--deep); }
+.rt-guide header span { align-self: center; font-size: 11.5px; color: #4a4f55; }
+.rt-guide.blocked header span { color: #a3271c; } .rt-guide.held header span { color: #7d5606; }
 .rt-stage .rt-guide header button { height: 24px; padding: 0 9px; border: 0; border-radius: 12px; background: #f0f2f4; font-size: 11px; color: #3c4147; }
 .rt-stage .rt-guide header button:hover:not(:disabled) { background: #e3e6ea; }
 .rt-guide ol { flex: 1; min-height: 0; margin: 0; padding: 12px 16px 14px; list-style: none; overflow-y: auto; }
@@ -3566,7 +3567,7 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-guide li:not(:last-child)::before { content: ""; position: absolute; left: 9px; top: 20px; bottom: 0; width: 2px; border-radius: 1px; background: var(--way); }
 .rt-guide li i { width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-style: normal; font-weight: 700; line-height: 20px; text-align: center;
   color: var(--deep); background: var(--soft); font-variant-numeric: tabular-nums; }
-.rt-guide li.end i { color: #fff; background: var(--way); }
+.rt-guide li.end i { color: #fff; background: var(--end); }
 .rt-guide li div { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
 .rt-guide li b { font-size: 12.5px; font-weight: 600; color: #15171a; }
 .rt-guide li span { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 11.5px; line-height: 1.45; color: #6b7178; word-break: break-all; }
@@ -3588,7 +3589,7 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-keys { position: absolute; left: 34px; bottom: 26px; z-index: 2; display: flex; gap: 16px; font-size: 12px; color: #4a4f55; pointer-events: none; }
 .rt-keys span { display: inline-flex; align-items: center; gap: 7px; }
 .rt-keys i { width: 14px; height: 14px; border-radius: 3px; }
-.rt-keys i.way { height: 5px; width: 18px; border-radius: 3px; background: #3fc47c; } .rt-keys i.blocked { background: #f6aaa3; } .rt-keys i.held { background: #f7d488; }
+.rt-keys i.way { height: 6px; width: 20px; border-radius: 3px; background: #3b82f6; box-shadow: 0 0 0 1.5px #1d4fbf; } .rt-keys i.blocked { background: #f6aaa3; } .rt-keys i.held { background: #f7d488; }
 .rt-zoom { position: absolute; right: 26px; bottom: 24px; z-index: 2; display: flex; flex-direction: column; overflow: hidden; border-radius: 10px; background: #fff;
   box-shadow: 0 0 0 1px #cfd4d9, 0 6px 18px rgba(21, 23, 26, .08); }
 .rt-stage .rt-zoom button { width: 38px; height: 38px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 0; background: #fff; color: #15171a;
