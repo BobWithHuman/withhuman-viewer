@@ -606,39 +606,10 @@ fn hidden_rules(rules: &serde_json::Value) -> String {
 #[component]
 pub fn CallBubble() -> Element {
     let mut state = use_context::<AppState>();
-    // Use the same unfolded map and turn order as the record view.
-    let stations = use_memo(move || {
-        let Load::Ready(model) = (state.graph)() else {
-            return Vec::new();
-        };
-        let all = model.nodes.iter().map(|n| n.seq()).collect();
-        let metro = crate::metro::Metro::build_with(&model, &all);
-        crate::flow::Flow::build(&metro)
-            .turns
-            .into_iter()
-            .flat_map(|t| t.calls)
-            .collect::<Vec<_>>()
-    });
-    let stops = stations();
-    let current = match (state.selected)() {
-        Selection::Node(seq) => stops.iter().position(|s| s.seq == seq),
-        Selection::None => None,
-    };
-    let station = current.map(|i| &stops[i]);
-    let previous = current.and_then(|i| i.checked_sub(1)).map(|i| &stops[i]);
-    let next = current.and_then(|i| stops.get(i + 1));
-    let previous_seq = previous.map(|s| s.seq);
-    let next_seq = next.map(|s| s.seq);
-    let previous_name = previous.map_or("출발역", |s| s.title.as_str());
-    let next_name = next.map_or("종착역", |s| s.title.as_str());
-    let name = station.map_or("기록", |s| s.title.as_str());
-    let color = crate::flow::GREEN;
-    let number = current.map_or(String::new(), |i| format!("{:02}", i + 1));
-    let progress = current.map_or(String::new(), |i| format!("{} / {}", i + 1, stops.len()));
     rsx! {
         section {
             class: "call-verdict-dialog",
-            aria_labelledby: "call-verdict-title",
+            aria_label: "툴 호출 판정 상세",
             onkeydown: move |e| {
                 if e.key() == Key::Escape {
                     e.stop_propagation();
@@ -646,31 +617,7 @@ pub fn CallBubble() -> Element {
                 }
             },
             div { class: "call-verdict-content", onclick: move |e| e.stop_propagation(),
-                header { class: "station-sign", style: "--station-color: {color}",
-                    div { class: "station-sign-top",
-                        span { "WITHHUMAN · 기록 노선 · {progress}" }
-                        button { class: "station-close", aria_label: "닫기", onclick: move |_| state.call_details_open.set(false), "✕" }
-                    }
-                    nav { class: "station-navigation", aria_label: "기록 노선 역 이동",
-                        button { disabled: previous_seq.is_none(),
-                            onclick: move |_| { if let Some(seq) = previous_seq { state.go_to(seq); } },
-                            span { class: "station-arrow", "←" }
-                            span { class: "station-neighbor", small { "이전 역" } strong { "{previous_name}" } }
-                        }
-                    div { class: "station-current",
-                        span { class: "station-number", "{number}" }
-                        div {
-                            span { class: "station-caption", "현재 역 · 툴 호출 판정" }
-                            h2 { id: "call-verdict-title", "{name}" }
-                        }
-                    }
-                        button { disabled: next_seq.is_none(),
-                            onclick: move |_| { if let Some(seq) = next_seq { state.go_to(seq); } },
-                            span { class: "station-neighbor", small { "다음 역" } strong { "{next_name}" } }
-                            span { class: "station-arrow", "→" }
-                        }
-                    }
-                }
+                button { class: "verdict-close", aria_label: "닫기", onclick: move |_| state.call_details_open.set(false), "✕" }
                 Inspector { verdict_only: true }
             }
         }
