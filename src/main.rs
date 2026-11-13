@@ -67,6 +67,20 @@ fn main() {
         .with_icon(icon)
         .with_menu(menu::build())
         .with_custom_head(head);
+    // Wayland uses the application ID to find the installed desktop entry and icon.
+    #[cfg(target_os = "linux")]
+    let config = {
+        use dioxus::desktop::tao::{
+            event_loop::EventLoopBuilder, platform::unix::EventLoopBuilderExtUnix,
+        };
+        let mut event_loop = EventLoopBuilder::with_user_event();
+        event_loop.with_app_id(if cfg!(feature = "admin") {
+            "dev.withhuman.console"
+        } else {
+            "dev.withhuman.viewer"
+        });
+        config.with_event_loop(event_loop.build())
+    };
     dioxus::LaunchBuilder::desktop()
         .with_cfg(config)
         .with_context(backend)
