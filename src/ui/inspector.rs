@@ -209,18 +209,7 @@ fn NodeView(
             div { class: "inspector-body",
                 Verdict {
                     model: model.clone(), seq, fields: node.props.clone(), trace: trace.clone(),
-                    payload: full_payload(&detail, &node.props),
-                }
-                if super::trace::has_final_score(&trace) {
-                    details { class: "verdict-extra",
-                        summary {
-                            span { class: "extra-show", "추가 정보 보기" }
-                            span { class: "extra-hide", "추가 정보 접기" }
-                        }
-                        div { class: "verdict-extra-body",
-                            FinalJudgment { trace: trace.clone(), decision: node.decision().unwrap_or("").to_owned() }
-                        }
-                    }
+                    payload: full_payload(&detail, &node.props), compact: true,
                 }
             }
         };
@@ -276,6 +265,7 @@ fn Verdict(
     fields: serde_json::Map<String, Value>,
     trace: Value,
     payload: Value,
+    #[props(default)] compact: bool,
 ) -> Element {
     let text = |key: &str| {
         fields
@@ -289,8 +279,7 @@ fn Verdict(
     let reason = text("decision_reason");
     let error = text("trace_error");
     // The call itself: its tool and what it acts on, whole.
-    let show_attempt = !payload.is_null();
-    let payload = if show_attempt {
+    let payload = if !payload.is_null() {
         payload
     } else {
         parse_json(fields.get("payload_json"))
@@ -332,31 +321,31 @@ fn Verdict(
                     {decision_badge(&decision)}
                 }
                 strong { {rule_text(&rule).unwrap_or("기록된 규칙에 따른 판정")} }
-                if let Some(score) = score.filter(|_| !show_attempt) {
+                if let Some(score) = score.filter(|_| !compact) {
                     span { class: "muted", "{score}" }
                 }
-                if let Some(second) = second.filter(|_| !show_attempt) {
+                if let Some(second) = second.filter(|_| !compact) {
                     span { class: "tag check", "{second}" }
                 }
             }
             if !call.is_empty() {
                 div { class: "callline", "{call}" }
             }
-            if !reason.is_empty() {
+            if !compact && !reason.is_empty() {
                 p { "{reason}" }
             }
             if !error.is_empty() {
                 p { class: "error", "판정 실패: {error}" }
             }
-            if show_attempt {
-                Story { model: model.clone(), seq, payload, trace: trace.clone(), decision: decision.clone() }
+            if compact {
+                FinalJudgment { trace: trace.clone(), decision: decision.clone() }
             }
             dl { class: "facts",
-                if !rule.is_empty() {
+                if !compact && !rule.is_empty() {
                     dt { "규칙" }
                     dd { {rule_text(&rule).unwrap_or("엔진의 추가 판정 규칙")} }
                 }
-                if !show_attempt && (judge_ms.is_some() || check_ms.is_some()) {
+                if !compact && (judge_ms.is_some() || check_ms.is_some()) {
                     dt { "Jev 시간" }
                     dd {
                         "판정 {judge_text}"

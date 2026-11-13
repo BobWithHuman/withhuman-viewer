@@ -3451,3 +3451,5 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .judgment-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .judgment-legend i { width: 8px; height: 8px; border-radius: 2px; }
 .judgment-legend small { margin-left: auto; }
+
+.tool-verdict .final-judgment { margin-top: 14px; }

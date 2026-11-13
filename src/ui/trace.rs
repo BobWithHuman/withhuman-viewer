@@ -304,10 +304,6 @@ fn final_score(trace: &Value) -> Option<FinalScore> {
     })
 }
 
-pub(super) fn has_final_score(trace: &Value) -> bool {
-    final_score(trace).is_some()
-}
-
 /// Compact score chart for the stage that actually determined the verdict.
 #[component]
 pub fn FinalJudgment(trace: Value, decision: String) -> Element {
