@@ -259,6 +259,112 @@ pub fn Check(model: Arc<Model>, trace: Value) -> Element {
     }
 }
 
+/// Only a scored second answer replaces the first-stage judgment.
+#[derive(Debug, PartialEq)]
+struct FinalScore {
+    stage: u8,
+    score: f64,
+    review: Option<f64>,
+    deny: f64,
+    default_threshold: bool,
+}
+
+fn final_score(trace: &Value) -> Option<FinalScore> {
+    let check = &trace["check"];
+    if let (Some(score), Some(deny)) = (
+        check["unwanted"].as_f64().filter(|s| s.is_finite()),
+        check_cut(check, exchange(trace, "check")),
+    ) {
+        return Some(FinalScore {
+            stage: 2,
+            score,
+            review: None,
+            deny,
+            default_threshold: true,
+        });
+    }
+    // A safeguard is blocked by a rule, without either score deciding it.
+    if check["branch"] == "safeguard" {
+        return None;
+    }
+    let score = trace["deviation"]["score"]
+        .as_f64()
+        .filter(|s| s.is_finite())?;
+    let recorded = trace["thresholds"]["review"]
+        .as_f64()
+        .zip(trace["thresholds"]["deny"].as_f64());
+    let (review, deny) =
+        recorded.unwrap_or_else(|| default_thresholds(trace["link"].as_str().unwrap_or("request")));
+    Some(FinalScore {
+        stage: 1,
+        score,
+        review: Some(review),
+        deny,
+        default_threshold: recorded.is_none(),
+    })
+}
+
+pub(super) fn has_final_score(trace: &Value) -> bool {
+    final_score(trace).is_some()
+}
+
+/// Compact score chart for the stage that actually determined the verdict.
+#[component]
+pub fn FinalJudgment(trace: Value, decision: String) -> Element {
+    let Some(result) = final_score(&trace) else {
+        return rsx! {};
+    };
+    let score = result.score.clamp(0.0, 1.0) * 100.0;
+    let deny = result.deny.clamp(0.0, 1.0) * 100.0;
+    let review = result.review.map(|r| r.clamp(0.0, result.deny) * 100.0);
+    let lower = if result.stage == 2 && trace["check"]["breach"] == true {
+        "확인"
+    } else {
+        "허용"
+    };
+    let lower_color = if lower == "확인" {
+        "--review"
+    } else {
+        "--allow"
+    };
+    let accessible = format!(
+        "{}차 판단, 점수 {:.0}%, 차단 기준 {:.0}%",
+        result.stage, score, deny
+    );
+    rsx! {
+        section { class: "final-judgment", aria_label: "{accessible}",
+            div { class: "judgment-heading",
+                h3 { "{result.stage}차 판단" }
+                {decision_badge(&decision)}
+            }
+            div { class: "judgment-chart", role: "img", aria_label: "{accessible}",
+                div { class: "judgment-marker", style: "left: {score}%",
+                    strong { style: "transform: translateX(-{score}%)", "{score:.0}%" }
+                }
+                div { class: "judgment-zones",
+                    if let Some(review) = review {
+                        span { style: "width: {review}%; background: var(--allow)" }
+                        span { style: "width: {deny - review}%; background: var(--review)" }
+                    } else {
+                        span { style: "width: {deny}%; background: var({lower_color})" }
+                    }
+                    span { style: "width: {100.0 - deny}%; background: var(--deny)" }
+                }
+                if let Some(review) = review {
+                    span { class: "judgment-threshold", style: "left: {review}%", "{review:.0}%" }
+                }
+                span { class: "judgment-threshold deny", style: "left: {deny}%", "{deny:.0}%" }
+            }
+            div { class: "judgment-legend",
+                span { i { style: "background: var({lower_color})" } "{lower}" }
+                if review.is_some() { span { i { style: "background: var(--review)" } "확인" } }
+                span { i { style: "background: var(--deny)" } "차단" }
+                small { if result.default_threshold { "기준선 · 기본값" } else { "기준선" } }
+            }
+        }
+    }
+}
+
 /// `+`/`-` lines of a change, or nothing for an empty side.
 fn change_lines(text: &Value, sign: char) -> Vec<String> {
     match text.as_str() {
@@ -697,7 +803,29 @@ pub fn Context(trace: Value) -> Element {
 mod tests {
     use serde_json::json;
 
-    use super::{attempt, change_lines, check_cut, option_seq, reasons, sorted};
+    use super::{attempt, change_lines, check_cut, final_score, option_seq, reasons, sorted};
+
+    #[test]
+    fn final_graph_uses_only_the_deciding_stage() {
+        let first = json!({"link": "segment", "deviation": {"score": 0.67},
+            "thresholds": {"review": 0.1, "deny": 0.2}});
+        let scored = final_score(&first).unwrap();
+        assert_eq!((scored.stage, scored.score, scored.deny), (1, 0.67, 0.2));
+        assert!(!scored.default_threshold);
+        let mut second = first.clone();
+        second["check"] = json!({"branch": "run", "unwanted": 0.58, "verdict": "DENY"});
+        let scored = final_score(&second).unwrap();
+        assert_eq!((scored.stage, scored.score, scored.deny), (2, 0.58, 0.4));
+        assert_eq!(scored.review, None);
+        // A planned second question without an answer leaves the first score in force.
+        second["check"] = json!({"branch": "run"});
+        assert_eq!(final_score(&second).unwrap().stage, 1);
+        second["check"] = json!({"branch": "clear"});
+        assert_eq!(final_score(&second).unwrap().stage, 1);
+        second["check"] = json!({"branch": "safeguard"});
+        assert!(final_score(&second).is_none());
+        assert!(final_score(&json!({})).is_none());
+    }
 
     #[test]
     fn an_edit_shows_what_it_adds_against_what_it_keeps() {
@@ -720,7 +848,7 @@ mod tests {
         });
         let why = reasons(&trace);
         assert_eq!(why.len(), 3);
-        assert!(why[0].0.contains("새 목표") && why[0].1 == "확률 0.83");
+        assert!(why[0].0.contains("새 목표") && why[0].1 == "83%");
         assert!(why[1].0.contains("추가한 내용"));
         assert!(why[2].0.contains("되돌리기"));
         assert!(reasons(&json!({"deviation": {"worst": "none"}})).is_empty());

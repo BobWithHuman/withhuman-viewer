@@ -11,7 +11,7 @@ use crate::api::Backend;
 use crate::layout::{Model, decision_color, label, percent};
 use crate::model::{NodeDetail, parse_json};
 
-use super::trace::{Check, Context, Deviation, JevLog, Preview, Story, TracePath};
+use super::trace::{Check, Context, Deviation, FinalJudgment, JevLog, Preview, Story, TracePath};
 
 /// A verdict as a coloured badge: 허용, 확인 or 차단.
 pub(super) fn decision_badge(decision: &str) -> Element {
@@ -211,18 +211,14 @@ fn NodeView(
                     model: model.clone(), seq, fields: node.props.clone(), trace: trace.clone(),
                     payload: full_payload(&detail, &node.props),
                 }
-                if trace["deviation"]["score"].as_f64().is_some()
-                    || trace["check"].as_object().is_some_and(|c| !c.is_empty()) {
+                if super::trace::has_final_score(&trace) {
                     details { class: "verdict-extra",
                         summary {
                             span { class: "extra-show", "추가 정보 보기" }
                             span { class: "extra-hide", "추가 정보 접기" }
                         }
                         div { class: "verdict-extra-body",
-                            Deviation { trace: trace.clone() }
-                            if trace["check"].as_object().is_some_and(|c| !c.is_empty()) {
-                                Check { model: model.clone(), trace: trace.clone() }
-                            }
+                            FinalJudgment { trace: trace.clone(), decision: node.decision().unwrap_or("").to_owned() }
                         }
                     }
                 }

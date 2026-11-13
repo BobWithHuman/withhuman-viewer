@@ -3436,3 +3436,18 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .call-verdict-dialog .verdict-close:hover { background: var(--hover); color: var(--text); }
 
 .fx-prompt.tool-verdict[data-placement="above"]::before { top: auto; bottom: -9px; transform: rotate(225deg); }
+
+.final-judgment { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.judgment-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.judgment-heading h3 { margin: 0; color: var(--text); font-size: 13px; }
+.judgment-chart { position: relative; margin-top: 14px; padding-top: 36px; padding-bottom: 30px; }
+.judgment-zones { display: flex; height: 18px; overflow: hidden; border-radius: 5px; }
+.judgment-zones > span { display: block; }
+.judgment-marker { position: absolute; top: 0; height: 59px; width: 0; z-index: 1; border-left: 2px solid var(--text); }
+.judgment-marker strong { position: absolute; top: 0; padding: 1px 6px; background: var(--bg); color: var(--text); font-size: 20px; font-variant-numeric: tabular-nums; }
+.judgment-threshold { position: absolute; top: 59px; transform: translateX(-50%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.judgment-threshold::before { content: ""; position: absolute; left: 50%; top: -23px; height: 18px; border-left: 2px dashed var(--bg); }
+.judgment-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 11px; color: var(--muted); }
+.judgment-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.judgment-legend i { width: 8px; height: 8px; border-radius: 2px; }
+.judgment-legend small { margin-left: auto; }
