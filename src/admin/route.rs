@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 
-use crate::flow::{Call, Flow, Tone};
+use crate::flow::{Call, Flow, Told, Tone};
 use crate::ui::{AppState, Selection};
 
 /// The eye looks down a diagonal of the floor, so what runs left to right on the page runs
@@ -35,6 +35,8 @@ const BETWEEN: f64 = 1.7;
 /// A turn with more Calls than this folds its plain runs, of this many Calls or more.
 const LONG: usize = 10;
 const RUN: usize = 3;
+/// A weight the engine did not settle on counts as a near thing from this much.
+const NEAR: f64 = 0.25;
 /// What a large block goes by where a Call goes by its seq: this, less its first Call's seq.
 const MANY: i64 = -1_000_000_000_000;
 
@@ -252,6 +254,9 @@ struct Step {
     /// words of its result that told this one, when the engine traced it to them.
     parent: Option<i64>,
     words: Option<Words>,
+    /// How much the engine found each thing the Call could have followed to weigh on it, the
+    /// heaviest first (`Call::weights`).
+    weights: Vec<(Told, f64)>,
     blocked: bool,
     held: bool,
     loose: bool,
@@ -296,6 +301,7 @@ fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
                             p: w.p,
                             error: w.error,
                         }),
+                    weights: c.weights.clone(),
                     blocked: c.blocked,
                     held: c.warn,
                     loose: c.loose,
@@ -572,10 +578,41 @@ fn scene(legs: &[Leg], open: &HashSet<i64>, kept: Option<i64>) -> (String, HashM
             if let (Some(_), Some(w)) = (road, &call.words) {
                 told.push((here, w.clone()));
             }
+            // What the engine weighed it against, heaviest first, each as the block it is
+            // when it stands on the map; and the heaviest it did not settle on, when that was
+            // a near thing, to draw as the way not taken.
+            let weighed: Vec<serde_json::Value> = call
+                .weights
+                .iter()
+                .map(|&(told, p)| {
+                    let (kind, block, name) = match told {
+                        Told::Request => ("ask", Some(ask), format!("요청 {}", turn.n)),
+                        Told::Nothing => ("none", None, "근거 없음".to_owned()),
+                        Told::Call(seq) => {
+                            let block = at.get(&seq).copied();
+                            let name = block
+                                .and_then(|i| nodes[i]["label"].as_str())
+                                .unwrap_or("앞선 호출");
+                            ("call", block, name.to_owned())
+                        }
+                    };
+                    serde_json::json!({ "kind": kind, "block": block, "label": name, "p": p })
+                })
+                .collect();
+            let rival = weighed
+                .iter()
+                .skip(1)
+                .find(|w| w["p"].as_f64().is_some_and(|p| p >= NEAR) && !w["block"].is_null())
+                .map(|w| w["block"].clone());
+            // Worth a look before any other: stopped or held, told by a tool result, or told
+            // by nothing the engine could find.
+            let notable = call.blocked || call.held || call.loose || call.words.is_some();
             nodes.push(stand(
                 serde_json::json!({
                     "kind": call.kind, "turn": t, "seq": call.seq, "pick": call.seq, "up": road, "state": state,
                     "label": call.tool, "tip": cut(&call.title, 90), "note": note, "way": way,
+                    "weights": weighed, "rival": rival, "notable": notable,
+                    "why": if call.blocked { Some("blocked") } else if call.held { Some("held") } else if call.loose { Some("loose") } else if call.words.is_some() { Some("told") } else { None },
                 }),
                 lot.at(),
                 meets,
@@ -809,6 +846,7 @@ mod tests {
             title: format!("call {seq}"),
             parent,
             words: None,
+            weights: Vec::new(),
             blocked,
             held: false,
             loose: false,
@@ -1041,6 +1079,59 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_call_says_what_the_engine_weighed_and_whether_it_is_worth_a_look() {
+        // 2 follows the request but nearly followed 1; 3 follows 1 by words in its result.
+        let mut second = call(2, None, false);
+        second.weights = vec![
+            (Told::Request, 0.56),
+            (Told::Call(1), 0.31),
+            (Told::Nothing, 0.13),
+        ];
+        let mut third = call(3, Some(1), false);
+        third.words = Some(Words {
+            quote: None,
+            paragraph: Some(2),
+            p: 0.8,
+            error: false,
+        });
+        third.weights = vec![(Told::Call(1), 0.9), (Told::Request, 0.1)];
+        let (nodes, at, _) = drawn(&[leg(
+            0,
+            vec![call(1, None, false), second, third, call(4, None, true)],
+        )]);
+        let two = &nodes[at[&2]];
+        let weighed: Vec<(&str, Option<u64>, f64)> = two["weights"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| {
+                (
+                    w["kind"].as_str().unwrap(),
+                    w["block"].as_u64(),
+                    w["p"].as_f64().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            weighed,
+            [
+                ("ask", Some(0), 0.56),
+                ("call", Some(at[&1] as u64), 0.31),
+                ("none", None, 0.13)
+            ]
+        );
+        // The way not taken: the Call it nearly followed. None when nothing came near.
+        assert_eq!(two["rival"].as_u64(), Some(at[&1] as u64));
+        assert!(nodes[at[&3]]["rival"].is_null());
+        let why: Vec<Option<&str>> = [1, 2, 3, 4].map(|s| nodes[at[&s]]["why"].as_str()).to_vec();
+        assert_eq!(why, [None, None, Some("told"), Some("blocked")]);
+        assert_eq!(
+            [1, 2, 3, 4].map(|s| nodes[at[&s]]["notable"] == true),
+            [false, false, true, true]
+        );
     }
 
     #[test]

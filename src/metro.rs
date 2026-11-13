@@ -114,6 +114,10 @@ pub struct Station {
     /// The subgraph the engine put it in, and the subgraphs on its path back to the request.
     pub subgraph: Option<i64>,
     pub path: Vec<i64>,
+    /// How much the engine found each thing the Call could have followed to weigh on it
+    /// (the trace's `influence`): a SubGraph by its number, or nothing (`None`), and the
+    /// weight from 0 to 1.
+    pub weights: Vec<(Option<i64>, f64)>,
     /// The Calls a folded station stands for, in order; just its own otherwise.
     pub members: Vec<i64>,
     /// When the engine saw the Call, in milliseconds.
@@ -1207,6 +1211,20 @@ impl Metro {
                             .as_array()
                             .map(|p| p.iter().filter_map(Value::as_i64).collect())
                             .unwrap_or_default(),
+                        weights: trace["influence"]
+                            .as_object()
+                            .map(|w| {
+                                w.iter()
+                                    .filter_map(|(key, p)| {
+                                        let from = match key.as_str() {
+                                            "none" => None,
+                                            key => Some(key.strip_prefix('s')?.parse().ok()?),
+                                        };
+                                        Some((from, p.as_f64()?))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         members: vec![node.seq()],
                         at: node.props.get("observed_at").and_then(Value::as_i64),
                         label: None,
@@ -1556,6 +1574,16 @@ impl Metro {
             .collect();
         out.sort_by(|a, b| a.x.total_cmp(&b.x));
         out.into_iter().map(|o| o.seq).collect()
+    }
+
+    /// The last Call before a Call in a SubGraph: the Call the engine would have had it follow
+    /// had it chosen that SubGraph. None for a SubGraph with no Call before it, a request's own.
+    pub fn last_in(&self, s: &Station, subgraph: i64) -> Option<i64> {
+        self.stations
+            .iter()
+            .filter(|o| o.seq != s.seq && o.x < s.x && o.subgraph == Some(subgraph))
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .map(|o| o.seq)
     }
 
     /// The Call the engine's path to a Call comes through last: the one whose result told it,

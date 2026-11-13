@@ -3544,6 +3544,21 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
   transition: opacity .18s; }
 .rt-labels span.ask { padding: 0 8px; font-size: 11.5px; font-weight: 600; color: #15171a; background: #fff; box-shadow: 0 0 0 1px #cfd4d9; }
 .rt-labels span.many { padding: 0 8px; font-size: 11.5px; font-weight: 600; color: #15171a; background: #fff; box-shadow: 0 0 0 1px #cfd4d9; }
+/* A Call worth a look: its name on a white tag with a dot in the colour of why. */
+.rt-labels span.why { padding: 0 8px 0 6px; font-weight: 600; color: #15171a; background: #fff; box-shadow: 0 0 0 1px #cfd4d9; }
+.rt-labels span.why::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: #7d8490; vertical-align: 1px; }
+.rt-labels span.why.blocked::before { background: #e2574b; } .rt-labels span.why.held::before { background: #db9c1c; } .rt-labels span.why.told::before { background: #3b82f6; }
+.rt-labels span.why.on { color: #fff; background: #15171a; box-shadow: none; } .rt-labels span.why.on::before { display: none; }
+.rt-labels span.why.on[data-step]::before { display: inline-block; }
+/* What is worth a look, above the keys: how many Calls for each reason, each a way to the next. */
+.rt-notables { position: absolute; left: 34px; bottom: 56px; z-index: 2; display: flex; gap: 6px; }
+.rt-notables[hidden] { display: none; }
+.rt-stage .rt-notables button { height: 28px; padding: 0 6px 0 11px; display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: 14px; background: #fff;
+  font-size: 12px; color: #15171a; box-shadow: 0 0 0 1px #d5d9de, 0 4px 12px rgba(21, 23, 26, .07); }
+.rt-stage .rt-notables button:hover:not(:disabled) { background: #f3f4f7; }
+.rt-notables button::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #7d8490; }
+.rt-notables button.blocked::before { background: #e2574b; } .rt-notables button.held::before { background: #db9c1c; } .rt-notables button.told::before { background: #3b82f6; }
+.rt-notables button b { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; color: #3c4147; background: #eef0f3; }
 .rt-labels span.words { font-size: 11px; color: #15171a; }
 .rt-labels span.blocked { color: #b93126; font-weight: 600; } .rt-labels span.held { color: #8a5f06; font-weight: 600; }
 .rt-labels span.on { padding: 0 8px 0 3px; font-weight: 600; color: #fff; background: #15171a; box-shadow: none; }
@@ -3575,6 +3590,12 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 .rt-guide li span.intent { color: #3c4147; }
 .rt-guide li:hover b, .rt-guide li:focus-visible b { text-decoration: underline; text-underline-offset: 3px; }
 .rt-guide li:focus-visible { outline: 2px solid var(--way); outline-offset: 4px; border-radius: 6px; }
+/* What the engine weighed a Call against: a bar in parts, the one it settled on in the way's
+   colour, and the same in words. */
+.rt-guide li .weigh { display: flex; gap: 2px; height: 5px; margin-top: 5px; border-radius: 3px; overflow: hidden; }
+.rt-guide li .weigh u { flex: 0 0 0; min-width: 3px; background: #c3c8d2; text-decoration: none; }
+.rt-guide li .weigh u.won { background: var(--way); } .rt-guide li .weigh u.none { background: #e4e7ec; }
+.rt-guide li span.weighed { font-size: 10.5px; color: #4a4f55; -webkit-line-clamp: 2; }
 .rt-guide li.why { cursor: default; }
 .rt-guide li.why i { width: 8px; height: 8px; margin: 6px; background: var(--way); }
 .rt-guide li.why b { font-size: 11.5px; font-weight: 500; color: var(--deep); text-decoration: none; }

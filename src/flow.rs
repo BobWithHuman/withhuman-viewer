@@ -24,6 +24,15 @@ pub const AMBER: &str = "#d9a21b";
 pub const RED: &str = "#d8403a";
 /// The most turns one task takes.
 const TASK_TURNS: usize = 6;
+/// What the engine weighed a Call against: the turn's request, an earlier Call's result, or
+/// nothing in the session.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Told {
+    Request,
+    Call(i64),
+    Nothing,
+}
+
 /// One Call as the map names it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Call {
@@ -56,6 +65,9 @@ pub struct Call {
     /// it, else the last Call in the SubGraph the engine chose as its parent; none when the
     /// engine chose the request itself (`Metro::parent_of`).
     pub parent: Option<i64>,
+    /// How much the engine found each thing the Call could have followed to weigh on it, the
+    /// heaviest first: what it settled on, and what it nearly did.
+    pub weights: Vec<(Told, f64)>,
     pub key: String,
     pub place: String,
 }
@@ -87,6 +99,26 @@ impl Call {
             by: by.filter(|&b| m.station(b).is_some()),
             loose: s.loose || s.unsourced,
             parent: m.parent_of(s),
+            weights: {
+                let mut weights: Vec<(Told, f64)> = Vec::new();
+                for &(from, p) in &s.weights {
+                    let told = match from {
+                        None => Told::Nothing,
+                        // The Call whose result told it, when that one is in the SubGraph;
+                        // else the SubGraph's last Call before this one.
+                        Some(g) => by
+                            .filter(|&b| m.station(b).is_some_and(|b| b.subgraph == Some(g)))
+                            .or_else(|| m.last_in(s, g))
+                            .map_or(Told::Request, Told::Call),
+                    };
+                    match weights.iter_mut().find(|(t, _)| *t == told) {
+                        Some((_, sum)) => *sum += p,
+                        None => weights.push((told, p)),
+                    }
+                }
+                weights.sort_by(|a, b| b.1.total_cmp(&a.1));
+                weights
+            },
             key: place_key(s),
             place: place_label(s),
         }

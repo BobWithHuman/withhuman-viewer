@@ -36,6 +36,15 @@ const GREEN = 0x3fc47c;
 // The way lit to a Call the engine stopped or held.
 const WAYS = { blocked: 0xe2574b, held: 0xdb9c1c };
 const ROUTE_LOT = 0xbcd6fb;
+// Why a Call is worth a look before the rest: the engine stopped it or held it, a tool result
+// told it, or the engine found nothing that did. The mark over its block, and its name.
+const WHYS = {
+  blocked: { color: 0xe2574b, name: "차단" },
+  held: { color: 0xdb9c1c, name: "확인 요청" },
+  told: { color: 0x3b82f6, name: "결과가 시킨 호출" },
+  loose: { color: 0x7d8490, name: "근거 없음" },
+};
+const RIVAL = 0x8a90a0;
 const LOTS = { blocked: 0xf6aaa3, held: 0xf7d488 };
 // The eye looks down a diagonal of the floor: one step to the right on the page is this much
 // along x and back along z.
@@ -263,7 +272,11 @@ function mount(container) {
   const guide = document.createElement("aside");
   guide.className = "rt-guide";
   guide.hidden = true;
-  container.append(labels, tip, guide);
+  // What is worth a look in the session, by why: each picks the next Call of its kind.
+  const notables = document.createElement("div");
+  notables.className = "rt-notables";
+  notables.hidden = true;
+  container.append(labels, tip, guide, notables);
 
   const scene = new THREE.Scene();
   scene.add(new THREE.HemisphereLight(0xffffff, 0xc3c2ea, 2.0));
@@ -359,7 +372,13 @@ function mount(container) {
     nodes.forEach((n, i) => {
       // A request picked keeps its whole turn in view and lets the other turns fade.
       const whole = asked != null && n.turn === asked;
-      n.goal = n.ghost ? (on.has(i) ? 1 : 0) : !lit.length || on.has(i) || whole ? 1 : 0.42;
+      // The way lit stands whole. Of the rest, what is worth a look stays clear and a Call
+      // that only followed the request and went through stands back; another turn's, or
+      // anything off the way lit, further back still.
+      const plain = n.seq != null && !n.notable;
+      const aside = lit.length > 1 || (asked != null && !whole);
+      n.goal = n.ghost ? (on.has(i) ? 1 : 0) : on.has(i) ? 1 : aside ? (plain ? 0.3 : 0.62) : plain ? 0.58 : 1;
+      if (n.flag) n.flag.material.opacity = on.has(i) || !aside ? 1 : 0.5;
       // Drawn round in black: the Call picked, and the request its way starts at.
       const marked = i === picked || (on.has(i) && n.kind === "ask");
       n.hull.forEach((h) => (h.visible = marked));
@@ -397,6 +416,18 @@ function mount(container) {
       point(0);
     }
     if (!dots.length || still.matches) flow = dots.length ? flow : null;
+    // The way not taken: for each Call on the way lit, a broken line from what the engine
+    // nearly settled on instead.
+    for (const i of lit) {
+      const from = nodes[nodes[i].rival];
+      if (!from || on.has(nodes[i].rival) || nodes[i].ghost) continue;
+      const pts = trace([[from.x, from.z], [nodes[i].x, nodes[i].z]]);
+      for (let k = 2; k + 3 < pts.length; k += 6) {
+        const dash = ribbon(pts.slice(k, k + 4), 0.11, 0.0125, RIVAL, 5);
+        if (dash) glow.add(dash);
+      }
+      from.goal = Math.max(from.goal, 0.8);
+    }
     // A pin over the Call the way ends at, in the way's colour.
     if (lit.length > 1) {
       const end = nodes[picked];
@@ -468,6 +499,22 @@ function mount(container) {
           li.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && go());
         }
         body.append(name, what);
+        // What the engine weighed this Call against, as a bar and in words: what it settled
+        // on first, what it nearly did after.
+        if (n.weights?.length) {
+          const bar = document.createElement("div");
+          bar.className = "weigh";
+          const words = document.createElement("span");
+          words.className = "weighed";
+          words.textContent = n.weights.map((w) => `${w.label} ${Math.round(w.p * 100)}%`).join(" · ");
+          n.weights.forEach((w, at) => {
+            const part = document.createElement("u");
+            part.className = at === 0 ? "won" : w.kind === "none" ? "none" : "";
+            part.style.flexGrow = Math.max(w.p, 0.02);
+            bar.append(part);
+          });
+          body.append(bar, words);
+        }
         if (k === 0 && n.intent) {
           const intent = document.createElement("span");
           intent.className = "intent";
@@ -480,7 +527,7 @@ function mount(container) {
       guide.append(head, list);
     }
     // Which names give way when two would overlap: the lit way first, then the street's own.
-    const rank = (i) => (on.has(i) ? 0 : ON_STREET.has(nodes[i].kind) || nodes[i].kind === "many" ? 1 : nodes[i].state ? 2 : 3);
+    const rank = (i) => (on.has(i) ? 0 : nodes[i].why ? 1 : ON_STREET.has(nodes[i].kind) || nodes[i].kind === "many" ? 2 : 3);
     order = nodes.map((_, i) => i).sort((a, b) => rank(a) - rank(b) || a - b);
     ways.forEach((w) => (w.goal = (lit.length ? 0.7 : 1) * (w.most ?? 1)));
     stale = true;
@@ -562,13 +609,38 @@ function mount(container) {
         ground.position.z = n.z;
         add(ground);
       }
+      // A mark over a Call worth a look, in the colour of why.
+      let flag = null;
+      if (n.why) {
+        flag = new THREE.Mesh(new THREE.OctahedronGeometry(0.17), new THREE.MeshBasicMaterial({ color: WHYS[n.why].color, transparent: true }));
+        flag.position.set(n.x, b.tall + 0.42, n.z);
+        flag.scale.y = 1.35;
+        root.add(flag);
+      }
       const name = document.createElement("span");
       name.textContent = n.label;
       name.classList.add(street || n.ghost || n.kind === "many" ? n.kind : "call");
       if (n.state) name.classList.add(n.state);
+      if (n.why) name.classList.add("why", n.why);
       labels.append(name);
-      return { ...n, ...b, i, name, size, wide: name.offsetWidth, at: n.ghost ? 0 : 1, goal: n.ghost ? 0 : 1, shown: true };
+      return { ...n, ...b, i, name, size, flag, wide: name.offsetWidth, at: n.ghost ? 0 : 1, goal: n.ghost ? 0 : 1, shown: true };
     });
+    // The strip: how many Calls are worth a look for each reason; one picked goes to the
+    // next of its kind after the Call picked.
+    notables.replaceChildren();
+    for (const [why, { name }] of Object.entries(WHYS)) {
+      const mine = nodes.map((n, i) => i).filter((i) => nodes[i].why === why);
+      if (!mine.length) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = why;
+      const count = document.createElement("b");
+      count.textContent = mine.length;
+      button.append(name, count);
+      button.addEventListener("click", () => api.onPick?.(nodes[mine.find((i) => picked != null && i > picked) ?? mine[0]].pick));
+      notables.append(button);
+    }
+    notables.hidden = !notables.children.length;
     fit();
     view.x = view.toX;
     view.z = view.toZ;
@@ -787,7 +859,7 @@ function mount(container) {
         const must = lead && (i === picked || n.ghost || ON_STREET.has(n.kind));
         const show = must || (!n.ghost && !boxes.some(over) && (lead || !behind()));
         if (show) boxes.push(box);
-        n.name.style.opacity = !show ? 0 : n.goal < 0.7 ? 0.4 : 1;
+        n.name.style.opacity = !show ? 0 : n.goal < 0.5 ? 0.35 : n.goal < 0.7 ? 0.6 : 1;
       }
     }
     for (const w of ways) {
@@ -842,6 +914,7 @@ function mount(container) {
     labels.remove();
     tip.remove();
     guide.remove();
+    notables.remove();
   };
   return api;
 }
