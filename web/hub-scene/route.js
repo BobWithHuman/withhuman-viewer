@@ -451,79 +451,119 @@ function mount(container) {
       pin.position.set(end.x, end.tall + 0.3, end.z);
       glow.add(pin);
     }
-    // The directions: the request it leaves from, each Call it goes through with the words
-    // that sent it on, and the Call it arrives at.
+    // The way in short, over the map: one sentence saying why the Call picked happened and
+    // what the engine did, then the way itself as a row of cards from the request to the
+    // Call, the reason each followed the last written on the arrow between them.
     const steps = [...lit].reverse();
     guide.replaceChildren();
     guide.hidden = steps.length < 2;
-    guide.className = `rt-guide ${nodes[picked]?.state ?? ""}`;
+    guide.className = `rt-path ${nodes[picked]?.state ?? ""}`;
     if (steps.length > 1) {
       const end = nodes[picked];
-      const calls = steps.filter((i) => nodes[i].seq != null).length;
-      const head = document.createElement("header");
-      const title = document.createElement("strong");
-      title.textContent = `${end.label} · ${end.tip}`;
-      const sum = document.createElement("span");
-      const verdict = end.state === "blocked" ? "도착지에서 차단됨" : end.state === "held" ? "도착지에서 확인 요청" : "허용됨";
-      sum.textContent = calls > 1 ? `호출 ${calls - 1}곳을 거쳐 도착 · ${verdict}` : `요청에서 바로 도착 · ${verdict}`;
+      const ask = nodes[steps[0]];
+      const stops = steps.filter((i) => nodes[i].kind !== "words");
+      const told = nodes[steps[steps.length - 2]].kind === "words" ? nodes[steps[steps.length - 3]] : null;
+      // Why, in a sentence.
+      const say = document.createElement("p");
+      say.className = "say";
+      const what = document.createElement("b");
+      what.textContent = `${end.label} · ${end.tip}`;
+      const lead = told
+        ? `${told.label}(${told.tip}) 결과의 한 문단이 시킨 호출입니다.`
+        : stops.length === 2
+          ? `${ask.label}에 바로 이어진 호출입니다.`
+          : `${ask.label}에서 호출 ${stops.length - 2}개를 거쳐 이어진 호출입니다.`;
+      const stamp = document.createElement("em");
+      stamp.textContent = end.state === "blocked" ? "엔진이 차단" : end.state === "held" ? "엔진이 확인 요청" : "엔진이 허용";
+      say.append(what, `: ${lead} `, stamp);
+      // How sure the engine was, in words: numbers only when it was a near thing.
+      const sure = document.createElement("span");
+      sure.className = "sure";
+      const [first, second] = end.weights ?? [];
+      if (first) {
+        const pct = (w) => Math.round(w.p * 100);
+        sure.textContent =
+          first.kind === "none"
+            ? `엔진이 근거를 찾지 못했습니다 (${pct(first)}%)`
+            : second && second.p >= 0.25 && first.p - second.p < 0.3
+              ? `엔진 판단: ${first.label} 때문으로 봤지만 ${second.label}일 수도 있음 (${pct(first)} 대 ${pct(second)})`
+              : `엔진 판단: ${first.p >= 0.75 ? "거의 " : ""}${first.label} 때문 (${pct(first)}%)`;
+      }
       const all = document.createElement("button");
       all.type = "button";
-      all.textContent = "전체 경로";
+      all.textContent = "지도에서 전체 경로";
       all.addEventListener("click", () => show(true));
-      head.append(title, sum, all);
+      const head = document.createElement("header");
+      head.append(say, sure, all);
+      // The way, card by card.
       const list = document.createElement("ol");
-      let no = 0;
-      steps.forEach((i, k) => {
+      const card = (i, no) => {
         const n = nodes[i];
+        n.name.dataset.step = no;
         const li = document.createElement("li");
-        const mark = document.createElement("i");
-        const body = document.createElement("div");
+        li.className = i === picked ? "card end" : n.kind === "ask" ? "card ask" : "card";
+        li.tabIndex = 0;
+        const badge = document.createElement("i");
+        badge.textContent = no;
         const name = document.createElement("b");
-        const what = document.createElement("span");
-        if (n.kind === "words") {
-          // Not a place but why the way goes on: the words read at the Call before.
-          li.className = "why";
-          name.textContent = "이 결과를 읽고 다음 호출로";
-          what.textContent = `${n.tip} · ${n.note}`;
-        } else {
-          no++;
-          n.name.dataset.step = no;
-          mark.textContent = no;
-          const role = k === 0 ? "출발" : i === picked ? "도착" : "경유";
-          if (i === picked) li.className = "end";
-          name.textContent = `${role} · ${n.label}`;
-          what.textContent = n.tip;
-          li.tabIndex = 0;
-          const go = () => focus(i);
-          li.addEventListener("click", go);
-          li.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && go());
-        }
-        body.append(name, what);
-        // What the engine weighed this Call against, as a bar and in words: what it settled
-        // on first, what it nearly did after.
-        if (n.weights?.length) {
-          const bar = document.createElement("div");
-          bar.className = "weigh";
-          const words = document.createElement("span");
-          words.className = "weighed";
-          words.textContent = n.weights.map((w) => `${w.label} ${Math.round(w.p * 100)}%`).join(" · ");
-          n.weights.forEach((w, at) => {
-            const part = document.createElement("u");
-            part.className = at === 0 ? "won" : w.kind === "none" ? "none" : "";
-            part.style.flexGrow = Math.max(w.p, 0.02);
-            bar.append(part);
-          });
-          body.append(bar, words);
-        }
-        if (k === 0 && n.intent) {
-          const intent = document.createElement("span");
-          intent.className = "intent";
+        name.textContent = n.label;
+        const tip = document.createElement("span");
+        tip.textContent = n.tip;
+        li.append(badge, name, tip);
+        if (n.kind === "ask" && n.intent) {
+          const intent = document.createElement("small");
           intent.textContent = `의도 · ${n.intent}`;
-          body.append(intent);
+          li.append(intent);
         }
-        li.append(mark, body);
-        list.append(li);
-      });
+        if (i === picked) {
+          const verdict = document.createElement("u");
+          verdict.textContent = n.state === "blocked" ? "차단" : n.state === "held" ? "확인 요청" : "허용";
+          li.append(verdict);
+        }
+        const go = () => focus(i);
+        li.addEventListener("click", go);
+        li.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && go());
+        return li;
+      };
+      const arrow = (text, quote) => {
+        const li = document.createElement("li");
+        li.className = quote ? "link told" : "link";
+        const why = document.createElement("b");
+        why.textContent = text;
+        li.append(why);
+        if (quote) {
+          const said = document.createElement("span");
+          said.textContent = quote;
+          li.append(said);
+        }
+        return li;
+      };
+      // A long way keeps its first two cards and its last three, and counts the Calls between.
+      const cut = stops.length > 6 ? [2, stops.length - 3] : null;
+      let no = 0;
+      let pending = null;
+      for (const i of steps) {
+        const n = nodes[i];
+        if (n.kind === "words") {
+          pending = n.tip;
+          continue;
+        }
+        no++;
+        const hidden = cut && no > cut[0] && no <= cut[1];
+        if (hidden) {
+          n.name.dataset.step = no;
+          if (no === cut[0] + 1) {
+            const more = arrow(`호출 ${cut[1] - cut[0]}개를 거쳐`);
+            more.classList.add("more");
+            list.append(more);
+          }
+          pending = null;
+          continue;
+        }
+        if (no > 1 && !(cut && no === cut[1] + 1)) list.append(arrow(pending ? "이 결과를 읽고" : no === 2 ? "요청을 따라" : "이어서", pending));
+        pending = null;
+        list.append(card(i, no));
+      }
       guide.append(head, list);
     }
     // Which names give way when two would overlap: the lit way first, then the street's own.
@@ -677,19 +717,21 @@ function mount(container) {
     const vs = lit.map((k) => (nodes[k].x + nodes[k].z) * TURN);
     const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)];
     const zoom = whole ? 1.6 : view.toZoom;
-    const wide = (view.span * canvas.clientWidth) / Math.max(1, canvas.clientHeight) / zoom;
+    const high = Math.max(1, canvas.clientHeight);
+    const wide = (view.span * canvas.clientWidth) / high / zoom;
     const deep = (view.span * 2) / zoom;
     const u = (view.toX - view.toZ) * TURN;
     const v = (view.toX + view.toZ) * TURN;
-    // The directions card covers the map's right: the way keeps to the left of it.
-    const card = guide.hidden ? 0 : (guide.offsetWidth + 40) / Math.max(1, canvas.clientWidth);
-    if (whole || u0 < u - wide + 2.5 || u1 > u + wide * (1 - 2 * card) - 2.5 || v0 < v - deep + 5 || v1 > v + deep - 4) {
+    // The way in short lies across the top of the map: the way on the map keeps below it.
+    // What of the map's height it covers, and that as the floor's units toward the eye.
+    const over = guide.hidden ? 0 : Math.min(0.6, (guide.offsetHeight + 40) / high);
+    if (whole || u0 < u - wide + 2.5 || u1 > u + wide - 2.5 || v0 < v - deep + 2 * deep * over + 5 || v1 > v + deep - 4) {
       // Zoomed out as far as the way needs, no closer than it was (or than reads well).
-      const need = Math.max((u1 - u0 + 6) / (2 * wide * (1 - card) * zoom), (v1 - v0 + 9) / (2 * deep * zoom), 1);
+      const need = Math.max((u1 - u0 + 6) / (2 * wide * zoom), (v1 - v0 + 9) / (2 * deep * (1 - over) * zoom), 1);
       const next = Math.max(0.4, Math.min(zoom, zoom / need));
       view.toZoom = next;
-      const half = (view.span * canvas.clientWidth) / Math.max(1, canvas.clientHeight) / next;
-      const [cu, cv] = [(u0 + u1) / 2 + half * card, (v0 + v1) / 2];
+      // The middle of the way sits in the middle of what the panel leaves clear.
+      const [cu, cv] = [(u0 + u1) / 2, (v0 + v1) / 2 - ((view.span * 2) / next) * over];
       view.toX = (cu + cv) * TURN;
       view.toZ = (cv - cu) * TURN;
       wake();
