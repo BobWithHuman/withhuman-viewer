@@ -815,8 +815,7 @@ pub(super) fn reasons(trace: &Value) -> Vec<(String, String)> {
         };
         out.push((
             format!("{}.", breach_text(worst)),
-            p.map(|p| format!("확률 {}", percent(p)))
-                .unwrap_or_default(),
+            p.map(|p| format!("{:.0}%", p * 100.0)).unwrap_or_default(),
         ));
     }
     let c = &trace["check"];
@@ -826,7 +825,7 @@ pub(super) fn reasons(trace: &Value) -> Vec<(String, String)> {
             Some("run") => "실행되는 코드가 요청 밖의 일을 합니다.",
             _ => "요청 밖의 목표를 위한 호출이거나 사용자에게 반합니다.",
         };
-        out.push((what.to_owned(), format!("2차 확인 확률 {}", percent(u))));
+        out.push((what.to_owned(), format!("{:.0}%", u * 100.0)));
     } else if c["branch"] == "safeguard" {
         out.push((
             "에이전트 설정이나 훅을 바꾸려 했습니다.".into(),
@@ -839,7 +838,7 @@ pub(super) fn reasons(trace: &Value) -> Vec<(String, String)> {
     {
         out.push((
             "되돌리기 어려운 작업입니다.".into(),
-            format!("확률 {}", percent(i)),
+            format!("{:.0}%", i * 100.0),
         ));
     }
     out
@@ -855,7 +854,7 @@ pub fn Story(
     trace: Value,
     decision: String,
 ) -> Element {
-    let state = use_context::<AppState>();
+    let mut state = use_context::<AppState>();
     let (lines, command) = attempt(&payload);
     let stopped = matches!(decision.as_str(), "DENY" | "REVIEW");
     let why = reasons(&trace);
@@ -877,13 +876,13 @@ pub fn Story(
         });
     let from_call = cause.and_then(|(r, ..)| model.call_of.get(&r).copied());
     let verdict_note = match decision.as_str() {
-        "DENY" => "막았습니다",
-        "REVIEW" => "사용자 확인을 요청했습니다",
-        _ => "허용했습니다",
+        "DENY" => "2. WithHuman이 차단한 이유",
+        "REVIEW" => "2. WithHuman이 사용자 확인을 요청한 이유",
+        _ => "2. WithHuman이 허용한 이유",
     };
     rsx! {
         div { class: if stopped { "story stopped" } else { "story" },
-            h4 { "하려던 일" }
+            h4 { "1. 에이전트가 수행하려는 일" }
             if !lines.is_empty() {
                 div { class: "lines",
                     for (sign, line) in lines {
@@ -893,7 +892,7 @@ pub fn Story(
             } else if let Some(cmd) = command {
                 div { class: "lines", span { "{cmd}" } }
             }
-            h4 { if stopped { "{verdict_note}: 이유" } else { "{verdict_note}" } }
+            h4 { "{verdict_note}" }
             if why.is_empty() {
                 p { class: "muted", if stopped { "기록된 이유가 없습니다." } else { "요청한 일의 한 단계로 판단했습니다." } }
             } else {
@@ -903,16 +902,18 @@ pub fn Story(
                     }
                 }
             }
-            h4 { "시킨 것" }
+            h4 { "3. 에이전트의 행동을 발생시킨 부분" }
             match (link.as_str(), cause) {
                 ("segment", Some((result, paragraph, p))) => rsx! {
                     div { class: "cause-quote",
-                        button { class: "link", onclick: move |_| state.go_to(from_call.unwrap_or(result)),
-                            "{from_call.map(|c| node_name(&model, c)).unwrap_or_else(|| node_name(&model, result))}"
+                        button { class: "link", onclick: move |_| {
+                            state.call_modal.set(false);
+                            state.go_to(from_call.unwrap_or(result));
+                        },
+                            "{from_call.unwrap_or(result)}번 노드"
                         }
-                        " 결과"
                         if let Some(i) = paragraph { " ¶{i}" }
-                        span { class: "muted", " · 원인일 확률 {percent(p)}" }
+                        span { class: "muted", " · {p * 100.0:.0}%" }
                         Preview { key: "{result}-{paragraph:?}", seq: result, paragraph }
                     }
                 },

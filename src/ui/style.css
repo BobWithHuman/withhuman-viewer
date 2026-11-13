@@ -3394,3 +3394,32 @@ button.vz-rank:hover:not(:disabled) { background: var(--cs-row); }
 .vz-rank .fill { display: block; height: 100%; min-width: 3px; border-radius: 4px; }
 button.vz-rank:disabled { cursor: default; opacity: 1; }
 .cs-list-row.sx-value .meta { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+
+/* Match the app's charcoal panels regardless of the OS color scheme. */
+.call-verdict-dialog {
+  --bg: var(--af-field); --panel: var(--af-panel); --raised: var(--af-raise);
+  --text: var(--af-text); --muted: var(--af-mute); --line: var(--af-raise);
+  --hover: var(--af-raise); --accent: var(--af-blue);
+  --accent-soft: color-mix(in srgb, var(--af-blue) 18%, var(--af-panel));
+  --shadow: 0 20px 60px rgba(0, 0, 0, .55);
+  color-scheme: dark;
+}
+.call-verdict-dialog { width: min(860px, calc(100vw - 48px)); max-width: none; max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+.call-verdict-dialog::backdrop { background: rgba(0, 0, 0, .5); }
+.call-verdict-content { display: flex; flex-direction: column; max-height: calc(100vh - 50px); }
+.call-verdict-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border-bottom: 1px solid var(--line); }
+.call-verdict-header h2 { margin: 0; font-size: 16px; }
+.call-verdict-dialog .inspector { width: 100% !important; flex: 1 1 auto; overflow: hidden; border: 0; }
+.call-verdict-dialog .tabs { flex-wrap: wrap; }
+
+.call-verdict-header { background: var(--af-bar); }
+.call-verdict-dialog .tabs { background: var(--af-tab); }
+.call-verdict-dialog .tabs button.on { color: var(--accent); }
+.call-verdict-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.call-verdict-dialog .verdict-extra > summary { cursor: pointer; width: fit-content; padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--text); }
+.call-verdict-dialog .verdict-extra > summary:hover { background: var(--af-btn); }
+.call-verdict-dialog .verdict-extra > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.call-verdict-dialog .verdict-extra .extra-hide, .call-verdict-dialog .verdict-extra[open] .extra-show { display: none; }
+.call-verdict-dialog .verdict-extra[open] .extra-hide { display: inline; }
+.call-verdict-dialog .verdict-extra-body { margin-top: 12px; }

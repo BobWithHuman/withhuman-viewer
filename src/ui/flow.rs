@@ -775,7 +775,7 @@ fn call_row(
     c: &crate::flow::Call,
     key: String,
     picked: Option<i64>,
-    mut state: AppState,
+    state: AppState,
     inner: bool,
     times: usize,
 ) -> Element {
@@ -798,7 +798,7 @@ fn call_row(
             key: "{key}",
             class: "{cls}",
             title: "{c.arg}",
-            onclick: move |_| state.selected.set(Selection::Node(seq)),
+            onclick: move |_| state.show_call(seq),
             {icon}
             span { class: "glyph", title: "{c.glyph.name()}",
                 svg { width: "14", height: "14", view_box: "0 0 14 14", {glyph(c.glyph, 7.0, 7.0, 13.0, c.tone.color())} }
@@ -1060,7 +1060,7 @@ fn LegendPicks(
     turn: Signal<usize>,
     detail: Signal<bool>,
 ) -> Element {
-    let mut state = use_context::<AppState>();
+    let state = use_context::<AppState>();
     let mut detail = detail;
     let picked = match (state.selected)() {
         Selection::Node(seq) => Some(seq),
@@ -1080,7 +1080,7 @@ fn LegendPicks(
                             onclick: move |_| {
                                 select_turn(turn, state, &fl, p.turn);
                                 if let Some(seq) = p.seq {
-                                    state.selected.set(Selection::Node(seq));
+                                    state.show_call(seq);
                                     detail.set(true);
                                 }
                             },
@@ -1108,7 +1108,7 @@ fn LineMap(
     /// How much of the view's right side a card covers.
     covered: f64,
 ) -> Element {
-    let mut state = use_context::<AppState>();
+    let state = use_context::<AppState>();
     let mut detail = detail;
     let mut legend = legend;
     // The legend: kinds of station hidden (greyed on the line), the mark lit (the rest greyed),
@@ -1501,7 +1501,7 @@ fn LineMap(
                                             o.insert((st.turn, gi));
                                         }
                                     } else if let Some(seq) = st.seq {
-                                        state.selected.set(Selection::Node(seq));
+                                        state.show_call(seq);
                                         detail.set(true);
                                     }
                                 },

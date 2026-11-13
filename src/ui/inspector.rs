@@ -27,7 +27,7 @@ fn rule_text(rule: &str) -> Option<&'static str> {
         "intent::match" => "의도 안의 행동",
         "intent::unknown" => "의도가 기록되지 않아 판정 없음",
         "trace::unresolved" => "원인 추적 실패",
-        "trace::no_subgraph" => "추적할 SubGraph 없음",
+        "trace::no_subgraph" => "판정에 필요한 작업 흐름이 없어 원인을 추적하지 못함",
         "cause::none" => "원인 없음으로 차단 (이전 규칙)",
         "safeguard::change" => "에이전트 설정·훅 변경으로 차단",
         _ => return None,
@@ -123,7 +123,7 @@ enum Tab {
 }
 
 #[component]
-pub fn Inspector() -> Element {
+pub fn Inspector(#[props(default)] verdict_only: bool) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let state = use_context::<AppState>();
     let mut detail = use_signal(|| None::<Load<Option<NodeDetail>>>);
@@ -167,7 +167,7 @@ pub fn Inspector() -> Element {
             }
         },
         Selection::Node(seq) => {
-            rsx! { NodeView { key: "{seq}", model: model.clone(), seq, detail } }
+            rsx! { NodeView { key: "{seq}", model: model.clone(), seq, detail, verdict_only } }
         }
     };
     rsx! { aside { class: "inspector", style: "width: {width}px", {body} } }
@@ -178,6 +178,7 @@ fn NodeView(
     model: Arc<Model>,
     seq: i64,
     detail: Signal<Option<Load<Option<NodeDetail>>>>,
+    verdict_only: bool,
 ) -> Element {
     let Some(node) = model.node(seq).cloned() else {
         return rsx! { p { class: "muted", "이 노드는 그래프에 없습니다." } };
@@ -203,6 +204,31 @@ fn NodeView(
     } else {
         vec![(Tab::Paragraphs, "문단"), (Tab::Props, "속성")]
     };
+    if verdict_only {
+        return rsx! {
+            div { class: "inspector-body",
+                Verdict {
+                    model: model.clone(), seq, fields: node.props.clone(), trace: trace.clone(),
+                    payload: full_payload(&detail, &node.props),
+                }
+                if trace["deviation"]["score"].as_f64().is_some()
+                    || trace["check"].as_object().is_some_and(|c| !c.is_empty()) {
+                    details { class: "verdict-extra",
+                        summary {
+                            span { class: "extra-show", "추가 정보 보기" }
+                            span { class: "extra-hide", "추가 정보 접기" }
+                        }
+                        div { class: "verdict-extra-body",
+                            Deviation { trace: trace.clone() }
+                            if trace["check"].as_object().is_some_and(|c| !c.is_empty()) {
+                                Check { model: model.clone(), trace: trace.clone() }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
     let subgraph = model
         .subgraph_of(seq)
         .map(|n| format!("S{n}"))
@@ -230,7 +256,7 @@ fn NodeView(
                         trace: trace.clone(),
                         decision: node.decision().unwrap_or("").to_owned(),
                     }
-                    Verdict { model: model.clone(), seq, fields: node.props.clone(), trace: trace.clone() }
+                    Verdict { model: model.clone(), seq, fields: node.props.clone(), trace: trace.clone(), payload: Value::Null }
                     Deviation { trace: trace.clone() }
                 },
                 Tab::Cause => rsx! {
@@ -253,6 +279,7 @@ fn Verdict(
     seq: i64,
     fields: serde_json::Map<String, Value>,
     trace: Value,
+    payload: Value,
 ) -> Element {
     let text = |key: &str| {
         fields
@@ -266,7 +293,12 @@ fn Verdict(
     let reason = text("decision_reason");
     let error = text("trace_error");
     // The call itself: its tool and what it acts on, whole.
-    let payload = parse_json(fields.get("payload_json"));
+    let show_attempt = !payload.is_null();
+    let payload = if show_attempt {
+        payload
+    } else {
+        parse_json(fields.get("payload_json"))
+    };
     let tool = payload["tool_name"].as_str().unwrap_or("").to_owned();
     let brief = model
         .node(seq)
@@ -303,11 +335,11 @@ fn Verdict(
                 if !decision.is_empty() {
                     {decision_badge(&decision)}
                 }
-                strong { "{rule_text(&rule).unwrap_or(&rule)}" }
-                if let Some(score) = score {
+                strong { {rule_text(&rule).unwrap_or("기록된 규칙에 따른 판정")} }
+                if let Some(score) = score.filter(|_| !show_attempt) {
                     span { class: "muted", "{score}" }
                 }
-                if let Some(second) = second {
+                if let Some(second) = second.filter(|_| !show_attempt) {
                     span { class: "tag check", "{second}" }
                 }
             }
@@ -320,12 +352,15 @@ fn Verdict(
             if !error.is_empty() {
                 p { class: "error", "판정 실패: {error}" }
             }
+            if show_attempt {
+                Story { model: model.clone(), seq, payload, trace: trace.clone(), decision: decision.clone() }
+            }
             dl { class: "facts",
                 if !rule.is_empty() {
                     dt { "규칙" }
-                    dd { code { "{rule}" } }
+                    dd { {rule_text(&rule).unwrap_or("엔진의 추가 판정 규칙")} }
                 }
-                if judge_ms.is_some() || check_ms.is_some() {
+                if !show_attempt && (judge_ms.is_some() || check_ms.is_some()) {
                     dt { "Jev 시간" }
                     dd {
                         "판정 {judge_text}"
@@ -564,5 +599,33 @@ fn hidden_rules(rules: &serde_json::Value) -> String {
             .join(", "),
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+/// Native dialog provides focus trapping and restores focus when dismissed.
+#[component]
+pub fn CallModal() -> Element {
+    let mut state = use_context::<AppState>();
+    use_effect(move || {
+        document::eval("document.getElementById('call-verdict-dialog')?.showModal()");
+    });
+    rsx! {
+        dialog {
+            id: "call-verdict-dialog",
+            class: "call-verdict-dialog",
+            aria_labelledby: "call-verdict-title",
+            oncancel: move |e| {
+                e.prevent_default();
+                state.call_modal.set(false);
+            },
+            onclick: move |_| state.call_modal.set(false),
+            div { class: "call-verdict-content", onclick: move |e| e.stop_propagation(),
+                header { class: "call-verdict-header",
+                    h2 { id: "call-verdict-title", "툴 호출 판정 상세" }
+                    button { autofocus: true, aria_label: "닫기", onclick: move |_| state.call_modal.set(false), "✕" }
+                }
+                Inspector { verdict_only: true }
+            }
+        }
     }
 }
