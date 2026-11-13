@@ -597,6 +597,14 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
 /// zooms it, as a title bar does.
 #[component]
 fn TopBar() -> Element {
+    let logo = use_hook(|| {
+        use base64::Engine;
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD
+                .encode(include_bytes!("../../icons/Vienna.png"))
+        )
+    });
     let mut state = use_context::<AppState>();
     let p = (state.public)();
     let screen = (state.screen)();
@@ -645,7 +653,7 @@ fn TopBar() -> Element {
                 onclick: move |_| state.sidebar.toggle(),
                 {sidebar_icon()}
             }
-            span { class: "tb-logo", "W" }
+            img { class: "tb-logo", src: "{logo}", alt: "Vienna", draggable: "false" }
             div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                 button { class: "{seg(\"home\")}", onclick: move |_| go(Screen::Home, mode),
                     {line_icon("M4 11l8-6.5L20 11v8.5a1 1 0 0 1-1 1h-4.5V15h-5v5.5H5a1 1 0 0 1-1-1z")}

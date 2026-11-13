@@ -2190,7 +2190,7 @@ button.primary { background: var(--c-accent); border-color: var(--c-accent); }
 .tb-lights { flex: none; width: 76px; }
 .tb-icon { width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: #c8c8c8; display: grid; place-items: center; }
 .tb-icon:hover:not(:disabled) { background: rgba(255, 255, 255, .08); }
-.tb-logo { font: italic 900 21px/1 -apple-system, BlinkMacSystemFont, sans-serif; color: #f4f4f4; letter-spacing: -.04em; margin: 0 2px; }
+.tb-logo { display: block; flex: none; width: 32px; height: 32px; object-fit: contain; margin: 0 2px; }
 .tb-seg { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: #232424; }
 .tb-seg button { height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 7px; background: none;
   color: #d6d6d6; font-size: 13px; font-weight: 500; }
