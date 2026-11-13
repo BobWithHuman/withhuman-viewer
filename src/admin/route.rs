@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 
-use crate::flow::{Call, Flow, Glyph, Tone};
+use crate::flow::{Call, Flow, Tone};
 use crate::ui::{AppState, Selection};
 
 /// How many blocks stand in a row before the line turns back, and how far apart blocks and rows
@@ -40,38 +40,31 @@ fn cut(text: &str, most: usize) -> String {
     }
 }
 
-/// A Call as 기록's maps need it.
+/// A Call as the map needs it.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct Step {
-    pub seq: i64,
-    pub kind: &'static str,
-    pub tool: String,
-    pub title: String,
-    /// What it acted on, as the list beside writes it.
-    pub arg: String,
-    /// Where the words it followed were read.
-    pub via: Option<String>,
-    pub glyph: Glyph,
-    pub at: Option<i64>,
+struct Step {
+    seq: i64,
+    kind: &'static str,
+    tool: String,
+    title: String,
     /// The Call that read what told the agent to make this one.
-    pub by: Option<i64>,
-    pub blocked: bool,
-    pub held: bool,
-    pub loose: bool,
+    by: Option<i64>,
+    blocked: bool,
+    held: bool,
+    loose: bool,
 }
 
 /// A turn as the map needs it: which it is, its request and intent, and its Calls in order.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct Leg {
-    pub turn: usize,
-    pub n: usize,
-    pub req: String,
-    pub intent: Option<String>,
-    pub asked: Option<i64>,
-    pub calls: Vec<Step>,
+struct Leg {
+    turn: usize,
+    n: usize,
+    req: String,
+    intent: Option<String>,
+    calls: Vec<Step>,
 }
 
-pub(super) fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
+fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
     turns
         .iter()
         .filter_map(|&t| Some((t, flow.turns.get(t)?)))
@@ -80,7 +73,6 @@ pub(super) fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
             n: turn.n,
             req: turn.req.clone(),
             intent: turn.intent.clone(),
-            asked: turn.asked,
             calls: turn
                 .calls
                 .iter()
@@ -89,10 +81,6 @@ pub(super) fn legs(flow: &Flow, turns: &[usize]) -> Vec<Leg> {
                     kind: kind(c),
                     tool: c.tool.clone(),
                     title: c.title.clone(),
-                    arg: c.arg.clone(),
-                    via: c.via.clone(),
-                    glyph: c.glyph,
-                    at: c.at,
                     by: c.by,
                     blocked: c.blocked,
                     held: c.warn,
@@ -257,10 +245,6 @@ mod tests {
             kind: "run",
             tool: "Bash".into(),
             title: format!("call {seq}"),
-            arg: String::new(),
-            via: None,
-            glyph: Glyph::Run,
-            at: None,
             by,
             blocked,
             held: false,
@@ -278,7 +262,6 @@ mod tests {
             n: 1,
             req: "고쳐줘".into(),
             intent: None,
-            asked: None,
             calls,
         };
         let (json, at) = scene(&[leg]);

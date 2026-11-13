@@ -74,11 +74,11 @@ fn select_turn(mut turn: Signal<usize>, mut state: AppState, flow: &Flow, t: usi
     }
 }
 
-/// The session as the security team's app draws it, a flow diagram or a map of blocks seen at
-/// an angle (`admin::Record`); the developer's app keeps the route map.
+/// The session as the security team's app draws it, a map of blocks seen at an angle
+/// (`admin::RouteScene`); the developer's app keeps the route map.
 #[cfg(feature = "admin")]
 fn map_3d(flow: Arc<Flow>, turns: Vec<usize>, title: String, detail: Signal<bool>) -> Element {
-    rsx! { crate::admin::Record { flow, turns, title, detail } }
+    rsx! { crate::admin::RouteScene { flow, turns, title, detail } }
 }
 #[cfg(not(feature = "admin"))]
 fn map_3d(_: Arc<Flow>, _: Vec<usize>, _: String, _: Signal<bool>) -> Element {
