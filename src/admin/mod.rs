@@ -15,6 +15,7 @@
 mod audit;
 mod charts;
 mod detections;
+mod flowmap;
 mod hub;
 mod inventory;
 mod main_page;
@@ -29,12 +30,12 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 pub use audit::Audit;
+pub use flowmap::Record;
 pub use hub::Hub;
 pub use inventory::InventoryPage;
 pub use main_page::Main;
 pub use mcp::Mcp;
 pub use policy::Policy;
-pub use route::RouteScene;
 pub use secrets::Secrets;
 
 /// The main page's 3D scene: three.js and `web/hub-scene/scene.js`, bundled (`npm run build`

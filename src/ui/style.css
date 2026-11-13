@@ -3565,3 +3565,50 @@ button.vz-rank:disabled { cursor: default; opacity: 1; }
 /* The route map's own zoom, legend toggle and mark sit out while the 3D map is up: it has its own. */
 .fx-main:has(.rt-stage) .fx-brand { display: none; }
 .routes.fx:has(.rt-stage) .fx-tools button:is([title="확대"], [title="축소"], [title="노선 전체를 한 화면에"], [title^="범례"]) { display: none; }
+
+/* 기록 as a flow diagram (admin/flowmap.rs): cards named at their left, chips for what they
+   carry, blue for the request's line, pink for what a tool result pulled in, black for the
+   engine's verdict, on a light ground that scrolls. */
+.fd-stage { position: absolute; inset: 0; overflow: auto; background: #f7f7f7; color: #1f1f1f; }
+.fd-canvas { position: relative; min-width: 100%; min-height: 100%; }
+.fd-wires, .fd-ports { position: absolute; left: 0; top: 0; pointer-events: none; }
+.fd-ports { z-index: 2; }
+.fd-wires path { fill: none; stroke-width: 2; stroke-linecap: round; }
+.fd-wires path.hot { stroke-width: 3.4; }
+.fd-wires .asked, .fd-ports .asked { stroke: #4a82d8; }
+.fd-wires .result, .fd-ports .result { stroke: #e58ae8; }
+.fd-wires .plain { stroke: #3c3c3c; stroke-width: 2.2; }
+.fd-wires .found { fill: #fff; stroke: #dcdcdc; stroke-width: 1; }
+.fd-ports circle { fill: #fff; stroke-width: 2; }
+.fd-ports rect.plain { fill: #3c3c3c; }
+.fd-name { position: absolute; left: 0; display: flex; flex-direction: column; gap: 1px; text-align: right; pointer-events: none; }
+.fd-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; padding-left: 12px; }
+.fd-name small { font-size: 9.5px; color: #6f6f6f; font-variant-numeric: tabular-nums; }
+.fd-stage .fd-card { position: absolute; z-index: 1; display: flex; flex-direction: column; padding: 0; border: 1px solid #dcdcdc; border-radius: 3px; background: #fff;
+  overflow: hidden; text-align: left; color: #1f1f1f; cursor: pointer; }
+.fd-stage .fd-card:hover:not(:disabled) { background: #fff; border-color: #a9a9a9; }
+.fd-stage .fd-card.ask { cursor: default; }
+.fd-stage .fd-card.on, .fd-stage .fd-card.on:hover:not(:disabled) { border-color: #1f1f1f; box-shadow: 0 0 0 1.5px #1f1f1f; }
+.fd-card .row { flex: none; height: 44px; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+.fd-card .ico { flex: none; width: 32px; display: grid; place-items: center; color: #4a4a4a; border-right: 1px solid #e3e3e3; height: 26px; }
+.chip { flex: none; height: 28px; padding: 0 11px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 28px; text-align: center;
+  border-radius: 2px; background: #efefef; color: #2c2c2c; }
+.chip.asked { background: #c9daf4; } .chip.result { background: #f6d6f7; }
+.chip.loose { background: #fff; box-shadow: inset 0 0 0 1px #c9c9c9; color: #6f6f6f; }
+.fd-card .foot { flex: none; height: 32px; display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; background: #3c3c3c; font-size: 11.5px; color: #9a9a9a; }
+.fd-card .foot span { text-align: center; }
+.fd-card .foot span + span { box-shadow: -1px 0 0 #5c5c5c; }
+.fd-card .foot span.on { color: #fff; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1.5px; }
+.fd-found { position: absolute; z-index: 1; height: 40px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.fd-keys { position: sticky; left: 0; bottom: 0; z-index: 3; display: flex; gap: 18px; width: max-content; padding: 10px 16px; font-size: 11.5px; color: #4a4a4a;
+  background: rgba(247, 247, 247, .92); }
+.fd-keys span { display: inline-flex; align-items: center; gap: 7px; }
+.fd-keys i { width: 18px; height: 3px; border-radius: 2px; }
+.fd-keys i.asked { background: #4a82d8; } .fd-keys i.result { background: #e58ae8; } .fd-keys i.plain { background: #3c3c3c; }
+.fd-switch { position: absolute; right: 22px; top: 18px; z-index: 4; display: flex; border: 1px solid #c9c9c9; border-radius: 3px; background: #fff; overflow: hidden; }
+.fx-stage .fd-switch button { height: 28px; padding: 0 12px; border: 0; border-radius: 0; background: #fff; font-size: 12px; color: #6f6f6f; }
+.fx-stage .fd-switch button + button { border-left: 1px solid #c9c9c9; }
+.fx-stage .fd-switch button:hover:not(:disabled) { background: #f2f2f2; }
+.fx-stage .fd-switch button.on, .fx-stage .fd-switch button.on:hover:not(:disabled) { background: #3c3c3c; color: #fff; }
+.fx-main:has(.fd-stage) .fx-brand { display: none; }
+.routes.fx:has(.fd-stage) .fx-tools button:is([title="확대"], [title="축소"], [title="노선 전체를 한 화면에"], [title^="범례"]) { display: none; }
