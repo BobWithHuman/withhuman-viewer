@@ -635,7 +635,7 @@ pub fn CallModal() -> Element {
     let previous_name = previous.map_or("출발역", |s| s.title.as_str());
     let next_name = next.map_or("종착역", |s| s.title.as_str());
     let name = station.map_or("기록", |s| s.title.as_str());
-    let color = station.map_or("var(--af-blue)", |s| s.tone.color());
+    let color = crate::flow::GREEN;
     let number = current.map_or(String::new(), |i| format!("{:02}", i + 1));
     let progress = current.map_or(String::new(), |i| format!("{} / {}", i + 1, stops.len()));
     rsx! {
@@ -651,15 +651,8 @@ pub fn CallModal() -> Element {
             div { class: "call-verdict-content", onclick: move |e| e.stop_propagation(),
                 header { class: "station-sign", style: "--station-color: {color}",
                     div { class: "station-sign-top",
-                        span { "WITHHUMAN · 기록 노선" }
+                        span { "WITHHUMAN · 기록 노선 · {progress}" }
                         button { class: "station-close", autofocus: true, aria_label: "닫기", onclick: move |_| state.call_modal.set(false), "✕" }
-                    }
-                    div { class: "station-current",
-                        span { class: "station-number", "{number}" }
-                        div {
-                            span { class: "station-caption", "현재 역 · 툴 호출 판정" }
-                            h2 { id: "call-verdict-title", "{name}" }
-                        }
                     }
                     nav { class: "station-navigation", aria_label: "기록 노선 역 이동",
                         button { disabled: previous_seq.is_none(),
@@ -667,7 +660,13 @@ pub fn CallModal() -> Element {
                             span { class: "station-arrow", "←" }
                             span { class: "station-neighbor", small { "이전 역" } strong { "{previous_name}" } }
                         }
-                        span { class: "station-progress", "{progress}" }
+                    div { class: "station-current",
+                        span { class: "station-number", "{number}" }
+                        div {
+                            span { class: "station-caption", "현재 역 · 툴 호출 판정" }
+                            h2 { id: "call-verdict-title", "{name}" }
+                        }
+                    }
                         button { disabled: next_seq.is_none(),
                             onclick: move |_| { if let Some(seq) = next_seq { state.go_to(seq); } },
                             span { class: "station-neighbor", small { "다음 역" } strong { "{next_name}" } }
