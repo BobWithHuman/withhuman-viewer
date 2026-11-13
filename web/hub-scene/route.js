@@ -2,7 +2,11 @@
 // to the request. One street runs through the session from left to right; each turn's request,
 // the agent's intent and its answer stand on it. A Call the engine traced to the request stands
 // off the street at the end of a lane; a Call it traced to an earlier Call stands on from that
-// one, the road carrying on. Every such link is drawn as a thin green line down its road. A
+// one, the road carrying on. So there are two kinds of line. A thin grey one runs from each
+// Call to the next in the order made, whatever told it. A coloured one runs down each road,
+// the engine's link from a Call to what it was traced to: green, or red into a Call the engine
+// stopped and amber into one it held. Where the two part, the agent did other things between
+// a Call and the one that followed from it. A
 // block picked is drawn round in black and its whole way from the request is lit in a thick
 // green band, the words of a tool result that told a Call standing on the road before it; the
 // same way is written out as a line of names at the foot. Calls the engine stopped stand on a
@@ -20,6 +24,10 @@ const KERB = 0xd3d7dc;
 const MARK = 0xbcc2c9;
 const GREEN = 0x3fc47c;
 const LINK = 0x86dcab;
+const ORDER = 0xa3a9b0;
+// The engine's link into a Call it stopped or held, thin and lit.
+const LINKS = { blocked: 0xee9087, held: 0xe9bd5a };
+const WAYS = { blocked: 0xe2574b, held: 0xdb9c1c };
 const GREEN_LOT = 0xa9ebc4;
 const LOTS = { blocked: 0xf6aaa3, held: 0xf7d488 };
 // The eye looks down a diagonal of the floor: one step to the right on the page is this much
@@ -336,7 +344,7 @@ function mount(container) {
     flow = [];
     for (let k = lit.length - 1; k > 0; k--) {
       const pts = trace(way(nodes[lit[k]], nodes[lit[k - 1]]));
-      const band = ribbon(pts, 0.24, 0.016, GREEN, 5);
+      const band = ribbon(pts, 0.24, 0.016, WAYS[nodes[picked].state] ?? GREEN, 5);
       if (band) glow.add(band);
       flow.push(...pts);
     }
@@ -354,6 +362,7 @@ function mount(container) {
     // The same way written out, from the request to the Call picked.
     trail.replaceChildren();
     trail.hidden = lit.length < 2;
+    trail.className = `rt-trail ${nodes[picked]?.state ?? ""}`;
     const steps = [...lit].reverse();
     steps.forEach((i, k) => {
       const n = nodes[i];
@@ -380,7 +389,7 @@ function mount(container) {
     // Which names give way when two would overlap: the lit way first, then the street's own.
     const rank = (i) => (on.has(i) ? 0 : ON_STREET.has(nodes[i].kind) ? 1 : nodes[i].state ? 2 : 3);
     order = nodes.map((_, i) => i).sort((a, b) => rank(a) - rank(b) || a - b);
-    ways.forEach((w) => (w.goal = lit.length ? 0.7 : 1));
+    ways.forEach((w) => (w.goal = (lit.length ? 0.7 : 1) * (w.most ?? 1)));
     stale = true;
     wake();
   }
@@ -447,7 +456,7 @@ function mount(container) {
           const lane = trace([from ? [from.x, from.z] : [n.jx, n.jz], [n.x, n.z]]);
           add(ribbon(lane, 0.44, 0.002, KERB, 0));
           add(ribbon(lane, 0.34, 0.004, STREET, 1));
-          add(ribbon(lane, 0.09, 0.0055, LINK, 2));
+          add(ribbon(lane, 0.09, 0.0055, LINKS[n.state] ?? LINK, 2));
         }
         if (!n.state) {
           const kerb = lot(street, size + 0.1, KERB, 0.006, 2);
@@ -466,6 +475,18 @@ function mount(container) {
       if (n.state) name.classList.add(n.state);
       labels.append(name);
       return { ...n, ...b, i, name, size, wide: name.offsetWidth, at: n.ghost ? 0 : 1, goal: n.ghost ? 0 : 1, shown: true };
+    });
+    // The order made: a thin grey line from each block of a turn to the next, where the
+    // street or the engine's own link does not already run between the two.
+    const made = nodes.filter((n) => !n.ghost);
+    made.forEach((a, k) => {
+      const b = made[k + 1];
+      if (!b || b.turn !== a.turn || b.up === a.i) return;
+      if (ON_STREET.has(a.kind) && ON_STREET.has(b.kind)) return;
+      const line = ribbon(trace([[a.x, a.z], [b.x, b.z]]), 0.05, 0.0105, ORDER, 4);
+      if (!line) return;
+      root.add(line);
+      ways.push({ way: line, at: 0.75, goal: 0.75, most: 0.75 });
     });
     fit();
     view.x = view.toX;

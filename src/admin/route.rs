@@ -595,11 +595,12 @@ pub fn RouteScene(
             div { id: "route-scene" }
             header { class: "rt-head",
                 h2 { "{title}" }
-                p { "요청 {turns.len()}개와 호출 {calls}개입니다. 요청을 따른 호출은 큰길에서 갈라지고, 앞선 호출에서 이어진 호출은 그 뒤로 길이 이어집니다. 호출을 누르면 요청에서 그 호출까지 엔진이 고른 길이 굵게 켜집니다." }
+                p { "요청 {turns.len()}개와 호출 {calls}개입니다. 회색 선은 일어난 순서이고, 색 선은 엔진이 그 호출을 어디서 이어진 것으로 봤는지입니다. 호출을 누르면 요청에서 그 호출까지 엔진이 고른 길만 굵게 켜집니다." }
             }
             div { class: "rt-keys",
-                span { i { class: "way" } "고른 호출까지의 길" }
-                span { i { class: "link" } "엔진이 이은 연결" }
+                span { i { class: "order" } "일어난 순서" }
+                span { i { class: "link" } "엔진이 이은 길" }
+                span { i { class: "stop" } "차단된 호출로 이은 길" }
                 span { i { class: "blocked" } "차단" }
                 span { i { class: "held" } "확인 요청" }
             }
