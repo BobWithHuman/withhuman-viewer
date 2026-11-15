@@ -51,7 +51,11 @@ fn main() {
             .with_title_hidden(true)
             .with_fullsize_content_view(true)
     };
-    let head = format!("<meta charset=\"utf-8\"><style>{}</style>", ui::CSS);
+    let head = format!(
+        "<meta charset=\"utf-8\"><style>{}</style>{}",
+        ui::CSS,
+        ui::head_extra()
+    );
     let config = Config::new()
         .with_window(window)
         .with_menu(menu::build())
