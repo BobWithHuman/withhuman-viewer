@@ -1,0 +1,42 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+/* Tokens measured from the reference: neutral greys, a teal for steps, yellow for what was caught. */
+@theme {
+  --font-sans: "Pretendard Variable", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --color-bg: #282828;
+  --color-panel: #242424;
+  --color-sunk: #1f1f1f;
+  --color-box: #343434;
+  --color-chip: #3c3c3c;
+  --color-edge: #bcbcbc;
+  --color-teal: #58c0a4;
+  --color-catch: #f8d448;
+  --color-block: #ef6b5e;
+  --color-hold: #f2a93b;
+  --color-act: #548cd0;
+  --color-pick: #6488b4;
+  --color-fg: #f2f2f2;
+  --color-mut: #a3a3a3;
+  --color-dim: #737373;
+}
+
+html, body, #root { height: 100%; overflow: hidden; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+button { cursor: pointer; }
+.scroll { scrollbar-width: thin; scrollbar-color: #4a4a4a transparent; }
+
+/* React Flow on the dark canvas */
+.react-flow { background: transparent; }
+.react-flow__edge-path { stroke-linecap: round; }
+.react-flow__handle { opacity: 0; pointer-events: none; }
+.react-flow__attribution { display: none; }

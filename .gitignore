@@ -1,2 +1,6 @@
 /target/
 /dist/
+/web/record/node_modules/
+/web/record/dist/
+/web/console/node_modules/
+/web/console/dist/

@@ -4,8 +4,12 @@
 mod compare;
 mod flow;
 pub(crate) mod home;
+mod icons;
 mod inspector;
 mod metro;
+// 기록's graph for the security team, drawn by the page in `web/record`.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+mod record;
 mod settings;
 mod setup;
 // The session list, kept while sessions are picked in the route list's region.
@@ -28,6 +32,44 @@ use crate::settings::Public;
 
 pub const CSS: &str = include_str!("style.css");
 
+/// What the app's head needs beyond the styles: 기록's page for the security team.
+pub fn head_extra() -> String {
+    #[cfg(feature = "admin")]
+    {
+        format!(
+            "{}{}{}",
+            font_script(),
+            record::head_script(),
+            crate::admin::web::head_script()
+        )
+    }
+    #[cfg(not(feature = "admin"))]
+    {
+        font_script()
+    }
+}
+
+/// Pretendard, the app's typeface (SIL Open Font Licence), carried in the app so every machine
+/// shows the same letters.
+const FONT: &[u8] = include_bytes!("PretendardVariable.woff2");
+
+/// Loads the typeface once as a blob the app's pages and the frames inside them all read:
+/// `__whFontCss` is the `@font-face` rule, put in the app's head here and in each frame as it
+/// loads (`__whFontInto`).
+fn font_script() -> String {
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode(FONT);
+    format!(
+        "<script>(function () {{\n\
+           const bytes = Uint8Array.from(atob('{data}'), (c) => c.charCodeAt(0));\n\
+           const url = URL.createObjectURL(new Blob([bytes], {{ type: 'font/woff2' }}));\n\
+           window.__whFontCss = \"@font-face {{ font-family: 'Pretendard Variable'; font-weight: 45 920; font-style: normal; font-display: block; src: url('\" + url + \"') format('woff2-variations'); }}\";\n\
+           window.__whFontInto = function (doc) {{ const s = doc.createElement('style'); s.textContent = window.__whFontCss; doc.head.appendChild(s); }};\n\
+           window.__whFontInto(document);\n\
+         }})();</script>"
+    )
+}
+
 /// The main page: the developer's sessions worth a look, or the security team's overview of
 /// every machine.
 #[cfg(feature = "admin")]
@@ -48,8 +90,6 @@ fn first_screen() -> Screen {
         Ok("work") => Screen::Work,
         Ok("a") => Screen::FeatureA,
         Ok("b") => Screen::FeatureB,
-        #[cfg(feature = "admin")]
-        Ok("mcp") => Screen::Mcp,
         #[cfg(feature = "admin")]
         Ok("secrets") => Screen::Secrets,
         #[cfg(feature = "admin")]
@@ -90,9 +130,8 @@ fn FeaturePage(second: bool) -> Element {
 #[component]
 fn ProductPage(screen: Screen) -> Element {
     match screen {
-        Screen::Secrets => rsx! { crate::admin::Secrets {} },
         Screen::Inventory => rsx! { crate::admin::InventoryPage {} },
-        _ => rsx! { crate::admin::Mcp {} },
+        _ => rsx! { crate::admin::Secrets {} },
     }
 }
 #[cfg(not(feature = "admin"))]
@@ -149,9 +188,7 @@ pub enum Screen {
     /// Two features to come, each a screen of its own in the top bar for now.
     FeatureA,
     FeatureB,
-    /// The security team's other products, opened from the rail: MCP 사용, 민감 정보, 인벤토리.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    Mcp,
+    /// The security team's other products, opened from the rail: 민감 정보, 인벤토리.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     Secrets,
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
@@ -161,7 +198,7 @@ pub enum Screen {
 impl Screen {
     /// One of the rail's products other than 이상 행위 탐지.
     pub fn is_product(self) -> bool {
-        matches!(self, Screen::Mcp | Screen::Secrets | Screen::Inventory)
+        matches!(self, Screen::Secrets | Screen::Inventory)
     }
 }
 
@@ -313,7 +350,7 @@ pub fn App() -> Element {
                 }
             };
         }
-        Screen::FeatureA | Screen::FeatureB | Screen::Mcp | Screen::Secrets | Screen::Inventory => {
+        Screen::FeatureA | Screen::FeatureB | Screen::Secrets | Screen::Inventory => {
             let screen = (state.screen)();
             return rsx! {
                 div { class: "app",
@@ -351,7 +388,10 @@ pub fn App() -> Element {
             if (state.mode)() == Mode::Compare {
                 compare::Compare {}
             }
-            div { class: "columns", hidden: (state.mode)() == Mode::Compare,
+            if cfg!(feature = "admin") && (state.mode)() != Mode::Compare {
+                record::RecordGraph {}
+            }
+            div { class: "columns", hidden: (state.mode)() == Mode::Compare || cfg!(feature = "admin"),
                 main { class: "stage",
                     div { class: "canvas-wrap",
                         flow::FlowMap {}
@@ -640,19 +680,19 @@ fn TopBar() -> Element {
             span { class: "tb-logo", "W" }
             div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                 button { class: "{seg(\"home\")}", onclick: move |_| go(Screen::Home, mode),
-                    {line_icon("M4 11l8-6.5L20 11v8.5a1 1 0 0 1-1 1h-4.5V15h-5v5.5H5a1 1 0 0 1-1-1z")}
+                    {line_icon(icons::HOUSE)}
                     "{HOME_LABEL}"
                 }
                 button { class: "{seg(\"graph\")}", onclick: move |_| go(Screen::Work, Mode::Graph),
-                    {line_icon("M6 20V11a3 3 0 0 1 3-3h9M14 4l4 4-4 4")}
+                    {line_icon(icons::ROUTE)}
                     "{SCREEN_LABELS.0}"
                 }
                 button { class: "{seg(\"a\")}", onclick: move |_| go(Screen::FeatureA, Mode::Graph),
-                    {line_icon("M4 4.5h7v7H4zM13 4.5h7v7h-7zM4 13.5h7v7H4zM13 13.5h7v7h-7z")}
+                    {line_icon(if cfg!(feature = "admin") { icons::CLIPBOARD_CHECK } else { icons::LAYOUT_GRID })}
                     "{SCREEN_LABELS.1}"
                 }
                 button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
-                    {line_icon("M12 3.5l2.4 5.3 5.6.6-4.2 3.8 1.2 5.6L12 16l-5 2.8 1.2-5.6L4 9.4l5.6-.6z")}
+                    {line_icon(if cfg!(feature = "admin") { icons::SCROLL_TEXT } else { icons::STAR })}
                     "{SCREEN_LABELS.2}"
                 }
             }
@@ -769,29 +809,23 @@ fn Rail() -> Element {
                 class: if on_detect { "product on" } else { "product" },
                 title: "이상 행위 탐지 · 메인 · 기록 · 감사 · 정책",
                 onclick: move |_| if !on_detect { state.screen.set(Screen::Home) },
-                {icon("M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6zM9 12l2.2 2.2L15.5 10")}
-            }
-            button {
-                class: on(Screen::Mcp),
-                title: "MCP 사용 현황",
-                onclick: move |_| state.screen.set(Screen::Mcp),
-                {icon("M9 3.5v4M15 3.5v4M6.5 7.5h11v3.5a5.5 5.5 0 0 1-11 0zM12 16.5v4")}
+                {icon(icons::SHIELD_CHECK)}
             }
             button {
                 class: on(Screen::Secrets),
                 title: "민감 정보: 비밀값·개인정보의 흐름",
                 onclick: move |_| state.screen.set(Screen::Secrets),
-                {icon("M7 10.5V8a5 5 0 0 1 10 0v2.5M5.5 10.5h13v9.5h-13zM12 14.5v2")}
+                {icon(icons::LOCK_KEYHOLE)}
             }
             button {
                 class: on(Screen::Inventory),
-                title: "인벤토리: 기기 · 사용자 · 세션, 키 발급과 회수",
+                title: "인벤토리: 기기 · 사용자 · 세션 · MCP, 키 발급과 회수",
                 onclick: move |_| state.screen.set(Screen::Inventory),
-                {icon("M4 6.5h16M4 12h16M4 17.5h16M7 4.5v4M7 10v4M7 15.5v4")}
+                {icon(icons::MONITOR_SMARTPHONE)}
             }
             i { class: "sep" }
             button { title: "다시 읽기", onclick: move |_| state.reload += 1,
-                {icon("M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4")}
+                {icon(icons::REFRESH_CW)}
             }
             button {
                 title: "화면 채우기",
@@ -799,17 +833,17 @@ fn Rail() -> Element {
                     let window = dioxus::desktop::window();
                     window.set_maximized(!window.is_maximized());
                 },
-                {icon("M4.5 9V4.5H9M15 4.5h4.5V9M19.5 15v4.5H15M9 19.5H4.5V15")}
+                {icon(icons::MAXIMIZE)}
             }
             span { class: "fill" }
             button {
                 class: if demo { "demo" } else { "" },
                 title: if demo { "데모 데이터를 보는 중: 엔진 데이터로 바꾸기" } else { "엔진 데이터를 보는 중: 데모 데이터로 바꾸기" },
                 onclick: move |_| state.toggle_demo(&backend),
-                {icon("M5 6c0-1.4 3.1-2.6 7-2.6s7 1.2 7 2.6-3.1 2.6-7 2.6S5 7.4 5 6zM5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6")}
+                {icon(icons::DATABASE)}
             }
             button { title: "연결 설정", onclick: move |_| state.settings_open.set(true),
-                {icon("M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8")}
+                {icon(icons::SETTINGS)}
             }
         }
     }
@@ -819,8 +853,7 @@ fn Rail() -> Element {
 fn sidebar_icon() -> Element {
     rsx! {
         svg { width: "18", height: "18", view_box: "0 0 24 24",
-            rect { x: "3", y: "5", width: "18", height: "14", rx: "3", fill: "none", stroke: "currentColor", stroke_width: "1.7" }
-            path { d: "M9 5v14M5.5 8.5h1.5M5.5 11h1.5", fill: "none", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round" }
+            path { d: icons::PANEL_LEFT, fill: "none", stroke: "currentColor", stroke_width: "1.7", stroke_linecap: "round", stroke_linejoin: "round" }
         }
     }
 }
