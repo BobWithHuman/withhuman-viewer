@@ -5,14 +5,14 @@
 // pressed opens its detail. A machine is marked when the EDR knows it; the machines the EDR lists
 // that have no hooks come last.
 
-import { BadgeCheck, BadgeX, Laptop, OctagonX, ShieldCheck, ShieldOff, Zap } from "lucide-react";
+import { BadgeCheck, BadgeX, Laptop, OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Empty, ServiceLogo, ago } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark } from "./marks";
 import { isOn, type Server } from "./mcp/types";
-import { EDR_STATUS, ENGINE, PERM, STATE, agentLabel, type EdrOnly, type Machine, type Shadow, type View } from "./model";
+import { EDR_STATUS, ENGINE, STATE, agentLabel, type EdrOnly, type Machine, type Shadow, type View } from "./model";
 
 /** A row: a machine the engine knows, or a place shadow AI was found on that it does not. */
 type Row = { key: string; name: string; machine?: Machine; shadow: Shadow[]; edr?: EdrOnly };
@@ -106,7 +106,6 @@ export function Fleet({ view, machines, servers, picked, onDevice, onServer }: {
                   {m?.edr && tip(<BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />, <>EDR 확인 · {EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"} · 에이전트 {m.edr.id}</>)}
                   {m && !m.edr && view.edrKnown && m.state !== "unregistered" && tip(<BadgeX className="size-3.5 text-review" strokeWidth={2} />, "EDR에 없는 기기")}
                   {r.edr && <span className="rounded bg-review/15 px-1.5 text-[11px] leading-[18px] font-medium text-review">훅 없음</span>}
-                  {m?.permission_mode === "bypassPermissions" && tip(<Zap className="size-3.5 text-deny" strokeWidth={2} />, PERM.bypassPermissions.label)}
                   {m?.engine_mode && ENGINE[m.engine_mode] && (() => {
                     const e = ENGINE[m.engine_mode!], Icon = e.icon;
                     return tip(<Icon className="size-3.5" strokeWidth={1.9} style={{ color: e.color }} />, `엔진 ${e.label}`);

@@ -135,20 +135,39 @@ pub(super) fn page(
     page
 }
 
-/// Each session's Calls: how many, how many held for the user and how many blocked, by session.
+/// Each session's Calls: how many, how many held for the user and how many blocked, and the
+/// engine's mode (`enforce`, `shadow` or `record`) at its latest Call that had one, by session.
 pub(super) fn session_calls(facts: &[CallFact]) -> Value {
-    let mut by: BTreeMap<&str, [u32; 3]> = BTreeMap::new();
+    #[derive(Default)]
+    struct Of<'a> {
+        n: [u32; 3],
+        mode: Option<(i64, &'a str)>,
+    }
+    let mut by: BTreeMap<&str, Of> = BTreeMap::new();
     for f in facts {
-        let n = by.entry(f.session.as_str()).or_default();
-        n[0] += 1;
+        let of = by.entry(f.session.as_str()).or_default();
+        of.n[0] += 1;
         match f.decision.as_deref() {
-            Some("REVIEW") => n[1] += 1,
-            Some("DENY") => n[2] += 1,
+            Some("REVIEW") => of.n[1] += 1,
+            Some("DENY") => of.n[2] += 1,
             _ => {}
+        }
+        if let Some(mode) = f.mode.as_deref() {
+            let at = f.at.unwrap_or(i64::MIN);
+            if of.mode.is_none_or(|(latest, _)| at >= latest) {
+                of.mode = Some((at, mode));
+            }
         }
     }
     by.into_iter()
-        .map(|(session, n)| (session.to_owned(), json!(n)))
+        .map(|(session, of)| {
+            let [n, review, deny] = of.n;
+            let mode = of.mode.map(|(_, m)| m);
+            (
+                session.to_owned(),
+                json!({ "n": n, "review": review, "deny": deny, "mode": mode }),
+            )
+        })
         .collect::<serde_json::Map<_, _>>()
         .into()
 }
@@ -306,22 +325,30 @@ mod tests {
     }
 
     #[test]
-    fn a_session_s_calls_are_counted_with_those_held_and_blocked() {
-        let call = |session: &str, decision: Option<&str>| CallFact {
+    fn a_session_s_calls_are_counted_and_its_latest_engine_mode_kept() {
+        let call = |session: &str, at: i64, decision: Option<&str>, mode: Option<&str>| CallFact {
             session: session.into(),
+            at: Some(at),
             decision: decision.map(str::to_owned),
+            mode: mode.map(str::to_owned),
             ..CallFact::default()
         };
         let facts = [
-            call("s1", Some("ALLOW")),
-            call("s1", Some("DENY")),
-            call("s1", Some("REVIEW")),
-            call("s1", None),
-            call("s2", Some("ALLOW")),
+            call("s1", 1, Some("ALLOW"), Some("shadow")),
+            call("s1", 3, Some("DENY"), Some("enforce")),
+            call("s1", 2, Some("REVIEW"), Some("shadow")),
+            call("s1", 4, None, None),
+            call("s2", 1, Some("ALLOW"), None),
         ];
         let calls = session_calls(&facts);
-        assert_eq!(calls["s1"], json!([4, 1, 1]));
-        assert_eq!(calls["s2"], json!([1, 0, 0]));
+        assert_eq!(
+            calls["s1"],
+            json!({"n": 4, "review": 1, "deny": 1, "mode": "enforce"})
+        );
+        assert_eq!(
+            calls["s2"],
+            json!({"n": 1, "review": 0, "deny": 0, "mode": null})
+        );
     }
 
     #[test]

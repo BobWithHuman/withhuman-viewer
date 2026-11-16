@@ -110,7 +110,8 @@ export function demo(now = Date.now()): Data {
     // Each session's calls, a few of them held or blocked, more where agents run unasked.
     session_calls: Object.fromEntries(sessions.map((r) => {
       const n = 3 + Math.floor(rnd() * 60), loose = r.permission_mode === "bypassPermissions";
-      return [r.id, [n, Math.floor(n * rnd() * (loose ? 0.15 : 0.06)), Math.floor(n * rnd() * (loose ? 0.08 : 0.03))]];
+      const mode = devices.find((d) => d.id === r.device)?.engine_mode ?? "record";
+      return [r.id, { n, review: Math.floor(n * rnd() * (loose ? 0.15 : 0.06)), deny: Math.floor(n * rnd() * (loose ? 0.08 : 0.03)), mode }];
     })),
   };
 }

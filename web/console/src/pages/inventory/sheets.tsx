@@ -8,9 +8,9 @@ import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Legend, ServiceLogo, SplitBar, Warn, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
-import { AgentMark, Chip, Dash, EngineBadge, PermBadge, StateBadge } from "./marks";
+import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./marks";
 import { isOn } from "./mcp/types";
-import { EDR_STATUS, PERM, PERM_KEYS, WHY, agentLabel, type Machine, type View } from "./model";
+import { EDR_STATUS, ENGINE, ENGINE_KEYS, WHY, agentLabel, type Machine, type View } from "./model";
 
 export function Section({ title, count, aside, children }: { title: string; count?: number; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -58,7 +58,7 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
   const shadow = view.shadow.filter((a) => a.device === m.id && a.project);
   const seen = view.shadow.filter((a) => a.device === m.id && !a.project);
   const runs = view.sessions.filter((r) => r.device === m.id);
-  const modes = PERM_KEYS.map((k) => ({ key: k, label: PERM[k].label, color: PERM[k].color, value: runs.filter((r) => r.permission_mode === k).length }));
+  const modes = ENGINE_KEYS.map((k) => ({ key: k, label: ENGINE[k].label, color: ENGINE[k].color, value: runs.filter((r) => view.sessionCalls[r.id]?.mode === k).length }));
   return (
     <>
       <SheetHeader className="gap-2 border-b p-5 pr-12">
@@ -72,7 +72,6 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px]">
           <StateBadge state={m.state} />
           <EngineBadge mode={m.engine_mode} />
-          {m.permission_mode && <PermBadge mode={m.permission_mode} />}
           {m.shadow > 0 && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><ShieldOff />섀도 AI {m.shadow}</Badge>}
           {m.stopped && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><OctagonX />멈춤{m.stopped.denied ? ` · 거부 ${m.stopped.denied}` : ""}</Badge>}
           {m.state !== "unregistered" && (m.stopped
@@ -150,7 +149,7 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
           </Section>
         )}
 
-        <Section title="권한 모드" count={runs.length}>
+        <Section title="엔진 모드" count={runs.length}>
           {runs.length === 0 ? <span className="px-2.5 text-[12.5px] text-muted-foreground">없음</span> : (
             <div className="flex flex-col gap-2 px-0.5">
               <SplitBar parts={modes} />

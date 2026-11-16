@@ -12,7 +12,7 @@ import { Empty, ServiceLogo, ago } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark } from "./marks";
 import { isOn } from "./mcp/types";
-import { ENGINE, PERM, PERM_KEYS, STATE, agentLabel, type Machine, type View } from "./model";
+import { ENGINE, ENGINE_KEYS, STATE, agentLabel, type Machine, type View } from "./model";
 
 
 /** One slot: what it holds, its name under it, and a count or a mark in its corner. */
@@ -109,7 +109,7 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
 export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
   view: View; id: string | null; onPick: (id: string) => void;
   onDevice: (id: string) => void; onServer: (name: string) => void;
-  /** Lists the machine's sessions, those let run one way when a mode is named. */
+  /** Lists the machine's sessions, those the engine ran in one mode when a mode is named. */
   onSessions: (id: string, mode?: string) => void;
 }) {
   const m = id ? view.machines.find((x) => x.id === id) : undefined;
@@ -123,7 +123,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
     .sort((a, b) => b.calls - a.calls);
   const guarded = m.agent && m.state !== "unregistered" ? [m.agent] : [];
   const wild = [...new Set(shadow.map((a) => a.agent))];
-  const modes = PERM_KEYS.map((k) => ({ k, n: sessions.filter((r) => r.permission_mode === k).length })).filter((x) => x.n);
+  const modes = ENGINE_KEYS.map((k) => ({ k, n: sessions.filter((r) => view.sessionCalls[r.id]?.mode === k).length })).filter((x) => x.n);
   const e = m.engine_mode ? ENGINE[m.engine_mode] : undefined;
 
   return (
@@ -165,9 +165,9 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
         </Shelf>
         <Shelf title="세션" count={sessions.length} row={6}>
           {modes.map(({ k, n }) => (
-            <Slot key={k} name={PERM[k].label} onClick={() => onSessions(m.id, k)} corner={n.toLocaleString()} tone={k === "bypassPermissions" ? "var(--deny)" : undefined}
-              tip={<>{PERM[k].label} · 세션 {n.toLocaleString()}</>}>
-              <History className="size-6" strokeWidth={1.6} style={{ color: PERM[k].color }} />
+            <Slot key={k} name={ENGINE[k].label} onClick={() => onSessions(m.id, k)} corner={n.toLocaleString()}
+              tip={<>엔진 {ENGINE[k].label} · 세션 {n.toLocaleString()}</>}>
+              <History className="size-6" strokeWidth={1.6} style={{ color: ENGINE[k].color }} />
             </Slot>
           ))}
         </Shelf>

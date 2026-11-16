@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ServiceLogo } from "@/kit";
 import { cn } from "@/lib/utils";
-import { AGENT, ENGINE, PERM, STATE, type State } from "./model";
+import { AGENT, ENGINE, STATE, type State } from "./model";
 
 export const Dash = () => <span className="text-muted-foreground/60">–</span>;
 
@@ -16,14 +16,6 @@ export function Chip({ children, className }: { children: ReactNode; className?:
 
 export function StateBadge({ state }: { state: State }) {
   return <Badge variant="secondary" className={cn("gap-1.5 border-0 font-medium", STATE[state].cls)}><i className={cn("size-1.5 rounded-full bg-current", state === "running" && "animate-pulse")} />{STATE[state].label}</Badge>;
-}
-
-/** How an agent was let run; running tools without asking is the one marked. */
-export function PermBadge({ mode }: { mode: string | null }) {
-  if (!mode) return <Dash />;
-  const p = PERM[mode];
-  if (mode === "bypassPermissions") return <Badge variant="secondary" className="border-0 bg-deny/15 font-semibold text-deny">{p.label}</Badge>;
-  return <span className="inline-flex min-w-0 items-center gap-1.5 text-foreground/85"><i className="size-1.5 shrink-0 rounded-full" style={{ background: p?.color ?? "var(--info)" }} /><span className="truncate">{p?.label ?? mode}</span></span>;
 }
 
 export function EngineBadge({ mode }: { mode: string | null }) {

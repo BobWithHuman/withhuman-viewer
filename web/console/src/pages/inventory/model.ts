@@ -40,13 +40,14 @@ export type Reply = {
   req: number; ok: boolean; error?: string; done?: "admin" | "device_stopped" | "device_released";
 };
 export type Tab = "sessions" | "shadow" | "mcp";
+export type SessionCalls = { n: number; review: number; deny: number; mode: string | null };
 export type Data = {
   status: "ready" | "loading" | "failed" | "none"; error: string | null; now: number;
   source: { label: string; demo: boolean }; admin: { api: string; has_token: boolean };
   actor: string; reply: Reply | null; shadow_known?: boolean;
   devices?: Device[]; projects?: Project[]; shadow?: Shadow[]; sessions?: Run[];
-  /** Each session's calls: how many, held for the user, blocked. */
-  session_calls?: Record<string, [number, number, number]>;
+  /** Each session's calls (how many, held for the user, blocked) and the engine's mode at its latest. */
+  session_calls?: Record<string, SessionCalls>;
   /** Whether the engine reads an EDR's machines, and those of them with no hooks. */
   edr_known?: boolean; edr_only?: EdrOnly[];
   /** The tab the lists open on. */
@@ -56,13 +57,6 @@ export type Data = {
 };
 
 // ---------------------------------------------------------------- words and colours
-export const PERM: Record<string, { label: string; color: string }> = {
-  bypassPermissions: { label: "확인 없이 실행", color: "var(--deny)" },
-  acceptEdits: { label: "편집 자동 수락", color: "var(--write)" },
-  plan: { label: "계획만", color: "var(--allow)" },
-  default: { label: "물어보고 실행", color: "var(--info)" },
-};
-export const PERM_KEYS = ["bypassPermissions", "acceptEdits", "plan", "default"];
 export const ENGINE: Record<string, { label: string; color: string; icon: LucideIcon }> = {
   enforce: { label: "차단", color: "var(--allow)", icon: ShieldCheck },
   shadow: { label: "시범 운영", color: "var(--review)", icon: Eye },

@@ -20,19 +20,19 @@ import { DataTable, Empty, PageHeader, Panel, ServiceLogo, ago, clock, num } fro
 import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
 import { Asks, type Ask } from "./inventory/dialogs";
-import { AgentMark, Chip, Dash, PermBadge, StateBadge } from "./inventory/marks";
+import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./inventory/marks";
 import { Fleet, FleetLegend } from "./inventory/fleet";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { isOn } from "./inventory/mcp/types";
-import { END, PERM, WHY, derive, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
+import { END, ENGINE, WHY, derive, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
 import { Bag, machineOrder } from "./inventory/bag";
 import { DeviceSheet } from "./inventory/sheets";
 
 const TABS: [Tab, string][] = [["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
 /** A tab the app named, when this page has it. */
 const known = (t?: string | null) => TABS.find(([k]) => k === t)?.[0];
-/** The way agents are let run that the lists are narrowed to. */
-type Filter = { kind: "perm"; value: string };
+/** The engine mode the sessions are narrowed to. */
+type Filter = { kind: "engine"; value: string };
 type Open = { kind: "device"; id: string } | { kind: "server"; name: string } | { kind: "tool"; server: string; tool: string };
 
 const mono = "font-mono text-[12px]";
@@ -98,7 +98,8 @@ export default function Page({ data }: { data: unknown | null }) {
   const current = view.machines.find((m) => m.id === focus) ?? machineOrder(view)[0];
   const mine = <T extends { device: string | null }>(list: T[]) => (current ? list.filter((x) => x.device === current.id) : []);
   const allSessions = mine(view.sessions), allShadow = mine(view.shadow);
-  const sessions = allSessions.filter((r) => (!filter || r.permission_mode === filter.value) && has(r.title, r.folder, r.id, r.model));
+  const modeOf = (r: Run) => view.sessionCalls[r.id]?.mode ?? null;
+  const sessions = allSessions.filter((r) => (!filter || modeOf(r) === filter.value) && has(r.title, r.folder, r.id));
   const shadow = allShadow.filter((a) => has(a.project, a.agent, WHY[a.why ?? ""]));
   const servers = view.mcp?.servers ?? [];
   // The machine's MCP servers, with the calls of their tools made from it and the latest.
@@ -119,16 +120,16 @@ export default function Page({ data }: { data: unknown | null }) {
         {r.opens && <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />}
       </span>
     ) },
-    { id: "calls", header: "호출", size: 160, accessorFn: (r) => view.sessionCalls[r.id]?.[0] ?? 0, cell: ({ row: { original: r } }) => {
+    { id: "calls", header: "호출", size: 160, accessorFn: (r) => view.sessionCalls[r.id]?.n ?? 0, cell: ({ row: { original: r } }) => {
       const n = view.sessionCalls[r.id];
       return n ? (
-        <span className="tnum flex items-center gap-2"><b className="font-medium">{num(n[0])}</b>
-          {n[1] > 0 && <span className="text-[12px] text-review">확인 {n[1]}</span>}
-          {n[2] > 0 && <span className="text-[12px] text-deny">차단 {n[2]}</span>}
+        <span className="tnum flex items-center gap-2"><b className="font-medium">{num(n.n)}</b>
+          {n.review > 0 && <span className="text-[12px] text-review">확인 {n.review}</span>}
+          {n.deny > 0 && <span className="text-[12px] text-deny">차단 {n.deny}</span>}
         </span>
       ) : <Dash />;
     } },
-    { id: "perm", header: "권한 모드", size: 136, accessorFn: (r) => r.permission_mode ?? "", cell: ({ row }) => <PermBadge mode={row.original.permission_mode} /> },
+    { id: "engine", header: "엔진 모드", size: 136, accessorFn: (r) => modeOf(r) ?? "", cell: ({ row }) => <EngineBadge mode={modeOf(row.original)} /> },
     { id: "end", header: "끝", size: 168, accessorFn: (r) => r.ended_at ?? 0, cell: ({ row: { original: r } }) => (
       r.ended_at ? <span className="tnum truncate text-muted-foreground">{clock(r.ended_at)} · {END[r.end_reason ?? ""] ?? "끝남"}</span> : <Dash />
     ) },
@@ -205,7 +206,7 @@ export default function Page({ data }: { data: unknown | null }) {
   const openServer = (name: string) => setOpen({ kind: "server", name });
   const openTool = (s: string, t: string) => setOpen({ kind: "tool", server: s, tool: t });
   const openDevice = (id: string) => setOpen({ kind: "device", id });
-  const chip = filter && PERM[filter.value].label;
+  const chip = filter && `엔진 ${ENGINE[filter.value]?.label ?? filter.value}`;
   const counts: Record<Tab, number> = {
     sessions: allSessions.length, shadow: allShadow.length, mcp: serverRows.length,
   };
@@ -224,7 +225,7 @@ export default function Page({ data }: { data: unknown | null }) {
           <Panel className="col-span-4 min-w-0" title="인벤토리">
             <div className="h-[360px]">
               <Bag view={view} id={current?.id ?? null} onPick={setFocus} onDevice={openDevice} onServer={openServer}
-                onSessions={(id, mode) => { setFocus(id); setFilter(mode ? { kind: "perm", value: mode } : null); setTab("sessions"); }} />
+                onSessions={(id, mode) => { setFocus(id); setFilter(mode ? { kind: "engine", value: mode } : null); setTab("sessions"); }} />
             </div>
           </Panel>
         </div>
