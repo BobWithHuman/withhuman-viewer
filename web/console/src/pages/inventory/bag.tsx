@@ -50,9 +50,10 @@ function Shelf({ title, count, row, children }: { title: string; count: number; 
   );
 }
 
-/** The machines in the order the picture has them: shadow AI first, then stopped, then running. */
+/** The machines to pick from, shadow AI first, then stopped, then running: those the engine knows,
+ * and those only the EDR lists. */
 export const machineOrder = (view: View) => [...view.machines]
-  .filter((m) => m.state !== "unregistered" || m.running)
+  .filter((m) => m.state !== "unregistered" || m.running || m.edrOnly)
   .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 const rank = (m: Machine) => (m.shadow ? 0 : m.stopped ? 1 : m.state === "running" ? 2 : 3);
 
@@ -95,6 +96,7 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
                 <span className="block truncate font-medium">{x.name}</span>
                 <span className="flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">{dot(x)}{[x.agent && agentLabel(x.agent), x.last && ago(x.last, view.now)].filter(Boolean).join(" · ")}</span>
               </span>
+              {x.edrOnly && <span className="shrink-0 rounded bg-review/15 px-1.5 text-[11px] leading-[18px] font-medium text-review">훅 없음</span>}
               {x.stopped && <span className="shrink-0 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-semibold text-deny">멈춤</span>}
               {x.shadow > 0 && <span className="tnum inline-flex shrink-0 items-center gap-1 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-medium text-deny"><ShieldOff className="size-3" strokeWidth={2.2} />{x.shadow}</span>}
               {x.id === id && <Check className="size-3.5 shrink-0 text-primary" />}
@@ -130,6 +132,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 pb-3">
         <Picker view={view} id={m.id} onPick={onPick} />
+        {m.edrOnly && <span className="rounded bg-review/15 px-1.5 text-[11px] leading-5 font-medium text-review">훅 없음</span>}
         {m.stopped && <span className="rounded bg-deny/15 px-1.5 text-[11px] leading-5 font-semibold text-deny">멈춤</span>}
         {e && <Tooltip><TooltipTrigger asChild><e.icon className="size-4 shrink-0" strokeWidth={1.9} style={{ color: e.color }} /></TooltipTrigger><TooltipContent>엔진 {e.label}</TooltipContent></Tooltip>}
         <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onDevice(m.id)}><PanelRightOpen /></Button></TooltipTrigger><TooltipContent>상세 · 기기 멈춤</TooltipContent></Tooltip>

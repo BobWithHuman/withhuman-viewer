@@ -81,7 +81,8 @@ export const END: Record<string, string> = { prompt_input_exit: "종료", logout
 
 // ---------------------------------------------------------------- what the page works out
 export const DAY = 24 * 60 * 60e3;
-export type Machine = Device & { name: string; state: State; running: boolean; shadow: number; projects: number };
+/** A machine the engine knows, or (`edrOnly`) one only the EDR lists, with no hooks on it. */
+export type Machine = Device & { name: string; state: State; running: boolean; shadow: number; projects: number; edrOnly?: boolean };
 
 export const hostOf = (d: { host: string | null; id: string }) => d.host ?? d.id;
 
@@ -91,7 +92,11 @@ export function derive(d: Data, windowMin: number) {
   const going = (r: Run) => !r.ended_at && r.last_seen_at != null && r.last_seen_at >= since;
   const sessions = [...(d.sessions ?? [])].sort((a, b) => Number(going(b)) - Number(going(a)) || (b.last_seen_at ?? b.created_at ?? 0) - (a.last_seen_at ?? a.created_at ?? 0));
   const live = new Set(sessions.filter(going).map((r) => r.device));
-  const shadow = d.shadow ?? [], projects = d.projects ?? [];
+  // A machine only the EDR lists goes by its EDR ID; the shadow AI seen on it is its own.
+  const edrOnly = d.edr_only ?? [];
+  const edrId = (id: string) => `edr:${id}`;
+  const shadow = (d.shadow ?? []).map((a) => (!a.device && a.edr && edrOnly.some((e) => e.id === a.edr) ? { ...a, device: edrId(a.edr) } : a));
+  const projects = d.projects ?? [];
   const count = <T,>(list: T[], key: (t: T) => string | null) => {
     const m = new Map<string, number>();
     for (const t of list) { const k = key(t); if (k) m.set(k, (m.get(k) ?? 0) + 1); }
@@ -105,6 +110,12 @@ export function derive(d: Data, windowMin: number) {
     return { ...x, name: hostOf(x), state, running, shadow: shadowOf.get(x.id) ?? 0, projects: projectsOf.get(x.id) ?? 0 };
   }).sort((a, b) => rank[a.state] - rank[b.state] || (b.last ?? 0) - (a.last ?? 0));
   const registered = machines.filter((m) => m.state !== "unregistered");
+  machines.push(...edrOnly.map((e): Machine => ({
+    id: edrId(e.id), host: e.name, os: e.os, agent: e.agent, hook_version: null,
+    registered_at: null, first_seen: null, last: e.last, sessions: 0, permission_mode: null, engine_mode: null,
+    serial: e.serial, edr: { id: e.id, status: e.status }, stopped: null,
+    name: e.name, state: "unregistered", running: false, shadow: shadowOf.get(edrId(e.id)) ?? 0, projects: 0, edrOnly: true,
+  })));
   const mcp = d.mcp ?? null;
   return {
     mcp,
@@ -114,7 +125,7 @@ export function derive(d: Data, windowMin: number) {
     shadowKnown: d.shadow_known ?? false,
     edrKnown: d.edr_known ?? false, edrOnly: d.edr_only ?? [],
     sessionCalls: d.session_calls ?? {},
-    unregistered: machines.length - registered.length,
+    unregistered: machines.filter((m) => !m.edrOnly).length - registered.length,
     runningSessions: sessions.filter(going).length,
     noId: sessions.filter((r) => !r.device).length,
   };
