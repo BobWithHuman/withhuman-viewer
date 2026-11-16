@@ -234,7 +234,8 @@ export default function Page({ data }: { data: unknown | null }) {
           <Panel className="col-span-4 min-w-0" title="인벤토리">
             <div className="h-[360px]">
               <Bag view={view} id={current?.id ?? null} onPick={setFocus} onDevice={openDevice} onServer={openServer}
-                onSessions={(id, mode) => { setFocus(id); setFilter(mode ? { kind: "engine", value: mode } : null); setTab("sessions"); }} />
+                onSessions={(id, mode) => { setFocus(id); setFilter(mode ? { kind: "engine", value: mode } : null); setTab("sessions"); }}
+                onShadow={() => setTab("shadow")} onGo={(to) => send("inventory", { type: "go", to })} />
             </div>
           </Panel>
         </div>

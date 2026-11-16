@@ -1,10 +1,11 @@
-// What one machine holds, laid out like a game's inventory: a slot for each agent (protected, and
-// the shadow runs seen of it), its projects, each MCP server (in the colour of its riskiest tool)
+// What one machine holds, laid out like a game's inventory: on top its status window (calls
+// stopped, sensitive values sent out, what waits for the team, shadow AI), then a slot for each
+// agent (protected, and the shadow runs seen of it), each MCP server (in the colour of its riskiest tool)
 // and each mode the engine ran its sessions in. A slot names what it holds and how many under it;
 // a slot pressed opens what it holds; a shelf with nothing says so. The machine is picked here:
 // its name opens a list to search.
 
-import { Check, ChevronDown, ChevronUp, ChevronsUpDown, FolderGit2, History, Laptop, PanelRightOpen, Search, ShieldCheck, ShieldOff } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ChevronsUpDown, History, Inbox, KeyRound, Laptop, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -145,17 +146,77 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
   );
 }
 
-export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
+/** One line of a status window: what it counts, a bar of ten blocks lit by its share, and the count. */
+function Stat({ icon: Icon, label, parts, total, value, onClick, tip }: {
+  icon: LucideIcon; label: string; parts: { n: number; color: string }[]; total: number; value: ReactNode; onClick?: () => void; tip: ReactNode;
+}) {
+  // Ten blocks, each lit in the colour of the part it falls in; one block at least for any part that is not 0.
+  const blocks: (string | null)[] = [];
+  let lit = 0;
+  for (const p of parts) {
+    const n = p.n ? Math.max(1, Math.round((10 * p.n) / Math.max(1, total))) : 0;
+    for (let i = 0; i < n && lit < 10; i++, lit++) blocks.push(p.color);
+  }
+  while (blocks.length < 10) blocks.push(null);
+  const on = parts.some((p) => p.n > 0);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button onClick={onClick} disabled={!onClick} className="grid w-full grid-cols-[18px_64px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors enabled:hover:bg-accent">
+          <Icon className={cn("size-4", on ? "text-foreground" : "text-muted-foreground")} strokeWidth={1.8} />
+          <span className={cn("text-[12px]", on ? "text-foreground" : "text-muted-foreground")}>{label}</span>
+          <span className="flex h-2.5 gap-[3px]">
+            {blocks.map((c, i) => <i key={i} className="h-full flex-1 rounded-[2px]" style={{ background: c ?? "rgb(255 255 255 / 0.07)" }} />)}
+          </span>
+          <span className="tnum min-w-[72px] text-right text-[12px]">{value}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** How a machine stands, like a game's status window: its calls stopped, the sensitive values
+ * sent out, what waits for the team, and the shadow AI seen on it. */
+function StatusWindow({ m, view, onSessions, onShadow, onGo }: {
+  m: Machine; view: View; onSessions: () => void; onShadow: () => void; onGo: (to: "main" | "secrets") => void;
+}) {
+  const st = view.standing[m.id] ?? { calls: 0, deny: 0, review: 0, worth: 0, pending: 0, out: 0, stopped: 0 };
+  const runs = view.shadow.filter((a) => a.device === m.id && !a.project).length;
+  const dim = (n: number, text: ReactNode) => <span className={n ? "font-semibold" : "text-muted-foreground"}>{text}</span>;
+  return (
+    <section className="col-span-2 rounded-lg border bg-background/50 p-1.5">
+      <Stat icon={ShieldX} label="차단" total={st.calls} onClick={onSessions}
+        parts={[{ n: st.deny, color: "var(--deny)" }, { n: st.review, color: "var(--review)" }]}
+        value={<>{dim(st.deny + st.review, <><span className="text-deny">{st.deny}</span><span className="text-muted-foreground"> · </span><span className="text-review">{st.review}</span></>)}<span className="text-muted-foreground"> / {st.calls.toLocaleString()}</span></>}
+        tip={<>호출 {st.calls.toLocaleString()} · 차단 {st.deny} · 사용자 확인 {st.review}</>} />
+      <Stat icon={KeyRound} label="민감 정보" total={Math.max(st.out + st.stopped, 5)} onClick={() => onGo("secrets")}
+        parts={[{ n: st.out, color: "var(--deny)" }, { n: st.stopped, color: "var(--review)" }]}
+        value={dim(st.out + st.stopped, <><span className={st.out ? "text-deny" : ""}>유출 {st.out}</span><span className="text-muted-foreground"> · 막음 {st.stopped}</span></>)}
+        tip={<>민감한 값을 밖으로 보낸 호출 {st.out} · 막힌 호출 {st.stopped}</>} />
+      <Stat icon={Inbox} label="처리 대기" total={Math.max(st.worth, 1)} onClick={() => onGo("main")}
+        parts={[{ n: st.pending, color: "var(--catch)" }, { n: st.worth - st.pending, color: "rgb(255 255 255 / 0.25)" }]}
+        value={dim(st.pending, <>{st.pending}<span className="text-muted-foreground"> / {st.worth}</span></>)}
+        tip={<>탐지 {st.worth} · 처리 대기 {st.pending}</>} />
+      <Stat icon={ShieldOff} label="섀도 AI" total={10} onClick={runs ? onShadow : undefined}
+        parts={[{ n: Math.min(runs, 10), color: "var(--deny)" }]}
+        value={dim(runs, <span className={runs ? "text-deny" : ""}>{runs}회</span>)}
+        tip={<>보호 밖에서 돈 실행 {runs}</>} />
+    </section>
+  );
+}
+
+export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow, onGo }: {
   view: View; id: string | null; onPick: (id: string) => void;
   onDevice: (id: string) => void; onServer: (name: string) => void;
+  /** Opens the machine's shadow AI runs; opens 메인 or 민감 정보. */
+  onShadow: () => void; onGo: (to: "main" | "secrets") => void;
   /** Lists the machine's sessions, those the engine ran in one mode when a mode is named. */
   onSessions: (id: string, mode?: string) => void;
 }) {
   const m = id ? view.machines.find((x) => x.id === id) : undefined;
   if (!m) return <div className="flex h-full flex-col"><div className="flex shrink-0 pb-3"><Picker view={view} id={null} onPick={onPick} /></div><Empty>기기 선택</Empty></div>;
   const shadow = view.shadow.filter((a) => a.device === m.id);
-  const hookless = shadow.filter((a) => a.project);
-  const projects = view.projects.filter((p) => p.device === m.id);
   const sessions = view.sessions.filter((r) => r.device === m.id);
   // Each server with the calls of its tools from this machine, and the risk of its riskiest tool it called.
   const servers = view.serversOn(m)
@@ -182,7 +243,8 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
         <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onDevice(m.id)}><PanelRightOpen /></Button></TooltipTrigger><TooltipContent>상세 · 기기 멈춤</TooltipContent></Tooltip>
       </div>
       <div className="scroll -mr-2 grid min-h-0 flex-1 grid-cols-2 content-start gap-x-4 gap-y-2.5 overflow-y-auto pr-2">
-        <Shelf title="에이전트" count={agents.length}>
+        <StatusWindow m={m} view={view} onSessions={() => onSessions(m.id)} onShadow={onShadow} onGo={onGo} />
+        <Shelf title="에이전트" count={agents.length} wide>
           {agents.map(({ a, guarded, runs }) => (
             <Slot key={a} name={agentLabel(a)} onClick={() => onDevice(m.id)}
               sub={[guarded && "보호됨", runs > 0 && `섀도 ${runs}`].filter(Boolean).join(" · ") || "미보호"}
@@ -194,12 +256,6 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
               <AgentMark agent={a} size={26} />
             </Slot>
           ))}
-        </Shelf>
-        <Shelf title="프로젝트" count={projects.length + hookless.length}>
-          {[
-            ...(projects.length ? [<Slot key="p" name="보호" sub={`${projects.length}개`} onClick={() => onDevice(m.id)} tip={<>보호된 프로젝트 {projects.length}</>}><FolderGit2 className="size-6 text-allow" strokeWidth={1.6} /></Slot>] : []),
-            ...(hookless.length ? [<Slot key="s" name="미보호" sub={`${hookless.length}개`} style={{ borderColor: "color-mix(in oklab, var(--deny) 55%, transparent)" }} onClick={() => onDevice(m.id)} tip={<>미보호 프로젝트 {hookless.length}</>}><FolderGit2 className="size-6 text-deny" strokeWidth={1.6} /></Slot>] : []),
-          ]}
         </Shelf>
         <Shelf title="MCP 서버" count={servers.length} wide>
           {servers.map(({ s, calls, risk }) => (

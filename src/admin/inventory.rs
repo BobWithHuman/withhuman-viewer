@@ -6,7 +6,7 @@
 //! does what the page asks for:
 //! - `stop_device`: a machine stopped, or let go again, through the engine's admin API;
 //! - `admin`: the admin API's address and token kept;
-//! - `open_session`: a session opened on the route map;
+//! - `open_session`: a session opened on the route map; `go`: 메인 or 민감 정보 opened;
 //! - `ack`: the last answer was seen.
 //!
 //! The first two carry a `req` number, and the answer goes back in the data as `reply` with the
@@ -38,6 +38,17 @@ pub fn InventoryPage() -> Element {
             let _ = (state.public)();
             let _ = bump();
             async move { (b.inventory().await, b.mcp_catalog().await, now_ms()) }
+        }
+    });
+    // What the status windows count beyond the Calls: the sensitive values the Calls carried, and
+    // what the team marked; read after the inventory, so it comes up first.
+    let extra = use_resource({
+        let backend = backend.clone();
+        move || {
+            let b = backend.clone();
+            let _ = (state.reload)();
+            let _ = (state.public)();
+            async move { (b.secrets().await.unwrap_or_default(), b.triage().await) }
         }
     });
     let mut reply = use_signal(|| None::<Value>);
@@ -75,6 +86,9 @@ pub fn InventoryPage() -> Element {
                 .unwrap_or_default();
             let mut page = inventory_web::page(inv, &titles, &modes, &called, &around(*at));
             page["session_calls"] = list.map_or(json!({}), |l| inventory_web::session_calls(l));
+            if let (Some(l), Some((mentions, triage))) = (list, &*extra.read()) {
+                page["standing"] = inventory_web::standing(l, mentions, &triage.marks);
+            }
             // The servers the machines have set up, or, while the engine does not collect them,
             // those whose tools the machines called.
             match (mcp, list) {
@@ -94,6 +108,10 @@ pub fn InventoryPage() -> Element {
         let req = m["req"].clone();
         let failed = move |e: String| json!({ "req": req, "ok": false, "error": e });
         match m["type"].as_str().unwrap_or_default() {
+            "go" => state.screen.set(match m["to"].as_str() {
+                Some("secrets") => Screen::Secrets,
+                _ => Screen::Home,
+            }),
             "open_session" => {
                 state.open_session(text("id"));
                 state.mode.set(Mode::Graph);

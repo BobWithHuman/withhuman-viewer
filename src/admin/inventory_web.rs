@@ -56,6 +56,76 @@ pub(super) fn last_calls(facts: &[CallFact]) -> HashMap<String, i64> {
     latest
 }
 
+/// How each machine stands, by client ID, as its status window shows it: its Calls (and those the
+/// engine blocked and held for the user), the Calls worth a look and those of them in sessions
+/// the team has not marked yet, and the Calls that sent sensitive values out (`out`) or tried and
+/// were stopped (`stopped`).
+pub(super) fn standing(
+    facts: &[CallFact],
+    mentions: &[crate::model::SecretMention],
+    marks: &HashMap<String, super::triage::Mark>,
+) -> Value {
+    use super::secrets::{held, in_call, outward};
+    #[derive(Default)]
+    struct Of {
+        calls: u32,
+        deny: u32,
+        review: u32,
+        worth: u32,
+        pending: u32,
+        out: std::collections::BTreeSet<(String, i64)>,
+        stopped: std::collections::BTreeSet<(String, i64)>,
+    }
+    let mut by: BTreeMap<&str, Of> = BTreeMap::new();
+    let mut sent: HashMap<(&str, i64), bool> = HashMap::new();
+    for m in mentions.iter().filter(|m| in_call(m) && outward(m)) {
+        let Some(client) = m.client.as_deref() else {
+            continue;
+        };
+        let of = by.entry(client).or_default();
+        let key = (m.session.clone(), m.seq);
+        if held(m) {
+            of.stopped.insert(key);
+        } else {
+            of.out.insert(key);
+            sent.insert((m.session.as_str(), m.seq), true);
+        }
+    }
+    for f in facts {
+        let Some(client) = f.client.as_deref() else {
+            continue;
+        };
+        let of = by.entry(client).or_default();
+        of.calls += 1;
+        match f.decision.as_deref() {
+            Some("DENY") => of.deny += 1,
+            Some("REVIEW") => of.review += 1,
+            _ => {}
+        }
+        if super::main_page::Severity::of(f).is_some()
+            || sent.contains_key(&(f.session.as_str(), f.seq))
+        {
+            of.worth += 1;
+            if !marks.contains_key(&f.session) {
+                of.pending += 1;
+            }
+        }
+    }
+    by.into_iter()
+        .map(|(client, of)| {
+            (
+                client.to_owned(),
+                json!({
+                    "calls": of.calls, "deny": of.deny, "review": of.review,
+                    "worth": of.worth, "pending": of.pending,
+                    "out": of.out.len(), "stopped": of.stopped.len(),
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
 /// The page's data when there is no inventory to show: still loading, failed to load, or an
 /// engine that keeps none (`status` is `loading`, `failed` or `none`).
 pub(super) fn without(status: &str, error: Option<&str>, around: &Around) -> Value {
@@ -561,5 +631,54 @@ mod tests {
             "the first command line in the run"
         );
         assert_eq!(runs[1]["command"], Value::Null);
+    }
+
+    #[test]
+    fn a_machine_stands_by_its_calls_stopped_values_sent_and_what_waits() {
+        use crate::admin::triage::Mark;
+        use crate::model::SecretMention;
+        let call = |session: &str, seq: i64, decision: &str| CallFact {
+            session: session.into(),
+            seq,
+            client: Some("a".into()),
+            decision: Some(decision.into()),
+            ..CallFact::default()
+        };
+        let facts = [
+            call("s1", 1, "DENY"),
+            call("s1", 2, "ALLOW"),
+            call("s2", 1, "REVIEW"),
+            call("s2", 2, "ALLOW"),
+        ];
+        let sent = |session: &str, seq: i64, decision: &str, ran: bool| SecretMention {
+            session: session.into(),
+            seq,
+            client: Some("a".into()),
+            slot: Some("agent".into()),
+            node: Some("Call".into()),
+            tool: Some("WebFetch".into()),
+            decision: Some(decision.into()),
+            ran,
+            ..SecretMention::default()
+        };
+        let mentions = [sent("s2", 2, "ALLOW", true), sent("s1", 1, "DENY", false)];
+        let marks: HashMap<String, Mark> = [(
+            "s1".to_owned(),
+            Mark {
+                state: "closed".into(),
+                by: "t".into(),
+                at: 1,
+            },
+        )]
+        .into();
+        let st = standing(&facts, &mentions, &marks);
+        assert_eq!(st["a"]["calls"], 4);
+        assert_eq!(st["a"]["deny"], 1);
+        assert_eq!(st["a"]["review"], 1);
+        assert_eq!(st["a"]["out"], 1);
+        assert_eq!(st["a"]["stopped"], 1);
+        // s1's DENY is marked; s2's REVIEW and its value sent out wait.
+        assert_eq!(st["a"]["worth"], 3);
+        assert_eq!(st["a"]["pending"], 2);
     }
 }

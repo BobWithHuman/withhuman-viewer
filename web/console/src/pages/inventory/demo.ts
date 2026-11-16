@@ -107,6 +107,12 @@ export function demo(now = Date.now()): Data {
     admin: { api: "http://127.0.0.1:8787", has_token: false }, actor: "security-admin", reply: null,
     shadow_known: true, devices, projects, shadow, sessions,
     mcp: demoMcp(real.map((d) => ({ user: d.host!, client: d.host! })), now),
+    // How each machine stands, from its sessions' calls and a few values sent out or stopped.
+    standing: Object.fromEntries(devices.map((d) => {
+      const n = 20 + Math.floor(rnd() * 300), deny = Math.floor(n * rnd() * 0.06), review = Math.floor(n * rnd() * 0.08);
+      const worth = deny + review + Math.floor(rnd() * 3);
+      return [d.id, { calls: n, deny, review, worth, pending: Math.floor(worth * rnd()), out: rnd() < 0.3 ? 1 + Math.floor(rnd() * 3) : 0, stopped: Math.floor(rnd() * 3) }];
+    })),
     // Each session's calls, a few of them held or blocked, more where agents run unasked.
     session_calls: Object.fromEntries(sessions.map((r) => {
       const n = 3 + Math.floor(rnd() * 60), loose = r.permission_mode === "bypassPermissions";
