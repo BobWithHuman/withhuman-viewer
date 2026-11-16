@@ -27,8 +27,30 @@ export type Project = { device: string; project: string; agent: string | null; h
 export type Shadow = {
   device: string | null; host: string | null; agent: string; project: string | null; last_seen: number | null;
   first?: number | null; scans?: number;
+  /** The command line the agent ran with, where the EDR tells it (Linux). */
+  command?: string | null;
   why?: "project" | "no_session" | "unregistered"; edr?: string | null;
 };
+/** What a shadow run's command line says of it: the prompt it was given, or the session it took
+ * up again (by its ID, or the latest), as a name for the run; none when it says neither. */
+export function runName(command: string | null | undefined): { prompt?: string; resume?: string | true } | null {
+  if (!command) return null;
+  // Words as a shell would split them, quotes kept together.
+  const words = [...command.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+  const at = words.findIndex((w) => /(^|[\\/])(claude|codex)(\.exe)?$/.test(w) || /@anthropic-ai\/claude-code|@openai\/codex/.test(w));
+  // The program is the first word when no word names it (a native install runs from its version's path).
+  const args = words.slice(at >= 0 ? at + 1 : 1);
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i];
+    if ((w === "--resume" || w === "-r") && args[i + 1] && !args[i + 1].startsWith("-")) return { resume: args[i + 1] };
+    if (w === "--continue" || w === "-c" || w === "resume") return { resume: args[i + 1] && !args[i + 1].startsWith("-") ? args[i + 1] : true };
+    if ((w === "-p" || w === "--print") && args[i + 1] && !args[i + 1].startsWith("-")) return { prompt: args[i + 1] };
+  }
+  // A prompt given as the first word that is not an option: `claude "fix it"`, `codex exec "fix it"`.
+  const rest = args.filter((w, i) => !w.startsWith("-") && !(i > 0 && /^--?(model|m|cwd|C|add-dir|profile|p)$/.test(args[i - 1])) && w !== "exec");
+  return rest.length ? { prompt: rest.join(" ") } : null;
+}
+
 export const WHY: Record<string, string> = { project: "훅 없는 프로젝트", no_session: "훅 세션 없음", unregistered: "미등록 기기" };
 export type Run = {
   id: string; device: string | null; host: string | null;

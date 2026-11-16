@@ -621,6 +621,19 @@ impl Demo {
                                 running_at: at - h * 60 * MIN,
                                 agent: agent.clone(),
                                 name: Some(e.name.clone()),
+                                // What the EDR tells of how it ran: a prompt given at the start,
+                                // a session taken up again, or (as on a Mac) nothing.
+                                command: match h {
+                                    0..=2 => Some(
+                                        "claude -p \"고객 목록을 CSV로 뽑아서 /tmp에 저장해줘\""
+                                            .into(),
+                                    ),
+                                    26 | 27 => Some(
+                                        "claude --resume 9f2c1a7e-5b3d-4e8a-a1c4-7d6e0f9b2c31"
+                                            .into(),
+                                    ),
+                                    _ => None,
+                                },
                             })
                     })
                     .collect(),

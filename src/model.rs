@@ -364,6 +364,8 @@ pub struct EdrSighting {
     pub agent: String,
     /// The machine's name then.
     pub name: Option<String>,
+    /// The command line the agent ran with, where the EDR tells it (Linux); none elsewhere.
+    pub command: Option<String>,
 }
 
 /// An agent running where the hooks are not: a Claude Code or Codex project a machine's check

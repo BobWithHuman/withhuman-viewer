@@ -98,7 +98,7 @@ export function demo(now = Date.now()): Data {
   const real = devices.filter((d) => d.registered_at && d.last);
   for (const i of [1, 4, 4, 8, 11, 13, 13, 13, 19, 22]) {
     const d = real[i % real.length];
-    shadow.push({ device: d.id, host: d.host, agent: rnd() < 0.55 ? "claude-code" : "codex", project: null, ...(() => { const last = now - (0.3 + rnd() * 70) * HOUR, scans = 1 + Math.floor(rnd() * 5); return { first: last - (scans - 1) * HOUR, last_seen: last, scans }; })(), why: "no_session" });
+    shadow.push({ device: d.id, host: d.host, agent: rnd() < 0.55 ? "claude-code" : "codex", project: null, ...(() => { const last = now - (0.3 + rnd() * 70) * HOUR, scans = 1 + Math.floor(rnd() * 5); return { first: last - (scans - 1) * HOUR, last_seen: last, scans }; })(), why: "no_session", command: pick(['claude -p "고객 목록을 CSV로 뽑아서 /tmp에 저장해줘"', "claude --resume 3b1f0c2a-7e44-4d0b-9a61-2c5e8f1d7a90", "claude", 'codex exec "배포 스크립트에서 승인 단계 빼줘"', null]) });
   }
   shadow.sort((a, b) => b.last_seen! - a.last_seen!);
 

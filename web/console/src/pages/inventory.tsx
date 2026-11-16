@@ -24,7 +24,7 @@ import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./inventory/mark
 import { Threats, ThreatsLegend } from "./inventory/threats";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { isOn } from "./inventory/mcp/types";
-import { END, ENGINE, WHY, derive, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
+import { END, ENGINE, WHY, derive, runName, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
 import { Bag, machineOrder } from "./inventory/bag";
 import { DeviceSheet } from "./inventory/sheets";
 
@@ -136,13 +136,24 @@ export default function Page({ data }: { data: unknown | null }) {
 
   const shadowCols = useMemo<ColumnDef<Shadow>[]>(() => [
     { id: "agent", header: "에이전트", size: 152, accessorFn: (a) => a.agent, cell: ({ row }) => <AgentMark agent={row.original.agent} label /> },
+    { id: "session", header: "세션", size: 340, accessorFn: (a) => a.command ?? "", cell: ({ row: { original: a } }) => {
+      const n = runName(a.command);
+      const resumed = n?.resume && n.resume !== true ? view.sessions.find((r) => r.id === n.resume) : undefined;
+      return (
+        <span className="flex min-w-0 items-center gap-1.5" title={a.command ?? undefined}>
+          {n?.prompt ? <span className="truncate">{n.prompt}</span>
+            : n?.resume ? <><Chip className="shrink-0">이어 하기</Chip><span className={cn("truncate", !resumed?.title && cn(mono, "text-muted-foreground"))}>{resumed?.title ?? (n.resume === true ? "" : n.resume.slice(0, 8))}</span></>
+            : <span className="text-muted-foreground">{a.command ? "프롬프트 없음" : "명령줄 없음"}</span>}
+        </span>
+      );
+    } },
     { id: "why", header: "근거", accessorFn: (a) => a.project ?? WHY[a.why ?? ""] ?? "", cell: ({ row: { original: a } }) => (a.project
       ? <code className={cn(mono, "truncate")} title={a.project}>{a.project}</code>
       : <Chip className={a.why === "unregistered" ? "bg-review/15 text-review" : "bg-deny/15 text-deny"}>{WHY[a.why ?? ""] ?? "–"}</Chip>) },
     { id: "first", header: "처음 본 때", size: 140, accessorFn: (a) => a.first ?? a.last_seen ?? 0, cell: ({ row: { original: a } }) => <span className="tnum text-muted-foreground">{clock(a.first ?? a.last_seen)}</span> },
     { id: "last", header: "마지막 본 때", size: 140, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
     { id: "scans", header: "스캔", size: 80, accessorFn: (a) => a.scans ?? 1, cell: ({ row }) => <span className="tnum">{row.original.scans ?? 1}</span> },
-  ], [view.now]);
+  ], [view]);
 
   type ServerRow = (typeof serverRows)[number];
   const serverCols = useMemo<ColumnDef<ServerRow>[]>(() => [

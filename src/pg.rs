@@ -562,8 +562,8 @@ impl Postgres<'_> {
         let sightings = if has_sightings {
             all(self
                 .rows(
-                    "SELECT agent_id, running_at, agent, name FROM edr_sightings \
-                     ORDER BY agent_id, running_at",
+                    // Every column: an engine that keeps the command line has one more.
+                    "SELECT * FROM edr_sightings ORDER BY agent_id, running_at",
                     &[],
                 )
                 .await?)

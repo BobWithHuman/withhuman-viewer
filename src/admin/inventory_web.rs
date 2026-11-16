@@ -196,11 +196,11 @@ const OPEN_FOR_MS: i64 = 24 * 60 * 60_000;
 /// that goes on (the EDR scans hourly by default).
 const RUN_GAP_MS: i64 = 3 * 60 * 60_000;
 
-/// A run of sightings: the first and last scan's time, how many scans, the agent, and the
-/// machine's name then.
-type Run<'a> = (i64, i64, u32, &'a str, Option<&'a str>);
-/// A sighting: the scan's time, the agent, and the machine's name then.
-type Seen<'a> = (i64, &'a str, Option<&'a str>);
+/// A run of sightings: the first and last scan's time, how many scans, the agent, the machine's
+/// name then, and the first command line seen in it.
+type Run<'a> = (i64, i64, u32, &'a str, Option<&'a str>, Option<&'a str>);
+/// A sighting: the scan's time, the agent, the machine's name then, and the command line.
+type Seen<'a> = (i64, &'a str, Option<&'a str>, Option<&'a str>);
 
 /// Shadow AI the EDR saw, as runs: the scans that saw a coding agent running on a machine with no
 /// Hooks session open then, one after another, are one run from the first to the last
@@ -222,13 +222,16 @@ fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
                     x.running_at,
                     &x.agent,
                     x.name.as_deref(),
+                    x.command.as_deref().filter(|c| !c.trim().is_empty()),
                 ));
             }
         }
         None => {
             for e in inv.edr.iter().flatten() {
                 if let (Some(at), Some(agent)) = (e.running_at, e.agent.as_deref()) {
-                    by.entry(&e.agent_id).or_default().push((at, agent, None));
+                    by.entry(&e.agent_id)
+                        .or_default()
+                        .push((at, agent, None, None));
                 }
             }
         }
@@ -266,25 +269,26 @@ fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
         };
         let mut run: Option<Run> = None;
         let mut runs = Vec::new();
-        for (at, agent, then) in seen {
+        for (at, agent, then, command) in seen {
             if open(at) {
                 runs.extend(run.take());
                 continue;
             }
             run = match run {
-                Some((first, last, n, a, t)) if a == agent && at - last <= RUN_GAP_MS => {
-                    Some((first, at, n + 1, a, t))
+                Some((first, last, n, a, t, c)) if a == agent && at - last <= RUN_GAP_MS => {
+                    Some((first, at, n + 1, a, t, c.or(command)))
                 }
                 other => {
                     runs.extend(other);
-                    Some((at, at, 1, agent, then))
+                    Some((at, at, 1, agent, then, command))
                 }
             };
         }
         runs.extend(run);
-        for (first, last, scans, agent, then) in runs {
+        for (first, last, scans, agent, then, command) in runs {
             found.push(json!({
                 "device": device, "host": name(then), "agent": agent, "project": null,
+                "command": command,
                 "first": first, "last_seen": last, "scans": scans,
                 "why": if device.is_some() { "no_session" } else { "unregistered" },
                 "edr": edr,
@@ -499,6 +503,7 @@ mod tests {
             running_at: at,
             agent: "claude-code".into(),
             name: Some("old-name".into()),
+            command: (at == t + H).then(|| "claude -p fix it".into()),
         };
         let inv = Inventory {
             clients: vec![Device {
@@ -551,5 +556,10 @@ mod tests {
             runs.iter()
                 .all(|r| r["host"] == "a-host" && r["why"] == "no_session")
         );
+        assert_eq!(
+            runs[0]["command"], "claude -p fix it",
+            "the first command line in the run"
+        );
+        assert_eq!(runs[1]["command"], Value::Null);
     }
 }
