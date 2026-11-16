@@ -127,7 +127,16 @@ SELECT c.session_id AS session, c.seq, c.client_id AS client, c.cwd,
        {tool} AS tool,
        substring(c.trace_json from '"link":"([^"]*)"') AS link,
        substring(c.trace_json from '"worst":"([^"]*)"') AS worst,
-       f.irreversible
+       f.irreversible,
+       CASE WHEN f.flagged THEN
+         (SELECT coalesce({src_command}, {src_file_path}, {src_url}, {src_pattern}, {src_tool})
+          FROM cause_edges e
+          JOIN nodes seg ON seg.session_id = e.session_id AND seg.seq = e.target_seq
+               AND seg.kind IN ('Segment', 'Error')
+          JOIN nodes src ON src.session_id = seg.session_id AND src.tool_use_id = seg.tool_use_id
+               AND src.kind = 'Call'
+          WHERE e.session_id = c.session_id AND e.call_seq = c.seq
+          ORDER BY e.probability DESC NULLS LAST LIMIT 1) END AS cause
 FROM nodes c
 CROSS JOIN LATERAL (
   SELECT i.irreversible, (c.decision IN ('DENY', 'REVIEW') OR i.irreversible) AS flagged
@@ -143,6 +152,11 @@ ORDER BY at DESC NULLS LAST LIMIT 50000
         pattern = field("c.payload_json", "pattern"),
         tool = field("c.payload_json", "tool_name"),
         ran = ran("c"),
+        src_command = field("src.payload_json", "command"),
+        src_file_path = field("src.payload_json", "file_path"),
+        src_url = field("src.payload_json", "url"),
+        src_pattern = field("src.payload_json", "pattern"),
+        src_tool = field("src.payload_json", "tool_name"),
     )
 });
 
@@ -429,6 +443,7 @@ impl Postgres<'_> {
         let mut rows = self.rows(&CALL_FACTS, &[&IRREVERSIBLE, &since]).await?;
         for row in &mut rows {
             unescape(row, "prompt", 200);
+            unescape(row, "cause", 300);
             unescape(row, "target", 300);
             unescape(row, "tool", 200);
         }

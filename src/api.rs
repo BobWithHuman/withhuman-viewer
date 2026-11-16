@@ -638,7 +638,8 @@ fn facts_cache(url: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     url.hash(&mut hasher);
-    config_dir().join(format!("facts-{:016x}.json", hasher.finish()))
+    // The number is the rows' shape: a file of an older shape is left unread.
+    config_dir().join(format!("facts2-{:016x}.json", hasher.finish()))
 }
 
 fn typed<T: DeserializeOwned>(value: Result<Value, ApiError>) -> Result<T, String> {

@@ -1,18 +1,18 @@
-// One Call worth a look, opened to judge: was it an attack, or nothing wrong. Down the left, why
-// it happened, in order: what the person asked, what the agent read and the words in it that
-// told it to act, what it was about to do, and why the engine decided as it did. On the right,
+// One Call worth a look, opened to judge: was it an attack, or nothing wrong. On top, side by
+// side, what the person asked and the words the agent read that told it to act. Down the left,
+// in order: what it read, what it was about to do, and why the engine decided as it did. On the right,
 // where else: the session's other Calls, the other sessions that read the same thing, and the
 // machine's latest. The team marks it an attack or fine, saves its evidence as a file, or opens
 // it in 기록.
 
-import { ArrowDown, ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageSquareText, OctagonX, ShieldAlert, SquareTerminal } from "lucide-react";
+import { ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageCircleQuestion, MessageSquareText, OctagonX, ShieldAlert, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { VerdictBadge, Warn, ago, clock } from "@/kit";
 import { cn } from "@/lib/utils";
-import { ACTION, type Blocked, type Call, type Case, DIM, type Group, MARK, MODE, type Mark, SEV, hostOf, toolName } from "./data";
+import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, hostOf, toolName } from "./data";
 import type { Ask } from "./list";
 
 const Mono = ({ children, className }: { children: ReactNode; className?: string }) => <code className={cn("font-mono text-[12px]", className)}>{children}</code>;
@@ -44,15 +44,24 @@ function Side({ title, count, children }: { title: string; count?: number; child
 const Rows = ({ children }: { children: ReactNode }) => <div className="flex flex-col overflow-hidden rounded-lg border">{children}</div>;
 const rowCls = "flex min-w-0 items-center gap-2 border-b px-2.5 py-2 text-left text-[12.5px] transition-colors last:border-b-0 hover:bg-accent/70";
 
-export function CaseView({ call, group, data, mark, blocked, ask, onCall }: {
-  call: Call; group: Group; data: Case | null | undefined; mark: Mark | undefined; blocked: Blocked[]; ask: Ask; onCall: (c: Call) => void;
+export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
+  call: Call; group: CaseGroup; data: Case | null | undefined; marks: Record<string, Mark>; blocked: Blocked[]; ask: Ask; onCall: (c: Call) => void;
 }) {
+  // The mark shown is this Call's session's; setting one marks every session of the case.
+  const mark = marks[call.session];
   // The kill switch asks twice: the first press arms it.
   const [armed, setArmed] = useState(false);
   // The case the app read is this Call's once its session and number match.
   const read = data && data.session === call.session && data.seq === call.seq && !data.loading ? data : null;
   const told = read?.told ?? null;
-  const others = group.calls.filter((c) => c !== call);
+  const others = group.calls.filter((c) => c !== call && c.session === call.session);
+  // The other sessions the same cause reached, each with its Calls worth a look.
+  const reached = group.sessions.filter((s) => s !== call.session).map((s) => group.calls.filter((c) => c.session === s));
+  // What to send the person to ask whether they meant it; copied, and the case marked as being looked at.
+  const question = () => {
+    ask({ do: "copy", text: [`확인 요청: ${DIM.kind.name(DIM.kind.of(call))}`, `요청: ${call.prompt ?? "-"}`, `실행하려던 것: ${call.target ?? call.tool ?? "-"}`, `단말: ${call.machine} · 세션 ${call.session}`, "직접 요청하신 작업이 맞나요?"].join("\n") });
+    ask({ do: "triage", sessions: [call.session], state: "reviewing" });
+  };
   const user = read?.user ?? call.user ?? null;
   const host = hostOf(call.target);
   // What the agent read is a source the team can distrust from here on.
@@ -73,10 +82,10 @@ export function CaseView({ call, group, data, mark, blocked, ask, onCall }: {
         </div>
         <div className="flex items-center gap-3">
           <SheetTitle className="min-w-0 flex-1 truncate text-[16px]">{DIM.kind.name(DIM.kind.of(call))}</SheetTitle>
-          <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={mark?.state ?? ""} onValueChange={(v) => ask({ do: "triage", session: call.session, state: v || null })}>
-            <ToggleGroupItem value="attack" className="px-3 text-[12.5px] data-[state=on]:bg-deny/20 data-[state=on]:text-deny">공격</ToggleGroupItem>
-            <ToggleGroupItem value="benign" className="px-3 text-[12.5px] data-[state=on]:bg-allow/20 data-[state=on]:text-allow">정상</ToggleGroupItem>
+          <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={mark?.state ?? ""} onValueChange={(v) => ask({ do: "triage", sessions: group.sessions, state: v || null })}>
+            {MARKS.map((m) => <ToggleGroupItem key={m} value={m} className={cn("px-2.5 text-[12.5px]", m === "attack" && "data-[state=on]:bg-deny/20 data-[state=on]:text-deny", m === "benign" && "data-[state=on]:bg-allow/20 data-[state=on]:text-allow", m === "reviewing" && "data-[state=on]:bg-review/20 data-[state=on]:text-review")}>{MARK[m].label}</ToggleGroupItem>)}
           </ToggleGroup>
+          <Button variant="outline" size="sm" onClick={question}><MessageCircleQuestion />확인 요청</Button>
           {user && (
             <Button variant="outline" size="sm" className={cn(armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
               onClick={() => { if (armed) { ask({ do: "stop", email: user, session: call.session, seq: call.seq }); setArmed(false); } else setArmed(true); }}>
@@ -89,14 +98,25 @@ export function CaseView({ call, group, data, mark, blocked, ask, onCall }: {
         <SheetDescription className="sr-only">{DIM.kind.name(DIM.kind.of(call))}</SheetDescription>
       </SheetHeader>
 
+      <div className="grid shrink-0 grid-cols-2 gap-3 border-b p-5">
+        <section className="grid content-start gap-1.5">
+          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground"><MessageSquareText className="size-3.5" />사용자가 시킨 말</h3>
+          <Box className="max-h-[132px] overflow-y-auto">{read?.request?.text ?? call.prompt ?? <span className="text-muted-foreground">프롬프트 없음</span>}</Box>
+        </section>
+        <section className="grid content-start gap-1.5">
+          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-catch"><FileText className="size-3.5" />읽은 글이 시킨 말{told && <span className="tnum ml-auto">{Math.round(told.probability * 100)}%</span>}</h3>
+          <Box tone={told?.quote ? "var(--catch)" : undefined} className="max-h-[132px] overflow-y-auto">
+            {!read ? <span className="text-muted-foreground">불러오는 중</span>
+              : told?.quote ? told.quote
+                : <span className="text-muted-foreground">{call.source === "request" ? "없음 · 사용자 요청에서 바로" : told ? "글귀 없음" : "원인 찾지 못함"}</span>}
+          </Box>
+        </section>
+      </div>
+
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.5fr)_minmax(280px,1fr)]">
         <div className="scroll min-h-0 overflow-y-auto p-5">
-          <Step n={1} icon={MessageSquareText} title="사용자 요청" aside={read?.request?.at ? <span className="tnum">{clock(read.request.at)}</span> : undefined}>
-            <Box>{read?.request?.text ?? call.prompt ?? <span className="text-muted-foreground">프롬프트 없음</span>}</Box>
-            {read?.request?.intent && <div className="flex items-center gap-2 text-[12px] text-muted-foreground"><span className="rounded bg-secondary px-1.5 leading-[20px]">의도</span><span className="min-w-0 truncate">{read.request.intent}</span></div>}
-          </Step>
-
-          <Step n={2} icon={FileText} title="읽은 것" tone={told ? "var(--catch)" : undefined}
+          {read?.request?.intent && <div className="mb-4 flex items-center gap-2 text-[12px] text-muted-foreground"><span className="rounded bg-secondary px-1.5 leading-[20px]">의도</span><span className="min-w-0 truncate">{read.request.intent}</span></div>}
+          <Step n={1} icon={FileText} title="읽은 것" tone={told ? "var(--catch)" : undefined}
             aside={!read ? <LoaderCircle className="size-3.5 animate-spin" /> : told ? <span className="tnum font-medium text-catch">{Math.round(told.probability * 100)}%</span> : undefined}>
             {!read && <Box className="text-muted-foreground">불러오는 중</Box>}
             {read?.error && <Box className="text-deny">{read.error}</Box>}
@@ -108,7 +128,7 @@ export function CaseView({ call, group, data, mark, blocked, ask, onCall }: {
                   <Mono className="min-w-0 flex-1 truncate">{told.target || "대상 없음"}</Mono>
                   <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
                 </button>
-                {told.quote && <Box tone="var(--catch)"><span className="mb-1 flex items-center gap-1.5 text-[11.5px] font-medium text-catch"><ArrowDown className="size-3" />{told.error ? "도구 오류가 시킴" : "이 글이 시킴"}{told.paragraph != null && <span className="tnum font-normal opacity-80">문단 {told.paragraph + 1}</span>}</span>{told.quote}</Box>}
+                {told.paragraph != null && <span className="tnum text-[12px] text-muted-foreground">문단 {told.paragraph + 1}{told.error ? " · 도구 오류" : ""}</span>}
                 {source && (
                   <Button variant="outline" size="sm" className={cn("justify-self-start", distrusted && "border-deny/60 bg-deny/12 text-deny hover:bg-deny/20 hover:text-deny")}
                     onClick={() => ask({ do: "source", source, on: !distrusted, session: call.session, seq: call.seq })}>
@@ -119,7 +139,7 @@ export function CaseView({ call, group, data, mark, blocked, ask, onCall }: {
             )}
           </Step>
 
-          <Step n={3} icon={SquareTerminal} title="하려던 행동" tone={SEV[call.sev].color} aside={<>{ACTION[call.action]?.label}<span>{call.ran ? "실행됨" : "실행 안 됨"}</span></>}>
+          <Step n={2} icon={SquareTerminal} title="하려던 행동" tone={SEV[call.sev].color} aside={<>{ACTION[call.action]?.label}<span>{call.ran ? "실행됨" : "실행 안 됨"}</span></>}>
             <Box tone={SEV[call.sev].color} className="font-mono text-[12px]">
               {call.tool && <span className="mr-2 rounded-md bg-secondary px-1.5 py-0.5 font-sans text-[11px] text-muted-foreground">{toolName(call.tool)}</span>}
               {call.target ?? call.tool}
@@ -127,7 +147,7 @@ export function CaseView({ call, group, data, mark, blocked, ask, onCall }: {
             {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">보내려던 곳</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
           </Step>
 
-          <Step n={4} icon={ShieldAlert} title="엔진 판정" last aside={call.rule ? <Mono>{call.rule}</Mono> : undefined}>
+          <Step n={3} icon={ShieldAlert} title="엔진 판정" last aside={call.rule ? <Mono>{call.rule}</Mono> : undefined}>
             <Box>{call.reason ?? <span className="text-muted-foreground">이유 없음</span>}</Box>
           </Step>
         </div>
@@ -147,6 +167,21 @@ export function CaseView({ call, group, data, mark, blocked, ask, onCall }: {
                 <button key={c.seq} onClick={() => onCall(c)} className={rowCls}>
                   <span className={cn("shrink-0 rounded px-1.5 text-[11px] leading-[19px] font-semibold", SEV[c.sev].cls)}>{SEV[c.sev].label}</span>
                   <Mono className="min-w-0 flex-1 truncate">{c.target ?? c.tool}</Mono>
+                </button>
+              ))}</Rows>
+            </Side>
+          )}
+
+          {reached.length > 0 && (
+            <Side title="같은 원인이 닿은 다른 세션" count={reached.length}>
+              <Rows>{reached.slice(0, 12).map((list) => (
+                <button key={list[0].session} onClick={() => onCall(list[0])} className={rowCls}>
+                  <span className="grid min-w-0 flex-1 gap-0.5">
+                    <span className="truncate">{list[0].prompt ?? "프롬프트 없음"}</span>
+                    <span className="flex items-center gap-2 text-[11.5px] text-muted-foreground"><Mono className="truncate text-[11px]">{list[0].machine}</Mono><span className="tnum shrink-0">{ago(list[0].at)}</span></span>
+                  </span>
+                  {marks[list[0].session] && <span className={cn("shrink-0 rounded px-1.5 text-[11px] leading-[19px] font-semibold", MARK[marks[list[0].session].state].cls)}>{MARK[marks[list[0].session].state].label}</span>}
+                  <span className="tnum inline-flex shrink-0 items-center gap-1 rounded bg-deny/15 px-1.5 text-[11.5px] leading-[20px] font-medium text-deny"><Hand className="size-3" />{list.length}</span>
                 </button>
               ))}</Rows>
             </Side>

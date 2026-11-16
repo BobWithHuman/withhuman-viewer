@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { send } from "../bridge";
 import { type RankBy, Ranking } from "./detect/breakdown";
 import { type Call, DIM, DIMS, type Data, type Dim, type Filter, MODE, type Period, VERDICTS, actionTotals, coverage, demo, passes, rangeLabel, span, within } from "./detect/data";
-import { type Ask, Watch } from "./detect/list";
+import { type Ask, type Told, Watch } from "./detect/list";
 import { Trend } from "./detect/trend";
 import { Tuning } from "./detect/tuning";
 
@@ -56,7 +56,18 @@ export default function Page({ data }: { data: unknown | null }) {
   const mode = MODE[cover.mode] ?? MODE.none;
   const blank = d.loading && !d.calls.length;
   const marks = d.triage ?? {}, blocked = d.blocked ?? [];
-  const alerts = useMemo(() => [...(d.alerts?.new ?? []).map((a) => ({ ...a, why: "new" as const })), ...(d.alerts?.silent ?? []).map((a) => ({ ...a, why: "silent" as const }))], [d.alerts]);
+  // The machines to do something about: those with Calls nothing decided, set up yet never
+  // heard, heard yet never set up, newly registered, or gone quiet.
+  const alerts = useMemo<Told[]>(() => {
+    const quiet = new Set<number>();
+    for (const [hour, m, , , undecided] of d.cover) if (undecided > 0 && hour + 3_600_000 > from && hour < to) quiet.add(m);
+    const of = (list: typeof d.alerts extends infer A ? A extends { new: infer L } ? L : never : never, why: Told["why"]) => (list ?? []).map((a) => ({ ...a, why }));
+    return [
+      ...[...quiet].map((m) => ({ id: d.machines[m], host: null, user: null, at: null, edr: null, why: "undecided" as const })),
+      ...of(d.alerts?.installed ?? [], "installed"), ...of(d.alerts?.unregistered ?? [], "unregistered"),
+      ...of(d.alerts?.new ?? [], "new"), ...of(d.alerts?.silent ?? [], "silent"),
+    ];
+  }, [d, from, to]);
   // The sessions of the period the team marked an attack.
   const attacks = useMemo(() => new Set(inPeriod.filter((c) => marks[c.session]?.state === "attack").map((c) => c.session)).size, [inPeriod, marks]);
   // The period as a report: its counts, the days, the gravest kinds, what the team decided
@@ -122,6 +133,7 @@ export default function Page({ data }: { data: unknown | null }) {
 
       <div className="scroll min-h-0 flex-1 overflow-y-auto px-6 pb-6">
         <div className="flex min-h-full flex-col gap-3">
+          <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} alerts={alerts} className="h-[clamp(420px,58vh,760px)] shrink-0" />
           <div className="grid h-[clamp(360px,42vh,480px)] shrink-0 grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] gap-3">
             <Panel
               className={`h-full ${FILL}`}
@@ -196,8 +208,6 @@ export default function Page({ data }: { data: unknown | null }) {
                 </>}
             </Panel>
           </div>
-
-          <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} alerts={alerts} className="min-h-[420px] flex-1 basis-[420px]" />
         </div>
       </div>
     </div>

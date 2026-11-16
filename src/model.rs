@@ -72,6 +72,10 @@ pub struct CallFact {
     pub worst: Option<String>,
     /// Hard to undo ([`crate::metro::IRREVERSIBLE`] or more).
     pub irreversible: bool,
+    /// What the Call whose result told this one to act was on (a file, a URL, a command, else
+    /// its tool), for a Call worth a look that a tool result made; none where the store does
+    /// not tell.
+    pub cause: Option<String>,
 }
 
 impl Session {

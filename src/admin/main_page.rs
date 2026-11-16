@@ -240,11 +240,19 @@ pub fn Main() -> Element {
                             }
                         });
                     }
+                    // One session marked, or every session of a case at once.
                     (Some("triage"), _) => {
-                        if let Some(session) = m.get("session").and_then(Value::as_str) {
-                            let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
-                            super::triage::mark(&mut marks.write(), session, m.get("state").and_then(Value::as_str), &by, now_ms());
+                        let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
+                        let state = m.get("state").and_then(Value::as_str);
+                        let sessions = m.get("sessions").and_then(Value::as_array).into_iter().flatten();
+                        for session in sessions.filter_map(Value::as_str).chain(m.get("session").and_then(Value::as_str)) {
+                            super::triage::mark(&mut marks.write(), session, state, &by, now_ms());
                         }
+                    }
+                    (Some("copy"), _) => {
+                        let text = serde_json::to_string(m.get("text").and_then(Value::as_str).unwrap_or_default()).unwrap_or_default();
+                        document::eval(&format!("navigator.clipboard.writeText({text})"));
+                        saved.set(Some("복사됨".into()));
                     }
                     // A source distrusted, or trusted again (`on` false).
                     (Some("source"), call) => {
