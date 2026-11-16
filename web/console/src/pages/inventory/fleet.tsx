@@ -2,19 +2,21 @@
 // agents and the MCP servers found anywhere, and a mark in a cell says that machine has it. An
 // agent under the engine's hooks is marked protected, one found running without them is shadow
 // AI; a server no tool of which was called from the machine is drawn faint. A person, a machine
-// or a server pressed opens its detail; a person pressed shows what they hold beside the picture.
+// or a server pressed opens its detail. A machine is grouped under its owner (the person the
+// security team named), marked when the EDR knows it and when someone else's key ran on it; the
+// machines the EDR lists that have no hooks come last.
 
-import { Laptop, ShieldCheck, ShieldOff, Zap } from "lucide-react";
+import { BadgeCheck, BadgeX, Laptop, ShieldCheck, ShieldOff, UserRoundX, Zap } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Empty, Person, ServiceLogo, ago, shortUser } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark } from "./marks";
 import { isOn, type Server } from "./mcp/types";
-import { ENGINE, PERM, STATE, agentLabel, type Machine, type Shadow, type View } from "./model";
+import { EDR_STATUS, ENGINE, PERM, STATE, agentLabel, type EdrOnly, type Machine, type Shadow, type View } from "./model";
 
 /** A row: a machine the engine knows, or a place shadow AI was found on that it does not. */
-type Row = { key: string; user: string | null; name: string; machine?: Machine; shadow: Shadow[] };
+type Row = { key: string; user: string | null; name: string; machine?: Machine; shadow: Shadow[]; edr?: EdrOnly };
 
 const AGENT_ORDER = ["claude-code", "codex"];
 const CELL = "grid h-10 w-11 shrink-0 place-items-center";
@@ -27,20 +29,19 @@ export function FleetLegend() {
     <div className="flex items-center gap-3.5 text-[12px] text-muted-foreground">
       {item(<ShieldCheck className="size-3.5 text-allow" strokeWidth={2} />, "보호됨")}
       {item(<ShieldOff className="size-3.5 text-deny" strokeWidth={2} />, "섀도 AI")}
+      {item(<BadgeCheck className="size-3.5 text-info" strokeWidth={2} />, "EDR 확인")}
       {item(<i className="size-2.5 rounded-full bg-foreground/70" />, "사용")}
       {item(<i className="size-2.5 rounded-full border border-dashed border-foreground/50" />, "설치만")}
     </div>
   );
 }
 
-export function Fleet({ view, machines, servers, picked, who, onDevice, onPerson, onServer }: {
+export function Fleet({ view, machines, servers, picked, onDevice, onServer }: {
   view: View; machines: Machine[]; servers: Server[]; picked: string | null;
-  /** The person whose holdings are shown beside the picture. */
-  who: string | null;
-  onDevice: (id: string) => void; onPerson: (email: string) => void; onServer: (name: string) => void;
+  onDevice: (id: string) => void; onServer: (name: string) => void;
 }) {
   const shown = new Set(machines.map((m) => m.id));
-  const rows: Row[] = machines.map((m) => ({ key: m.id, user: m.user, name: m.name, machine: m, shadow: view.shadow.filter((a) => a.device === m.id) }));
+  const rows: Row[] = machines.map((m) => ({ key: m.id, user: m.owner ?? m.user, name: m.name, machine: m, shadow: view.shadow.filter((a) => a.device === m.id) }));
   // Shadow AI found where the engine knows no machine: a row for each place.
   const loose = new Map<string, Row>();
   for (const a of view.shadow) {
@@ -51,6 +52,8 @@ export function Fleet({ view, machines, servers, picked, who, onDevice, onPerson
     loose.set(key, row);
   }
   rows.push(...loose.values());
+  // The machines the EDR lists with no hooks on them: no one's yet.
+  rows.push(...view.edrOnly.map((e) => ({ key: `edr${e.id}`, user: null, name: e.name, shadow: [], edr: e })));
 
   // People in the order of what needs a look: shadow AI first, then the most machines.
   const groups = new Map<string, Row[]>();
@@ -58,7 +61,7 @@ export function Fleet({ view, machines, servers, picked, who, onDevice, onPerson
   const people = [...groups.entries()].sort(([a, ra], [b, rb]) =>
     Number(rb.some((r) => r.shadow.length)) - Number(ra.some((r) => r.shadow.length)) || rb.length - ra.length || a.localeCompare(b));
 
-  const found = new Set([...machines.map((m) => m.agent), ...view.shadow.map((a) => a.agent)].filter((a): a is string => !!a));
+  const found = new Set([...machines.map((m) => m.agent), ...view.shadow.map((a) => a.agent), ...view.edrOnly.map((e) => e.agent)].filter((a): a is string => !!a));
   const agents = [...AGENT_ORDER.filter((a) => found.has(a)), ...[...found].filter((a) => !AGENT_ORDER.includes(a)).sort()];
   /** The calls of a server's tools made from a machine over the 30 days. */
   const callsFrom = (s: Server, m: Machine) => s.tools.reduce((a, t) => a + t.users.reduce((b, u) => b + (isOn(u.client, m) ? u.n : 0), 0), 0);
@@ -96,9 +99,7 @@ export function Fleet({ view, machines, servers, picked, who, onDevice, onPerson
             <Fragment key={r.key}>
               <div className={cn("flex h-10 min-w-0 items-center pr-2", line)}>
                 {i === 0 && (user
-                  ? <button onClick={() => onPerson(user)} aria-pressed={user === who} className={cn("flex min-w-0 items-center gap-2 rounded-md py-1 pr-2 pl-1 text-left transition-colors hover:bg-accent", user === who && "bg-accent font-semibold ring-1 ring-ring ring-inset")}>
-                      <Person name={user} size={22} label />
-                    </button>
+                  ? <Person name={user} size={22} label />
                   : <span className="text-muted-foreground">사용자 모름</span>)}
               </div>
               <button disabled={!m} onClick={() => m && onDevice(m.id)} aria-pressed={m?.id === picked}
@@ -107,18 +108,23 @@ export function Fleet({ view, machines, servers, picked, who, onDevice, onPerson
                 <span className="truncate font-mono text-[12px]">{r.name}</span>
                 {m && tip(<i className={cn("size-1.5 shrink-0 rounded-full", m.state === "running" ? "animate-pulse bg-allow" : m.state === "installed" ? "bg-catch" : "bg-foreground/35")} />, <>{STATE[m.state].label}{m.last ? ` · ${ago(m.last, view.now)}` : ""}</>)}
                 <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {m?.owner && m.user && m.owner !== m.user && tip(<UserRoundX className="size-3.5 text-review" strokeWidth={2} />, <>담당자 {shortUser(m.owner)} · 실행 {shortUser(m.user)}</>)}
+                  {m?.edr && tip(<BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />, <>EDR 확인 · {EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"} · 에이전트 {m.edr.id}</>)}
+                  {m && !m.edr && view.edrKnown && m.state !== "unregistered" && tip(<BadgeX className="size-3.5 text-review" strokeWidth={2} />, "EDR에 없는 기기")}
+                  {r.edr && <span className="rounded bg-review/15 px-1.5 text-[11px] leading-[18px] font-medium text-review">훅 없음</span>}
                   {m?.permission_mode === "bypassPermissions" && tip(<Zap className="size-3.5 text-deny" strokeWidth={2} />, PERM.bypassPermissions.label)}
                   {m?.engine_mode && ENGINE[m.engine_mode] && (() => {
                     const e = ENGINE[m.engine_mode!], Icon = e.icon;
                     return tip(<Icon className="size-3.5" strokeWidth={1.9} style={{ color: e.color }} />, `엔진 ${e.label}`);
                   })()}
-                  {!m && <span className="rounded bg-white/8 px-1.5 text-[11px] leading-[18px] text-muted-foreground">등록 안 됨</span>}
+                  {!m && !r.edr && <span className="rounded bg-white/8 px-1.5 text-[11px] leading-[18px] text-muted-foreground">등록 안 됨</span>}
                 </span>
               </button>
               <div className={cn("flex border-l px-2", line)}>
                 {agents.map((a) => {
                   const guarded = m?.agent === a && m.state !== "unregistered";
                   const wild = r.shadow.filter((x) => x.agent === a);
+                  if (r.edr?.agent === a) return <span key={a} className={CELL}>{tip(<span className="relative rounded-full outline-2 outline-offset-2 outline-deny"><AgentMark agent={a} size={20} /><ShieldOff className="absolute -right-2 -bottom-2 size-3.5 rounded-full bg-card p-px text-deny" strokeWidth={2.2} /></span>, <>섀도 AI · {agentLabel(a)} · EDR이 실행을 봄</>)}</span>;
                   return (
                     <span key={a} className={CELL}>
                       {wild.length > 0

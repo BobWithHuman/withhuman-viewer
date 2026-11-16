@@ -8,6 +8,7 @@
 //! - `revoke_key`, `stop`: one key revoked, or a person stopped (every key), which refuses that
 //!   person's Calls from then on. Those go to the engine's admin API, and its record is 감사's
 //!   킬스위치 기록;
+//! - `owner`: a machine's owner named, or the name taken off;
 //! - `admin`: the admin API's address and token kept;
 //! - `open_session`: a session opened on the route map; `copy`: a text put on the clipboard;
 //! - `ack`: the last answer was seen, so a key just issued is not kept any longer.
@@ -104,6 +105,22 @@ pub fn InventoryPage() -> Element {
                     }
                     Err(e) => failed(e),
                 }));
+            }
+            "owner" => {
+                let (device, owner, actor) = (text("device"), text("email"), text("actor"));
+                let (backend, req) = (backend.clone(), m["req"].clone());
+                spawn(async move {
+                    let owner = Some(owner.as_str()).filter(|o| !o.is_empty());
+                    reply.set(Some(
+                        match backend.assign_owner(&device, owner, &actor).await {
+                            Ok(()) => {
+                                bump += 1;
+                                json!({ "req": req, "ok": true, "done": "owner" })
+                            }
+                            Err(e) => failed(e),
+                        },
+                    ));
+                });
             }
             kind @ ("issue" | "revoke_key" | "stop") => {
                 let (email, actor, key_id) = (text("email"), text("actor"), text("key_id"));

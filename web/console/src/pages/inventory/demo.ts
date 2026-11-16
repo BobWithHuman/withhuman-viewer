@@ -169,5 +169,10 @@ export function demoAnswer(d: Data, m: Record<string, unknown>, req: number): Da
     const mine = keys.filter((k) => k.email === p.email), active = mine.filter((k) => !k.revoked_at).length;
     return { ...p, active_keys: active, revoked_keys: mine.length - active, stopped: active === 0 && mine.length > 0 };
   });
-  return { ...d, keys, people, events, reply };
+  let devices = d.devices;
+  if (m.type === "owner") {
+    devices = devices?.map((x) => (x.id === m.device ? { ...x, owner: email || null } : x));
+    reply = { req, ok: true, done: "owner" };
+  }
+  return { ...d, devices, keys, people, events, reply };
 }

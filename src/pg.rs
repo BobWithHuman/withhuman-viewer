@@ -458,7 +458,24 @@ impl Postgres<'_> {
             return Ok(Value::Null);
         }
         let all = |rows: Rows| Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>());
+        // The machines the EDR lists, where the engine keeps them.
+        let has_edr = self
+            .rows(
+                "SELECT to_regclass('public.edr_devices') IS NOT NULL AS ok",
+                &[],
+            )
+            .await?
+            .first()
+            .and_then(|r| r.get("ok"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let edr = if has_edr {
+            all(self.rows("SELECT * FROM edr_devices", &[]).await?)
+        } else {
+            Value::Null
+        };
         Ok(json!({
+            "edr": edr,
             "clients": all(self.rows("SELECT * FROM clients", &[]).await?),
             "projects": all(self.rows("SELECT * FROM client_projects", &[]).await?),
             "users": all(self.rows("SELECT * FROM users", &[]).await?),

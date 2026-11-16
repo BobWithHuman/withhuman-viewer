@@ -10,7 +10,15 @@ export type Device = {
   agent: string | null; hook_version: string | null; user: string | null;
   registered_at: number | null; first_seen: number | null; last: number | null;
   sessions: number; permission_mode: string | null; engine_mode: string | null;
+  /** The hardware serial number, and the person the security team named as the owner (`user`
+   * is whoever's key the machine last presented). */
+  serial?: string | null; owner?: string | null;
+  /** The EDR's agent on the machine, when the engine matched one. */
+  edr?: { id: string; status: string | null } | null;
 };
+/** A machine the EDR lists that has no hooks: maybe with an agent program the EDR saw on it. */
+export type EdrOnly = { id: string; name: string; os: string | null; status: string | null; serial: string | null; last: number | null; agent: string | null };
+export const EDR_STATUS: Record<string, string> = { active: "연결됨", disconnected: "끊김", never_connected: "연결된 적 없음", pending: "대기" };
 export type Project = { device: string; project: string; agent: string | null; hook_version: string | null; installed_at: number | null };
 export type Shadow = { device: string | null; host: string | null; user: string | null; agent: string; project: string | null; last_seen: number | null };
 export type PersonRow = {
@@ -31,7 +39,7 @@ export type Run = {
 };
 /** The app's answer to the request with the same `req`. */
 export type Reply = {
-  req: number; ok: boolean; error?: string; done?: "issued" | "revoked" | "stopped" | "admin";
+  req: number; ok: boolean; error?: string; done?: "issued" | "revoked" | "stopped" | "admin" | "owner";
   email?: string; key_id?: string; key?: string; count?: number;
 };
 export type Tab = "devices" | "people" | "sessions" | "shadow" | "mcp";
@@ -41,6 +49,8 @@ export type Data = {
   actor: string; reply: Reply | null; shadow_known?: boolean;
   devices?: Device[]; projects?: Project[]; shadow?: Shadow[]; people?: PersonRow[];
   keys?: Key[]; events?: KeyEvent[]; sessions?: Run[];
+  /** Whether the engine reads an EDR's machines, and those of them with no hooks. */
+  edr_known?: boolean; edr_only?: EdrOnly[];
   /** The tab the lists open on. */
   tab?: Tab;
   /** The MCP servers on the machines; null while the engine has not collected them. */
@@ -110,6 +120,7 @@ export function derive(d: Data, windowMin: number) {
     serversOn: (m: Machine) => (mcp?.servers ?? []).filter((s) => s.installs.some((i) => isOn(i.client, m))),
     now, going, sessions, machines, registered, shadow, projects,
     shadowKnown: d.shadow_known ?? false,
+    edrKnown: d.edr_known ?? false, edrOnly: d.edr_only ?? [],
     people: d.people ?? [], keys: d.keys ?? [], events: d.events ?? [],
     unregistered: machines.length - registered.length,
     runningSessions: sessions.filter(going).length,

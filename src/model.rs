@@ -336,6 +336,8 @@ pub struct Inventory {
     pub sessions: Vec<SessionRun>,
     /// Agents found running without the hooks; none when the engine cannot tell yet.
     pub shadow: Option<Vec<ShadowAgent>>,
+    /// The machines the EDR lists; none while the engine is not connected to one.
+    pub edr: Option<Vec<EdrDevice>>,
 }
 
 /// An agent running where the hooks are not: a Claude Code or Codex project a machine's check
@@ -371,6 +373,30 @@ pub struct Device {
     pub updated_at: Option<i64>,
     pub first_seen: Option<i64>,
     pub last_seen: Option<i64>,
+    /// The machine's hardware serial number, when its setup told it.
+    pub serial: Option<String>,
+    /// The person the security team named as the machine's owner; `user_email` is whoever's key
+    /// it last presented, which may be someone else.
+    pub owner_email: Option<String>,
+    /// The EDR's agent on this machine, when the engine matched one, and that agent's status
+    /// (`active`, `disconnected`, `never_connected` or `pending`).
+    pub edr_agent_id: Option<String>,
+    pub edr_status: Option<String>,
+}
+
+/// A machine as the company's EDR (Wazuh) lists it, whether or not the engine's hooks are on it.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct EdrDevice {
+    pub agent_id: String,
+    pub name: String,
+    pub os: Option<String>,
+    pub status: Option<String>,
+    pub serial: Option<String>,
+    pub last_seen: Option<i64>,
+    /// An agent program (Claude Code, Codex) the EDR saw running on it, if any.
+    pub agent: Option<String>,
 }
 
 /// A project a machine's hooks were installed in.

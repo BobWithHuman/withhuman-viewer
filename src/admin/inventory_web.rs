@@ -69,6 +69,24 @@ pub(super) fn page(
     page["status"] = json!("ready");
     page["shadow_known"] = json!(inv.shadow.is_some());
     page["devices"] = devices(inv, modes);
+    // The machines the EDR lists that no registered machine was matched to.
+    page["edr_known"] = json!(inv.edr.is_some());
+    page["edr_only"] = inv
+        .edr
+        .iter()
+        .flatten()
+        .filter(|e| {
+            !inv.clients
+                .iter()
+                .any(|d| d.edr_agent_id.as_deref() == Some(&e.agent_id))
+        })
+        .map(|e| {
+            json!({
+                "id": e.agent_id, "name": e.name, "os": e.os, "status": e.status,
+                "serial": e.serial, "last": e.last_seen, "agent": e.agent,
+            })
+        })
+        .collect();
     page["projects"] = inv
         .projects
         .iter()
@@ -173,6 +191,8 @@ fn devices(inv: &Inventory, modes: &HashMap<String, String>) -> Value {
                 "sessions": runs.len(),
                 "permission_mode": latest.and_then(|r| r.permission_mode.clone()),
                 "engine_mode": modes.get(&d.client_id),
+                "serial": d.serial, "owner": d.owner_email,
+                "edr": d.edr_agent_id.as_ref().map(|id| json!({ "id": id, "status": d.edr_status })),
             })
         })
         .collect()

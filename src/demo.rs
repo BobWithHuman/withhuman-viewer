@@ -259,7 +259,8 @@ impl Demo {
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     fn made_inventory(&self, now: i64) -> crate::model::Inventory {
         use crate::model::{
-            ApiKey, Device, DeviceProject, Inventory, KeyEvent, Person, SessionRun, ShadowAgent,
+            ApiKey, Device, DeviceProject, EdrDevice, Inventory, KeyEvent, Person, SessionRun,
+            ShadowAgent,
         };
         const MIN: i64 = 60_000;
         const DAY: i64 = 24 * 60 * MIN;
@@ -370,6 +371,15 @@ impl Demo {
             updated_at: registered,
             first_seen: first(id),
             last_seen: seen(id),
+            serial: Some(format!(
+                "C02{:07X}",
+                id.bytes()
+                    .fold(7u32, |a, b| a.wrapping_mul(31).wrapping_add(b.into()))
+                    & 0xFFF_FFFF
+            )),
+            owner_email: Some(user.into()),
+            edr_agent_id: None,
+            edr_status: None,
         };
         let clients = vec![
             device(
@@ -414,6 +424,53 @@ impl Demo {
                 ..Device::default()
             },
         ];
+        // The EDR lists every registered machine but one under its host name, and two machines the
+        // hooks are not on, one of which runs an agent. One machine's owner is not the person
+        // whose key it last presented.
+        let mut clients = clients;
+        let mut edr = Vec::new();
+        for (i, d) in clients
+            .iter_mut()
+            .filter(|d| d.registered_at.is_some())
+            .enumerate()
+        {
+            if i == 3 {
+                continue;
+            }
+            let status = if i == 1 { "disconnected" } else { "active" };
+            d.edr_agent_id = Some(format!("{:03}", i + 1));
+            d.edr_status = Some(status.into());
+            edr.push(EdrDevice {
+                agent_id: format!("{:03}", i + 1),
+                name: d.hostname.clone().unwrap_or_default(),
+                os: d.os.clone(),
+                status: Some(status.into()),
+                serial: d.serial.clone(),
+                last_seen: d.last_seen,
+                agent: None,
+            });
+        }
+        if let Some(d) = clients.get_mut(2) {
+            d.owner_email = Some("dev.kim@example.com".into());
+        }
+        edr.push(EdrDevice {
+            agent_id: "007".into(),
+            name: "design-mac-12".into(),
+            os: Some("macOS 15".into()),
+            status: Some("active".into()),
+            serial: Some("C02F81KQ0D".into()),
+            last_seen: Some(now - 2 * 60 * MIN),
+            agent: Some("claude-code".into()),
+        });
+        edr.push(EdrDevice {
+            agent_id: "008".into(),
+            name: "finance-win-03".into(),
+            os: Some("Windows 11".into()),
+            status: Some("active".into()),
+            serial: Some("PF3K9W2X".into()),
+            last_seen: Some(now - 20 * MIN),
+            agent: None,
+        });
         let project = |id: &str, path: &str, at: i64| DeviceProject {
             client_id: id.into(),
             project: path.into(),
@@ -578,6 +635,7 @@ impl Demo {
             events,
             sessions,
             shadow: Some(shadow),
+            edr: Some(edr),
         }
     }
 
@@ -620,6 +678,18 @@ impl Demo {
             },
         );
         (key_id, secret)
+    }
+
+    /// Names a machine's owner, or takes the name off.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub fn assign_owner(&mut self, now: i64, client: &str, email: Option<&str>) -> bool {
+        let mut inv = self.inventory(now);
+        let Some(d) = inv.clients.iter_mut().find(|d| d.client_id == client) else {
+            return false;
+        };
+        d.owner_email = email.map(str::to_owned);
+        self.inventory = Some(inv);
+        true
     }
 
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
