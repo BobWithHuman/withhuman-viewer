@@ -140,7 +140,9 @@ export default function Page({ data }: { data: unknown | null }) {
     { id: "why", header: "근거", accessorFn: (a) => a.project ?? WHY[a.why ?? ""] ?? "", cell: ({ row: { original: a } }) => (a.project
       ? <code className={cn(mono, "truncate")} title={a.project}>{a.project}</code>
       : <Chip className={a.why === "unregistered" ? "bg-review/15 text-review" : "bg-deny/15 text-deny"}>{WHY[a.why ?? ""] ?? "–"}</Chip>) },
-    { id: "last", header: "마지막으로 보임", size: 160, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
+    { id: "first", header: "처음 본 때", size: 140, accessorFn: (a) => a.first ?? a.last_seen ?? 0, cell: ({ row: { original: a } }) => <span className="tnum text-muted-foreground">{clock(a.first ?? a.last_seen)}</span> },
+    { id: "last", header: "마지막 본 때", size: 140, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
+    { id: "scans", header: "스캔", size: 80, accessorFn: (a) => a.scans ?? 1, cell: ({ row }) => <span className="tnum">{row.original.scans ?? 1}</span> },
   ], [view.now]);
 
   type ServerRow = (typeof serverRows)[number];

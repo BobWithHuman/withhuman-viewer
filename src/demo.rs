@@ -608,7 +608,23 @@ impl Demo {
             keys,
             events,
             sessions,
-            // The engine has no check of the projects: shadow AI comes from the EDR.
+            // The engine has no check of the projects: shadow AI comes from the EDR's scans, hourly
+            // while an agent runs, a few runs a machine over the last days.
+            sightings: Some(
+                edr.iter()
+                    .filter_map(|e| Some((e, e.running_at?, e.agent.clone()?)))
+                    .flat_map(|(e, at, agent)| {
+                        [0, 1, 2, 26, 27, 74]
+                            .into_iter()
+                            .map(move |h| crate::model::EdrSighting {
+                                agent_id: e.agent_id.clone(),
+                                running_at: at - h * 60 * MIN,
+                                agent: agent.clone(),
+                                name: Some(e.name.clone()),
+                            })
+                    })
+                    .collect(),
+            ),
             shadow: None,
             edr: Some(edr),
         }

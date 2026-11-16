@@ -548,8 +548,31 @@ impl Postgres<'_> {
         } else {
             Value::Null
         };
+        // Each scan that saw a coding agent running, where the engine keeps them (30 days).
+        let has_sightings = self
+            .rows(
+                "SELECT to_regclass('public.edr_sightings') IS NOT NULL AS ok",
+                &[],
+            )
+            .await?
+            .first()
+            .and_then(|r| r.get("ok"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let sightings = if has_sightings {
+            all(self
+                .rows(
+                    "SELECT agent_id, running_at, agent, name FROM edr_sightings \
+                     ORDER BY agent_id, running_at",
+                    &[],
+                )
+                .await?)
+        } else {
+            Value::Null
+        };
         Ok(json!({
             "edr": edr,
+            "sightings": sightings,
             "clients": all(self.rows("SELECT * FROM clients", &[]).await?),
             "projects": all(self.rows("SELECT * FROM client_projects", &[]).await?),
             "users": all(self.rows("SELECT * FROM users", &[]).await?),

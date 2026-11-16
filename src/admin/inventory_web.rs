@@ -178,43 +178,104 @@ const SLACK_MS: i64 = 2 * 60_000;
 /// A session that never said it ended is taken as open this long after its last signal.
 const OPEN_FOR_MS: i64 = 24 * 60 * 60_000;
 
-/// Shadow AI the EDR saw: a coding agent running at a process scan on a machine with no Hooks
-/// session open then (`why: "no_session"`: the Hooks are off, removed, or not in that folder),
-/// or on a machine that never registered with the engine (`"unregistered"`).
+/// Two sightings further apart than this are two runs, not one: a scan or two can miss a run
+/// that goes on (the EDR scans hourly by default).
+const RUN_GAP_MS: i64 = 3 * 60 * 60_000;
+
+/// A run of sightings: the first and last scan's time, how many scans, the agent, and the
+/// machine's name then.
+type Run<'a> = (i64, i64, u32, &'a str, Option<&'a str>);
+/// A sighting: the scan's time, the agent, and the machine's name then.
+type Seen<'a> = (i64, &'a str, Option<&'a str>);
+
+/// Shadow AI the EDR saw, as runs: the scans that saw a coding agent running on a machine with no
+/// Hooks session open then, one after another, are one run from the first to the last
+/// (`why: "no_session"`: the Hooks are off, removed, or not in that folder; `"unregistered"` on a
+/// machine that never registered with the engine). The scans are the engine's record of them
+/// (`edr_sightings`), else each machine's latest (`edr_devices.running_at`).
 fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
+    let named: HashMap<&str, &str> = inv
+        .edr
+        .iter()
+        .flatten()
+        .map(|e| (e.agent_id.as_str(), e.name.as_str()))
+        .collect();
+    let mut by: BTreeMap<&str, Vec<Seen>> = BTreeMap::new();
+    match &inv.sightings {
+        Some(list) => {
+            for x in list {
+                by.entry(&x.agent_id).or_default().push((
+                    x.running_at,
+                    &x.agent,
+                    x.name.as_deref(),
+                ));
+            }
+        }
+        None => {
+            for e in inv.edr.iter().flatten() {
+                if let (Some(at), Some(agent)) = (e.running_at, e.agent.as_deref()) {
+                    by.entry(&e.agent_id).or_default().push((at, agent, None));
+                }
+            }
+        }
+    }
     let mut found = Vec::new();
-    for e in inv.edr.iter().flatten() {
-        let (Some(agent), Some(at)) = (e.agent.as_deref(), e.running_at) else {
-            continue;
-        };
+    for (edr, mut seen) in by {
+        seen.sort_by_key(|x| x.0);
         let clients: Vec<&str> = inv
             .clients
             .iter()
-            .filter(|c| c.edr_agent_id.as_deref() == Some(e.agent_id.as_str()))
+            .filter(|c| c.edr_agent_id.as_deref() == Some(edr))
             .map(|c| c.client_id.as_str())
             .collect();
-        let open = inv.sessions.iter().any(|r| {
-            r.client_id.as_deref().is_some_and(|c| clients.contains(&c))
-                && r.created_at.is_some_and(|start| start <= at + SLACK_MS)
-                && match r.ended_at {
-                    Some(end) => end + SLACK_MS >= at,
-                    None => r
-                        .last_seen_at
-                        .or(r.created_at)
-                        .is_some_and(|last| last + OPEN_FOR_MS >= at),
-                }
-        });
-        if open {
-            continue;
-        }
+        let open = |at: i64| {
+            inv.sessions.iter().any(|r| {
+                r.client_id.as_deref().is_some_and(|c| clients.contains(&c))
+                    && r.created_at.is_some_and(|start| start <= at + SLACK_MS)
+                    && match r.ended_at {
+                        Some(end) => end + SLACK_MS >= at,
+                        None => r
+                            .last_seen_at
+                            .or(r.created_at)
+                            .is_some_and(|last| last + OPEN_FOR_MS >= at),
+                    }
+            })
+        };
         let device = clients.first().copied();
-        found.push(json!({
-            "device": device,
-            "host": device.and_then(|c| host.get(c).copied()).unwrap_or(e.name.as_str()),
-            "agent": agent, "project": null, "last_seen": at,
-            "why": if device.is_some() { "no_session" } else { "unregistered" },
-            "edr": e.agent_id,
-        }));
+        let name = |fallback: Option<&str>| {
+            device
+                .and_then(|c| host.get(c).copied())
+                .or_else(|| named.get(edr).copied())
+                .or(fallback)
+                .unwrap_or(edr)
+                .to_owned()
+        };
+        let mut run: Option<Run> = None;
+        let mut runs = Vec::new();
+        for (at, agent, then) in seen {
+            if open(at) {
+                runs.extend(run.take());
+                continue;
+            }
+            run = match run {
+                Some((first, last, n, a, t)) if a == agent && at - last <= RUN_GAP_MS => {
+                    Some((first, at, n + 1, a, t))
+                }
+                other => {
+                    runs.extend(other);
+                    Some((at, at, 1, agent, then))
+                }
+            };
+        }
+        runs.extend(run);
+        for (first, last, scans, agent, then) in runs {
+            found.push(json!({
+                "device": device, "host": name(then), "agent": agent, "project": null,
+                "first": first, "last_seen": last, "scans": scans,
+                "why": if device.is_some() { "no_session" } else { "unregistered" },
+                "edr": edr,
+            }));
+        }
     }
     found
 }
@@ -407,5 +468,69 @@ mod tests {
         assert_eq!(of("004").unwrap()["host"], "nobody");
         assert!(of("005").is_none());
         assert_eq!(found.len(), 3);
+    }
+
+    #[test]
+    fn the_scans_one_after_another_with_no_session_are_one_run() {
+        use crate::model::EdrSighting;
+        const H: i64 = 60 * 60_000;
+        let t = 100 * H;
+        let seen = |at: i64| EdrSighting {
+            agent_id: "001".into(),
+            running_at: at,
+            agent: "claude-code".into(),
+            name: Some("old-name".into()),
+        };
+        let inv = Inventory {
+            clients: vec![Device {
+                client_id: "a".into(),
+                edr_agent_id: Some("001".into()),
+                ..Device::default()
+            }],
+            // A session open from t+4h to t+5h covers the scan at t+4h30.
+            sessions: vec![SessionRun {
+                session_id: "s".into(),
+                client_id: Some("a".into()),
+                created_at: Some(t + 4 * H),
+                last_seen_at: Some(t + 5 * H),
+                ended_at: Some(t + 5 * H),
+                ..SessionRun::default()
+            }],
+            sightings: Some(vec![
+                seen(t),
+                seen(t + H),
+                seen(t + 2 * H),
+                seen(t + 4 * H + H / 2),
+                seen(t + 6 * H),
+                // Ten hours on: another run.
+                seen(t + 16 * H),
+            ]),
+            ..Inventory::default()
+        };
+        let host: HashMap<&str, &str> = [("a", "a-host")].into();
+        let runs = edr_shadow(&inv, &host);
+        let spans: Vec<(i64, i64, i64)> = runs
+            .iter()
+            .map(|r| {
+                (
+                    r["first"].as_i64().unwrap(),
+                    r["last_seen"].as_i64().unwrap(),
+                    r["scans"].as_i64().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            spans,
+            [
+                (t, t + 2 * H, 3),
+                (t + 6 * H, t + 6 * H, 1),
+                (t + 16 * H, t + 16 * H, 1)
+            ],
+            "the open session splits the first run from the second"
+        );
+        assert!(
+            runs.iter()
+                .all(|r| r["host"] == "a-host" && r["why"] == "no_session")
+        );
     }
 }

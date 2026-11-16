@@ -347,6 +347,23 @@ pub struct Inventory {
     pub shadow: Option<Vec<ShadowAgent>>,
     /// The machines the EDR lists; none while the engine is not connected to one.
     pub edr: Option<Vec<EdrDevice>>,
+    /// Each EDR scan that saw a coding agent running; none while the engine keeps no such record.
+    pub sightings: Option<Vec<EdrSighting>>,
+}
+
+/// An EDR scan that saw a coding agent running on a machine.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct EdrSighting {
+    /// The EDR's ID of the machine (`edr_devices.agent_id`).
+    pub agent_id: String,
+    /// The scan's time (ms).
+    pub running_at: i64,
+    /// `claude-code` or `codex`.
+    pub agent: String,
+    /// The machine's name then.
+    pub name: Option<String>,
 }
 
 /// An agent running where the hooks are not: a Claude Code or Codex project a machine's check

@@ -98,7 +98,7 @@ export function demo(now = Date.now()): Data {
   const real = devices.filter((d) => d.registered_at && d.last);
   for (const i of [1, 4, 4, 8, 11, 13, 13, 13, 19, 22]) {
     const d = real[i % real.length];
-    shadow.push({ device: d.id, host: d.host, agent: rnd() < 0.55 ? "claude-code" : "codex", project: null, last_seen: now - (0.3 + rnd() * 70) * HOUR, why: "no_session" });
+    shadow.push({ device: d.id, host: d.host, agent: rnd() < 0.55 ? "claude-code" : "codex", project: null, ...(() => { const last = now - (0.3 + rnd() * 70) * HOUR, scans = 1 + Math.floor(rnd() * 5); return { first: last - (scans - 1) * HOUR, last_seen: last, scans }; })(), why: "no_session" });
   }
   shadow.sort((a, b) => b.last_seen! - a.last_seen!);
 

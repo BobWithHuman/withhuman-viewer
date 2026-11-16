@@ -21,11 +21,12 @@ export type Device = {
 export type EdrOnly = { id: string; name: string; os: string | null; status: string | null; serial: string | null; last: number | null; agent: string | null };
 export const EDR_STATUS: Record<string, string> = { active: "연결됨", disconnected: "끊김", never_connected: "연결된 적 없음", pending: "대기" };
 export type Project = { device: string; project: string; agent: string | null; hook_version: string | null; installed_at: number | null };
-/** Shadow AI: a coding agent the EDR saw running at `last_seen` on a machine with no Hooks
- * session open then (`no_session`), or on one that never registered (`unregistered`); or a
- * project a check found with no hooks (`project`). */
+/** Shadow AI: a run of a coding agent the EDR's scans saw from `first` to `last_seen` (`scans`
+ * of them) on a machine with no Hooks session open then (`no_session`), or on one that never
+ * registered (`unregistered`); or a project a check found with no hooks (`project`). */
 export type Shadow = {
   device: string | null; host: string | null; agent: string; project: string | null; last_seen: number | null;
+  first?: number | null; scans?: number;
   why?: "project" | "no_session" | "unregistered"; edr?: string | null;
 };
 export const WHY: Record<string, string> = { project: "훅 없는 프로젝트", no_session: "훅 세션 없음", unregistered: "미등록 기기" };

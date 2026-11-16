@@ -102,7 +102,7 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
                   <ShieldOff className="size-4 shrink-0 text-deny" strokeWidth={1.9} />
                   <AgentMark agent={a.agent} size={16} label />
                   <Chip className="shrink-0 bg-deny/15 text-deny">{WHY[a.why ?? ""] ?? "훅 없음"}</Chip>
-                  <When>{clock(a.last_seen)} · {ago(a.last_seen, view.now)}</When>
+                  <When>{a.first && a.first !== a.last_seen ? `${clock(a.first)} – ${clock(a.last_seen).slice(-5)}` : clock(a.last_seen)} · 스캔 {a.scans ?? 1}</When>
                 </Line>
               ))}
             </div>
