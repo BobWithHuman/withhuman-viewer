@@ -8,16 +8,22 @@
 import { BadgeCheck, BadgeX, Laptop, OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Empty, ServiceLogo, ago } from "@/kit";
+import { Empty, NATURE, NatureIcon, ServiceLogo, ago, type Nature } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark } from "./marks";
-import { isOn, type Server } from "./mcp/types";
+import { isOn, type Server, type Tool } from "./mcp/types";
 import { EDR_STATUS, ENGINE, STATE, agentLabel, type EdrOnly, type Machine, type Shadow, type View } from "./model";
 
 /** A row: a machine the engine knows, or a place shadow AI was found on that it does not. */
 type Row = { key: string; name: string; machine?: Machine; shadow: Shadow[]; edr?: EdrOnly };
 
 const AGENT_ORDER = ["claude-code", "codex"];
+/** What makes an MCP tool a threat, the worst first: what moves money or accounts, sends data
+ * out, or deletes. */
+const RISKY: Nature[] = ["money", "send", "delete"];
+const worst = (tools: Tool[]) => RISKY.find((n) => tools.some((t) => t.nature === n)) ?? null;
+/** A server's tools that are a threat, those most called first. */
+const risky = (s: Server) => s.tools.filter((t) => RISKY.includes(t.nature)).sort((a, b) => RISKY.indexOf(a.nature) - RISKY.indexOf(b.nature) || b.calls - a.calls);
 const CELL = "grid h-10 w-11 shrink-0 place-items-center";
 const tip = (mark: ReactNode, text: ReactNode) => <Tooltip><TooltipTrigger asChild>{mark}</TooltipTrigger><TooltipContent>{text}</TooltipContent></Tooltip>;
 
@@ -31,6 +37,7 @@ export function FleetLegend() {
       {item(<BadgeCheck className="size-3.5 text-info" strokeWidth={2} />, "EDR 확인")}
       {item(<i className="size-2.5 rounded-full bg-foreground/70" />, "사용")}
       {item(<i className="size-2.5 rounded-full border border-dashed border-foreground/50" />, "설치만")}
+      {item(<i className="size-2.5 rounded-full ring-2 ring-send" />, "위험 도구 호출")}
     </div>
   );
 }
@@ -91,6 +98,38 @@ export function Fleet({ view, machines, servers, picked, onDevice, onServer }: {
           ))}
         </div>
 
+        {/* The servers' tools that are a threat. */}
+        <div className="sticky top-[54px] z-10 flex h-9 items-center border-b bg-card pl-2 text-[11.5px] text-muted-foreground">위험 도구</div>
+        <div className="sticky top-[54px] z-10 h-9 border-b border-l bg-card" />
+        <div className="sticky top-[54px] z-10 flex h-9 items-center border-b border-l bg-card px-2">
+          {servers.map((s) => {
+            const bad = risky(s), w = worst(bad);
+            if (!w) return <span key={s.name} className="grid w-11 shrink-0 place-items-center"><i className="size-1 rounded-full bg-foreground/12" /></span>;
+            const deny = s.tools.reduce((a, t) => a + t.deny, 0);
+            return (
+              <span key={s.name} className="grid w-11 shrink-0 place-items-center">
+                {tip(
+                  <button onClick={() => onServer(s.name)} className="tnum inline-flex h-6 items-center gap-0.5 rounded-md px-1 text-[11px] font-semibold transition-colors hover:bg-accent" style={{ color: NATURE[w].color }}>
+                    <NatureIcon n={w} className="size-3.5" />{bad.length}
+                    {deny > 0 && <i className="ml-0.5 size-1.5 rounded-full bg-deny" />}
+                  </button>,
+                  <div className="flex flex-col gap-1 py-0.5">
+                    <span className="font-medium">{s.name}</span>
+                    {bad.slice(0, 8).map((t) => (
+                      <span key={t.name} className="tnum flex items-center gap-1.5">
+                        <NatureIcon n={t.nature} className="size-3" />
+                        <span className="font-mono">{t.name}</span>
+                        <span className="opacity-70">{NATURE[t.nature].label} · 호출 {t.calls.toLocaleString()}{t.review ? ` · 확인 ${t.review}` : ""}{t.deny ? ` · 차단 ${t.deny}` : ""}</span>
+                      </span>
+                    ))}
+                    {bad.length > 8 && <span className="opacity-70">+{bad.length - 8}</span>}
+                  </div>,
+                )}
+              </span>
+            );
+          })}
+        </div>
+
         {rows.map((r) => {
           const m = r.machine;
           const line = "border-b border-white/5";
@@ -137,10 +176,18 @@ export function Fleet({ view, machines, servers, picked, onDevice, onServer }: {
                 {servers.map((s) => {
                   if (!m || !s.installs.some((x) => isOn(x.client, m))) return <span key={s.name} className={CELL}><i className="size-1 rounded-full bg-foreground/12" /></span>;
                   const n = callsFrom(s, m);
+                  // The tools that are a threat this machine called, and the worst of them.
+                  const used = risky(s).filter((t) => t.users.some((u) => u.n > 0 && isOn(u.client, m)));
+                  const w = worst(used);
                   return (
                     <button key={s.name} onClick={() => onServer(s.name)} className={cn(CELL, "rounded-md transition-colors hover:bg-accent")}>
-                      {tip(<span className={cn("rounded-full", !n && "opacity-40 outline outline-1 outline-offset-2 outline-foreground/60 outline-dashed")}><ServiceLogo name={s.name} size={20} /></span>,
-                        <>{s.name} · {n ? `호출 ${n.toLocaleString()}` : "호출 없음"} · {r.name}</>)}
+                      {tip(<span className={cn("rounded-full", !n && "opacity-40 outline outline-1 outline-offset-2 outline-foreground/60 outline-dashed", w && "ring-2 ring-offset-2 ring-offset-card")} style={w ? { ["--tw-ring-color" as string]: NATURE[w].color } : undefined}><ServiceLogo name={s.name} size={20} /></span>,
+                        <div className="flex flex-col gap-1 py-0.5">
+                          <span>{s.name} · {n ? `호출 ${n.toLocaleString()}` : "호출 없음"} · {r.name}</span>
+                          {used.map((t) => (
+                            <span key={t.name} className="tnum flex items-center gap-1.5"><NatureIcon n={t.nature} className="size-3" /><span className="font-mono">{t.name}</span><span className="opacity-70">{t.users.filter((u) => isOn(u.client, m)).reduce((a, u) => a + u.n, 0).toLocaleString()}</span></span>
+                          ))}
+                        </div>)}
                     </button>
                   );
                 })}
