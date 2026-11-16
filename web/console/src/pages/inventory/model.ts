@@ -1,6 +1,6 @@
 // The inventory as the app hands it over (`src/admin/inventory_web.rs`), and what the page works
-// out from it: which sessions are still going within the window picked, how each machine stands,
-// and what each machine did.
+// out from it: which sessions are still going within the window picked and how each machine
+// stands.
 
 import { Eye, FileText, ShieldCheck, type LucideIcon } from "lucide-react";
 import { isOn, type Mcp } from "./mcp/types";
@@ -39,23 +39,14 @@ export type Run = {
 export type Reply = {
   req: number; ok: boolean; error?: string; done?: "admin" | "device_stopped" | "device_released";
 };
-/** What a machine did over the last `days` days, by day, tool and session together: each cell is
- * [day, tool, session, allowed, held for the user, blocked], day and the others indexes; day 0 is
- * the first and the last is today. `recent` are the latest Calls of each day as they are. */
-export type Activity = {
-  tools: string[]; sessions: string[];
-  cells: [number, number, number, number, number, number][];
-  recent: Call[];
-};
-export type Call = { session: string; seq: number; at: number | null; tool: string | null; target: string | null; decision: string | null; ran: boolean };
-export type Tab = "activity" | "sessions" | "shadow" | "mcp";
+export type Tab = "sessions" | "shadow" | "mcp";
 export type Data = {
   status: "ready" | "loading" | "failed" | "none"; error: string | null; now: number;
   source: { label: string; demo: boolean }; admin: { api: string; has_token: boolean };
   actor: string; reply: Reply | null; shadow_known?: boolean;
   devices?: Device[]; projects?: Project[]; shadow?: Shadow[]; sessions?: Run[];
-  /** What each machine did, by its ID, over the last `days` days. */
-  activity?: Record<string, Activity>; days?: number;
+  /** Each session's calls: how many, held for the user, blocked. */
+  session_calls?: Record<string, [number, number, number]>;
   /** Whether the engine reads an EDR's machines, and those of them with no hooks. */
   edr_known?: boolean; edr_only?: EdrOnly[];
   /** The tab the lists open on. */
@@ -127,7 +118,7 @@ export function derive(d: Data, windowMin: number) {
     now, going, sessions, machines, registered, shadow, projects,
     shadowKnown: d.shadow_known ?? false,
     edrKnown: d.edr_known ?? false, edrOnly: d.edr_only ?? [],
-    activity: d.activity ?? {}, days: d.days ?? 14,
+    sessionCalls: d.session_calls ?? {},
     unregistered: machines.length - registered.length,
     runningSessions: sessions.filter(going).length,
     noId: sessions.filter((r) => !r.device).length,

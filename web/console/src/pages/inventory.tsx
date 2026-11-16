@@ -1,8 +1,7 @@
 // 인벤토리: the machines the engine protects and what is on them. On the left the picture of every
 // machine by the agents and MCP servers on it; a machine pressed there, or picked in the panel
-// beside it, is the one the panel and the lists under them show: what it did (its calls by day,
-// tools, sessions and latest calls), its sessions, the shadow AI seen on it and its MCP servers,
-// each row in brief and opening in full. A machine's sheet is where it is stopped; the app does
+// beside it, is the one the panel and the lists under them show: its sessions, the shadow AI seen
+// on it and its MCP servers, each row in brief and opening in full. A machine's sheet is where it is stopped; the app does
 // that (`src/admin/inventory.rs`) and answers in `data.reply`.
 
 import type { ColumnDef } from "@tanstack/react-table";
@@ -28,9 +27,8 @@ import { isOn } from "./inventory/mcp/types";
 import { END, PERM, WHY, derive, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
 import { Bag, machineOrder } from "./inventory/bag";
 import { DeviceSheet } from "./inventory/sheets";
-import { DeviceActivity } from "./inventory/activity";
 
-const TABS: [Tab, string][] = [["activity", "활동"], ["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
+const TABS: [Tab, string][] = [["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
 /** A tab the app named, when this page has it. */
 const known = (t?: string | null) => TABS.find(([k]) => k === t)?.[0];
 /** The way agents are let run that the lists are narrowed to. */
@@ -47,7 +45,7 @@ export default function Page({ data }: { data: unknown | null }) {
   const d = (data as Data | null) ?? local;
 
   const [windowMin, setWindowMin] = useState(10);
-  const [tab, setTab] = useState<Tab>(known(d.tab) ?? "activity");
+  const [tab, setTab] = useState<Tab>(known(d.tab) ?? "sessions");
   const [filter, setFilter] = useState<Filter | null>(null);
   // The machine the panel and the lists show: the first in the picture until one is picked.
   const [focus, setFocus] = useState<string | null>(null);
@@ -110,18 +108,6 @@ export default function Page({ data }: { data: unknown | null }) {
     return { s, calls, last: last || null };
   }).sort((a, b) => b.calls - a.calls), [view, current]);
   const shownServers = serverRows.filter((x) => has(x.s.name, ...x.s.tools.map((t) => t.name)));
-  // Each session's calls over the last two weeks, from the machine's activity.
-  const callsOf = useMemo(() => {
-    const a = current ? view.activity[current.id] : undefined;
-    const by = new Map<string, [number, number, number]>();
-    for (const c of a?.cells ?? []) {
-      const id = a!.sessions[c[2]], n = by.get(id) ?? [0, 0, 0];
-      n[0] += c[3] + c[4] + c[5]; n[1] += c[4]; n[2] += c[5];
-      by.set(id, n);
-    }
-    return by;
-  }, [view, current]);
-
   const sessionCols = useMemo<ColumnDef<Run>[]>(() => [
     { id: "state", header: "상태", size: 96, accessorFn: (r) => Number(view.going(r)), cell: ({ row }) => (
       view.going(row.original) ? <StateBadge state="running" /> : <span className="text-muted-foreground">{row.original.ended_at ? "끝남" : "신호 끊김"}</span>
@@ -133,8 +119,8 @@ export default function Page({ data }: { data: unknown | null }) {
         {r.opens && <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />}
       </span>
     ) },
-    { id: "calls", header: "호출", size: 160, accessorFn: (r) => callsOf.get(r.id)?.[0] ?? 0, cell: ({ row: { original: r } }) => {
-      const n = callsOf.get(r.id);
+    { id: "calls", header: "호출", size: 160, accessorFn: (r) => view.sessionCalls[r.id]?.[0] ?? 0, cell: ({ row: { original: r } }) => {
+      const n = view.sessionCalls[r.id];
       return n ? (
         <span className="tnum flex items-center gap-2"><b className="font-medium">{num(n[0])}</b>
           {n[1] > 0 && <span className="text-[12px] text-review">확인 {n[1]}</span>}
@@ -148,7 +134,7 @@ export default function Page({ data }: { data: unknown | null }) {
     { id: "end", header: "끝", size: 168, accessorFn: (r) => r.ended_at ?? 0, cell: ({ row: { original: r } }) => (
       r.ended_at ? <span className="tnum truncate text-muted-foreground">{clock(r.ended_at)} · {END[r.end_reason ?? ""] ?? "끝남"}</span> : <Dash />
     ) },
-  ], [view, callsOf]);
+  ], [view]);
 
   const shadowCols = useMemo<ColumnDef<Shadow>[]>(() => [
     { id: "agent", header: "에이전트", size: 152, accessorFn: (a) => a.agent, cell: ({ row }) => <AgentMark agent={row.original.agent} label /> },
@@ -223,7 +209,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const openDevice = (id: string) => setOpen({ kind: "device", id });
   const chip = filter && PERM[filter.value].label;
   const counts: Record<Tab, number> = {
-    activity: (current && view.activity[current.id]?.cells.reduce((n, c) => n + c[3] + c[4] + c[5], 0)) || 0,
     sessions: allSessions.length, shadow: allShadow.length, mcp: serverRows.length,
   };
   const shownCount = sessions.length;
@@ -269,12 +254,11 @@ export default function Page({ data }: { data: unknown | null }) {
             <div className="ml-auto flex items-center gap-3">
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input disabled={tab === "activity"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색" className="h-7 w-48 pl-8 text-[12.5px]" />
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색" className="h-7 w-48 pl-8 text-[12.5px]" />
               </div>
             </div>
           </div>
           <div className="min-h-0 flex-1 text-[13px] [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-auto [&_[data-slot=table-container]]:[scrollbar-color:#4a4a50_transparent] [&_[data-slot=table-container]]:[scrollbar-width:thin] [&_td:first-child]:pl-4 [&_th:first-child]:pl-4">
-            {tab === "activity" && current && <div className="scroll h-full overflow-y-auto p-4"><DeviceActivity key={current.id} m={current} view={view} onSession={openSession} wide /></div>}
             {tab === "sessions" && <DataTable key="sessions" columns={sessionCols} rows={sessions.slice(0, 300)} onRow={(r) => { if (r.opens) openSession(r.id); }} />}
             {tab === "shadow" && <DataTable key="shadow" columns={shadowCols} rows={shadow} onRow={() => current && openDevice(current.id)} />}
             {tab === "mcp" && (view.mcp ? <DataTable key="mcp" columns={serverCols} rows={shownServers} onRow={(x) => openServer(x.s.name)} picked={(x) => open?.kind === "server" && open.name === x.s.name} /> : <Empty />)}

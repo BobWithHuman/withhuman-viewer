@@ -1,4 +1,4 @@
-// Small parts the MCP sheets and a machine's activity share: the calls of a tool that were held or
+// Small parts the MCP sheets share: the calls of a tool that were held or
 // blocked, and the last 30 days as a chart.
 
 import { Bar, BarChart, XAxis } from "recharts";

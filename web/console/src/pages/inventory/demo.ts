@@ -2,7 +2,7 @@
 // sends, made the same way every time from a fixed seed.
 
 import { demoMcp } from "./mcp/demo";
-import type { Activity, Call, Data, Device, Project, Run, Shadow } from "./model";
+import type { Data, Device, Project, Run, Shadow } from "./model";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 
@@ -107,59 +107,12 @@ export function demo(now = Date.now()): Data {
     admin: { api: "http://127.0.0.1:8787", has_token: false }, actor: "security-admin", reply: null,
     shadow_known: true, devices, projects, shadow, sessions,
     mcp: demoMcp(real.map((d) => ({ user: d.host!, client: d.host! })), now),
-    activity: activity(sessions, now, rnd), days: DAYS,
+    // Each session's calls, a few of them held or blocked, more where agents run unasked.
+    session_calls: Object.fromEntries(sessions.map((r) => {
+      const n = 3 + Math.floor(rnd() * 60), loose = r.permission_mode === "bypassPermissions";
+      return [r.id, [n, Math.floor(n * rnd() * (loose ? 0.15 : 0.06)), Math.floor(n * rnd() * (loose ? 0.08 : 0.03))]];
+    })),
   };
-}
-
-const DAYS = 14;
-/** The tools a demo session calls, how often, and what they act on. */
-const TOOLS: [string, number, string[]][] = [
-  ["Bash", 30, ["npm test", "git status", "cargo build", "pytest -q", "git push origin HEAD", "curl -s https://api.github.com/repos", "rm -rf node_modules"]],
-  ["Read", 26, ["src/main.rs", "package.json", "README.md", ".env", "migrations/0042.sql", "src/app/page.tsx"]],
-  ["Edit", 18, ["src/lib/retry.ts", "src/app/page.tsx", "dags/alerts.py", "infra/main.tf"]],
-  ["Grep", 10, ["TODO", "retry", "api_key", "useEffect"]],
-  ["Write", 6, ["docs/runbook.md", "scripts/rollback.sh", "test/e2e/flaky.spec.ts"]],
-  ["WebFetch", 4, ["https://docs.stripe.com/webhooks", "https://pastebin.com/raw/x1", "https://registry.npmjs.org/react"]],
-  ["mcp__github__create_pull_request", 3, ["acme/payments fix/retry → main", "acme/web chore/deps → main"]],
-  ["mcp__slack__post_message", 2, ["#deploys", "#payments-oncall"]],
-  ["mcp__notion__search", 2, ["온보딩 문서", "장애 회고"]],
-];
-
-/** What each demo machine did: its sessions' Calls over the last two weeks. */
-function activity(sessions: Run[], now: number, rnd: () => number): Record<string, Activity> {
-  const day0 = new Date(now); day0.setHours(0, 0, 0, 0);
-  const dayOf = (at: number) => { const d = new Date(at); d.setHours(0, 0, 0, 0); return DAYS - 1 - Math.round((day0.getTime() - d.getTime()) / DAY); };
-  const weight = TOOLS.reduce((a, [, w]) => a + w, 0);
-  const tool = () => { let r = rnd() * weight; for (const t of TOOLS) { r -= t[1]; if (r < 0) return t; } return TOOLS[0]; };
-  const out: Record<string, Activity> = {};
-  for (const r of sessions) {
-    if (!r.device || !r.created_at || !r.last_seen_at || dayOf(r.created_at) < 0) continue;
-    const a = (out[r.device] ??= { tools: [], sessions: [], cells: [], recent: [] });
-    const reckless = r.permission_mode === "bypassPermissions";
-    const n = 6 + Math.floor(rnd() * 50);
-    for (let seq = 1; seq <= n; seq++) {
-      const at = r.created_at + ((r.last_seen_at - r.created_at) * seq) / n;
-      const [name, , targets] = tool();
-      const risky = /rm -rf|git push|pastebin|\.env|api_key|post_message|create_pull/.test(targets.join(" "));
-      const roll = rnd();
-      const decision = roll < (reckless ? 0.05 : 0.02) * (risky ? 3 : 1) ? "DENY" : roll < (reckless ? 0.12 : 0.07) * (risky ? 2 : 1) ? "REVIEW" : "ALLOW";
-      const target = targets[Math.floor(rnd() * targets.length)];
-      const call: Call = { session: r.id, seq: seq * 2, at, tool: name, target, decision, ran: decision === "ALLOW" || (decision === "REVIEW" && rnd() < 0.6) };
-      a.recent.push(call);
-      const ti = a.tools.indexOf(name) >= 0 ? a.tools.indexOf(name) : a.tools.push(name) - 1;
-      const si = a.sessions.indexOf(r.id) >= 0 ? a.sessions.indexOf(r.id) : a.sessions.push(r.id) - 1;
-      const d = dayOf(at);
-      let cell = a.cells.find((c) => c[0] === d && c[1] === ti && c[2] === si);
-      if (!cell) a.cells.push((cell = [d, ti, si, 0, 0, 0]));
-      cell[decision === "DENY" ? 5 : decision === "REVIEW" ? 4 : 3]++;
-    }
-  }
-  // The latest 30 of each day, as the app sends them.
-  for (const a of Object.values(out)) {
-    const kept = new Map<number, number>();
-    a.recent = a.recent.sort((x, y) => y.at! - x.at!).filter((c) => { const d = dayOf(c.at!); kept.set(d, (kept.get(d) ?? 0) + 1); return kept.get(d)! <= 30; });
-  }
-  return out;
 }
 
 /** The demo's answer to a request, as the app would give it: the machine stopped or let go, and a `reply`. */

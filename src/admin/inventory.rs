@@ -1,5 +1,5 @@
-//! 인벤토리: the machines and sessions the engine protects (withhuman-core's agent inventory),
-//! what each machine did, and the MCP servers the machines have set up, by machine alone.
+//! 인벤토리: the machines and sessions the engine protects (withhuman-core's agent inventory)
+//! and the MCP servers the machines have set up, by machine alone.
 //!
 //! The screen is drawn by the dashboards' page (`web/console/src/pages/inventory.tsx`) in a
 //! frame; this side reads the inventory, hands it over as JSON ([`super::inventory_web`]) and
@@ -62,16 +62,15 @@ pub fn InventoryPage() -> Element {
                 Load::Ready(list) => list.iter().map(|s| (s.id.clone(), s.clone())).collect(),
                 _ => HashMap::new(),
             };
-            let (modes, activity) = match &*facts.0.read() {
+            let (modes, calls) = match &*facts.0.read() {
                 Some(Ok(list)) => (
                     inventory_web::engine_modes(list),
-                    inventory_web::activity(list, *at),
+                    inventory_web::session_calls(list),
                 ),
                 _ => (HashMap::new(), json!({})),
             };
             let mut page = inventory_web::page(inv, &titles, &modes, &around(*at));
-            page["activity"] = activity;
-            page["days"] = json!(inventory_web::DAYS);
+            page["session_calls"] = calls;
             // The servers the machines have set up; none while the engine does not collect them.
             if let Ok(Some(c)) = mcp {
                 page["mcp"] = super::mcp_web::mcp(c, *at);
@@ -132,7 +131,7 @@ fn first_tab() -> &'static str {
         Ok("sessions") => "sessions",
         Ok("shadow") => "shadow",
         Ok("mcp") => "mcp",
-        _ => "activity",
+        _ => "sessions",
     }
 }
 

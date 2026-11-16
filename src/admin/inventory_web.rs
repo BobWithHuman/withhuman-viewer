@@ -135,97 +135,22 @@ pub(super) fn page(
     page
 }
 
-/// How many days of each machine's Calls [`activity`] gathers, today the last.
-pub(super) const DAYS: usize = 14;
-/// How many of a machine's latest Calls each day go over as they are.
-const RECENT: usize = 30;
-
-/// What each machine did over the last [`DAYS`] days, from its Calls, by client ID. Its Calls are
-/// counted by day, tool and session together (`cells`: day, tool, session as indexes into
-/// `tools` and `sessions`, then the Calls allowed, held for the user and blocked), so the page
-/// can narrow any of the three by the others; the latest [`RECENT`] of each day go over as they
-/// are. Days
-/// are this Mac's calendar days, day 0 the first and `DAYS - 1` today.
-pub(super) fn activity(facts: &[CallFact], now: i64) -> Value {
-    use chrono::TimeZone;
-    let day_of = |ms: i64| {
-        chrono::Local
-            .timestamp_millis_opt(ms)
-            .single()
-            .map(|t| t.date_naive())
-    };
-    let Some(today) = day_of(now) else {
-        return json!({});
-    };
-    #[derive(Default)]
-    struct Of<'a> {
-        tools: Vec<&'a str>,
-        sessions: Vec<&'a str>,
-        cells: BTreeMap<(usize, usize, usize), [u32; 3]>,
-        calls: Vec<(usize, &'a CallFact)>,
-    }
-    let mut by: BTreeMap<&str, Of> = BTreeMap::new();
+/// Each session's Calls: how many, how many held for the user and how many blocked, by session.
+pub(super) fn session_calls(facts: &[CallFact]) -> Value {
+    let mut by: BTreeMap<&str, [u32; 3]> = BTreeMap::new();
     for f in facts {
-        let (Some(client), Some(at)) = (f.client.as_deref(), f.at) else {
-            continue;
-        };
-        let Some(day) = day_of(at) else { continue };
-        let ago = (today - day).num_days();
-        if !(0..DAYS as i64).contains(&ago) {
-            continue;
+        let n = by.entry(f.session.as_str()).or_default();
+        n[0] += 1;
+        match f.decision.as_deref() {
+            Some("REVIEW") => n[1] += 1,
+            Some("DENY") => n[2] += 1,
+            _ => {}
         }
-        let of = by.entry(client).or_default();
-        let tool = f.tool.as_deref().unwrap_or("?");
-        let t = index(&mut of.tools, tool);
-        let s = index(&mut of.sessions, f.session.as_str());
-        let verdict = match f.decision.as_deref() {
-            Some("DENY") => 2,
-            Some("REVIEW") => 1,
-            _ => 0,
-        };
-        let day = DAYS - 1 - ago as usize;
-        of.cells.entry((day, t, s)).or_default()[verdict] += 1;
-        of.calls.push((day, f));
     }
     by.into_iter()
-        .map(|(client, mut of)| {
-            of.calls.sort_by_key(|(_, f)| std::cmp::Reverse(f.at));
-            let mut kept = [0usize; DAYS];
-            let recent: Vec<Value> = of
-                .calls
-                .iter()
-                .filter(|(day, _)| {
-                    kept[*day] += 1;
-                    kept[*day] <= RECENT
-                })
-                .map(|(_, f)| {
-                    json!({
-                        "session": f.session, "seq": f.seq, "at": f.at, "tool": f.tool,
-                        "target": f.target.as_deref().map(|t| t.chars().take(200).collect::<String>()),
-                        "decision": f.decision, "ran": f.ran,
-                    })
-                })
-                .collect();
-            let cells: Vec<Value> = of
-                .cells
-                .iter()
-                .map(|(&(d, t, s), n)| json!([d, t, s, n[0], n[1], n[2]]))
-                .collect();
-            (
-                client.to_owned(),
-                json!({ "tools": of.tools, "sessions": of.sessions, "cells": cells, "recent": recent }),
-            )
-        })
+        .map(|(session, n)| (session.to_owned(), json!(n)))
         .collect::<serde_json::Map<_, _>>()
         .into()
-}
-
-/// Where `x` is in `list`, put at its end when it is not there yet.
-fn index<'a>(list: &mut Vec<&'a str>, x: &'a str) -> usize {
-    list.iter().position(|y| *y == x).unwrap_or_else(|| {
-        list.push(x);
-        list.len() - 1
-    })
 }
 
 /// How far apart a scan and a session's start or end may be and still meet: the clocks of the
@@ -381,49 +306,22 @@ mod tests {
     }
 
     #[test]
-    fn a_machine_s_calls_are_counted_by_day_tool_and_session() {
-        let now = 1_763_280_000_000; // 2025-11-16, midday or so wherever the test runs
-        let call = |session: &str, tool: &str, at: i64, decision: Option<&str>| CallFact {
+    fn a_session_s_calls_are_counted_with_those_held_and_blocked() {
+        let call = |session: &str, decision: Option<&str>| CallFact {
             session: session.into(),
-            client: Some("a".into()),
-            tool: Some(tool.into()),
-            at: Some(at),
             decision: decision.map(str::to_owned),
             ..CallFact::default()
         };
-        let facts = vec![
-            call("s1", "Bash", now, Some("ALLOW")),
-            call("s1", "Bash", now, Some("DENY")),
-            call("s1", "Read", now, Some("REVIEW")),
-            call("s2", "Bash", now - 3 * 86_400_000, None),
-            call("s3", "Bash", now - 30 * 86_400_000, Some("ALLOW")),
-            CallFact {
-                client: None,
-                ..call("s4", "Bash", now, None)
-            },
+        let facts = [
+            call("s1", Some("ALLOW")),
+            call("s1", Some("DENY")),
+            call("s1", Some("REVIEW")),
+            call("s1", None),
+            call("s2", Some("ALLOW")),
         ];
-        let all = activity(&facts, now);
-        let a = &all["a"];
-        assert_eq!(a["tools"], json!(["Bash", "Read"]));
-        assert_eq!(
-            a["sessions"],
-            json!(["s1", "s2"]),
-            "a month ago is past the window"
-        );
-        let today = (DAYS - 1) as u64;
-        let cells = a["cells"].as_array().unwrap();
-        assert!(cells.contains(&json!([today, 0, 0, 1, 0, 1])), "{cells:?}");
-        assert!(cells.contains(&json!([today, 1, 0, 0, 1, 0])));
-        assert!(
-            cells.contains(&json!([today - 3, 0, 1, 1, 0, 0])),
-            "no decision counts as allowed"
-        );
-        assert_eq!(a["recent"].as_array().unwrap().len(), 4);
-        assert_eq!(
-            all.as_object().unwrap().len(),
-            1,
-            "a Call with no machine is no machine's"
-        );
+        let calls = session_calls(&facts);
+        assert_eq!(calls["s1"], json!([4, 1, 1]));
+        assert_eq!(calls["s2"], json!([1, 0, 0]));
     }
 
     #[test]
