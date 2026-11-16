@@ -1,12 +1,12 @@
 //! What the security team decided about what it looked at, kept in a file beside the settings
 //! (`triage.json`) on this Mac until the engine keeps it for the whole team: each session marked
-//! an attack or nothing wrong, and the sources (a document, a URL, a tool) it chose to distrust.
+//! as being looked at, an attack, nothing wrong or closed, and the sources (a document, a URL, a tool) it chose to distrust.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// A session's mark: `attack` or `benign`, who set it and when (ms).
+/// A session's mark (`reviewing`, `attack`, `benign` or `closed`), who set it and when (ms).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Mark {
     pub state: String,
@@ -65,7 +65,7 @@ fn save(store: &Store) {
 
 /// Sets a session's mark, or takes it off (`state` none), and writes the file.
 pub fn mark(store: &mut Store, session: &str, state: Option<&str>, by: &str, at: i64) {
-    match state.filter(|s| matches!(*s, "attack" | "benign")) {
+    match state.filter(|s| matches!(*s, "reviewing" | "attack" | "benign" | "closed")) {
         Some(state) => {
             store.marks.insert(
                 session.to_owned(),

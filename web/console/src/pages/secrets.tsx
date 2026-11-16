@@ -307,6 +307,14 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
   ) },
   { id: "spread", header: "퍼진 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (v) => v.last ?? 0, cell: ({ row: { original: v } }) => <When at={v.last} now={now} /> },
+  // A value that went out opens in 기록 at the Call that sent it, without the detail between.
+  { id: "open", header: "", size: 44, enableSorting: false, cell: ({ row: { original: v } }) => {
+    const t = v.trails.find((x) => x.status === "out"), m = t?.mentions.find((x) => x.out && !x.held) ?? t?.mentions.find((x) => x.out);
+    return t && m ? (
+      <button aria-label="기록에서 열기" title="기록에서 열기" onClick={(e) => { e.stopPropagation(); openInRecord(t.session, m.seq); }}
+        className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><ArrowUpRight className="size-3.5" /></button>
+    ) : null;
+  } },
 ];
 
 /** How many of each kind, the most first: "API 키 2 · IBAN 1". */

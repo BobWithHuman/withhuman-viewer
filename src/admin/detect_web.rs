@@ -149,6 +149,7 @@ fn call(f: &CallFact, severity: Severity, owners: &super::secrets_web::Owners) -
         "sev": severity.key(),
         "kind": detection_kind(f),
         "action": action_of(f),
+        "cause": f.cause,
         "source": source_of(f),
         "tool": f.tool,
         "folder": folder_of(f.cwd.as_deref()),
@@ -185,14 +186,27 @@ pub(super) fn alerts(inv: &crate::model::Inventory, now: i64) -> Value {
     let silent: Vec<Value> = inv
         .clients
         .iter()
-        .filter(|d| d.registered_at.is_some())
+        .filter(|d| d.registered_at.is_some() && d.last_seen.is_some())
         .filter(|d| {
-            d.last_seen.is_none_or(|at| at < now - SILENT_MS)
+            d.last_seen.is_some_and(|at| at < now - SILENT_MS)
                 || d.edr_status.as_deref() == Some("disconnected")
         })
         .map(|d| row(d, d.last_seen))
         .collect();
-    json!({ "new": new, "silent": silent })
+    // Set up yet never heard from, and heard from yet never set up.
+    let installed: Vec<Value> = inv
+        .clients
+        .iter()
+        .filter(|d| d.registered_at.is_some() && d.first_seen.is_none() && d.last_seen.is_none())
+        .map(|d| row(d, d.registered_at))
+        .collect();
+    let unregistered: Vec<Value> = inv
+        .clients
+        .iter()
+        .filter(|d| d.registered_at.is_none())
+        .map(|d| row(d, d.last_seen))
+        .collect();
+    json!({ "new": new, "silent": silent, "installed": installed, "unregistered": unregistered })
 }
 
 /// The page's data as JSON text.

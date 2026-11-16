@@ -22,6 +22,8 @@ export type Call = {
   session: string; seq: number; at: number | null; machine: string; verdict: Verdict; sev: Sev;
   /** Whose session it is, when the inventory tells. */
   user?: string | null;
+  /** What the Call whose result told this one to act was on: a file, a URL, a command or a tool. */
+  cause?: string | null;
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
   target: string | null; reason: string | null; prompt: string | null; rule: string | null;
   mode: string | null; ran: boolean; hard: boolean;
@@ -38,18 +40,23 @@ export type Data = {
   /** What the team marked each session as, the case opened, and what the last save said. */
   triage?: Record<string, Mark>; case?: Case | null; saved?: string | null;
   /** The sources the team distrusts, and the machines to tell it about. */
-  blocked?: Blocked[]; alerts?: { new: Alert[]; silent: Alert[] } | null;
+  blocked?: Blocked[]; alerts?: { new: Alert[]; silent: Alert[]; installed?: Alert[]; unregistered?: Alert[] } | null;
 };
 // A source the team distrusts, and the Call that showed it.
 export type Blocked = { source: string; by: string; at: number; session: string; seq: number };
 // A machine newly registered, or not heard from.
 export type Alert = { id: string; host: string | null; user: string | null; at: number | null; edr: string | null };
-// A session's mark: an attack, or nothing wrong.
-export type Mark = { state: "attack" | "benign"; by: string; at: number };
+// A session's mark: being looked at, an attack, nothing wrong (a false alarm), or closed.
+export type Mark = { state: "reviewing" | "attack" | "benign" | "closed"; by: string; at: number };
+export const MARKS: Mark["state"][] = ["reviewing", "attack", "benign", "closed"];
 export const MARK: Record<Mark["state"], { label: string; cls: string }> = {
-  attack: { label: "공격", cls: "bg-deny/15 text-deny" },
-  benign: { label: "정상", cls: "bg-allow/15 text-allow" },
+  reviewing: { label: "확인 중", cls: "bg-review/15 text-review" },
+  attack: { label: "공격 확인", cls: "bg-deny/15 text-deny" },
+  benign: { label: "오탐", cls: "bg-allow/15 text-allow" },
+  closed: { label: "종결", cls: "bg-white/8 text-muted-foreground" },
 };
+// Still to handle: not marked yet, or being looked at.
+export const isOpen = (m: Mark | undefined) => !m || m.state === "reviewing";
 // One Call laid out to judge (`src/admin/case.rs`): what was asked, what told the agent to act
 // (the Call whose result it was, and the words), and where else the same thing was read.
 export type Case = {
@@ -208,6 +215,29 @@ export function groups(calls: Call[], of: (c: Call) => string): Group[] {
   }
   return [...by.values()].sort((a, b) => b.risk - a.risk || b.total - a.total || a.key.localeCompare(b.key));
 }
+// A Call that already ran though it should worry: allowed though hard to undo, held and let
+// run by a person, or one that sent data out and ran. These come before what the engine stopped.
+export const happened = (c: Call) => c.ran && (c.verdict === "allow" || c.hard || c.kind === "exfiltration" || c.verdict === "review");
+
+// A case: the Calls worth a look that one cause made, over every session it reached; a Call
+// with no known cause makes a case of its session. Those with Calls that already ran come
+// first, then the riskiest.
+export type CaseGroup = Group & { cause: string | null; sessions: string[]; machines: string[]; ran: number };
+export function cases(calls: Call[]): CaseGroup[] {
+  return groups(calls, (c) => (c.cause ? `c:${c.cause}` : `s:${c.session}`))
+    .map((g) => ({
+      ...g, cause: g.calls[0].cause ?? null,
+      sessions: [...new Set(g.calls.map((c) => c.session))], machines: [...new Set(g.calls.map((c) => c.machine))],
+      ran: g.calls.filter(happened).length,
+    }))
+    .sort((a, b) => Number(b.ran > 0) - Number(a.ran > 0) || b.risk - a.risk || b.total - a.total);
+}
+// A case's state: its sessions' common mark, `mixed` when they differ, none when none is marked.
+export function stateOf(g: CaseGroup, marks: Record<string, Mark>): Mark["state"] | "mixed" | null {
+  const states = new Set(g.sessions.map((s) => marks[s]?.state ?? null));
+  return states.size > 1 ? "mixed" : [...states][0];
+}
+
 // The worst of some Calls.
 export const worst = (g: Pick<Group, Sev>): Sev => SEVS.find((s) => g[s] > 0) ?? "after";
 
@@ -333,7 +363,8 @@ export const hostOf = (target: string | null) => {
 export function tuning(calls: Call[], marks: Record<string, Mark>) {
   const sessions = [...new Set(calls.map((c) => c.session))];
   const marked = sessions.filter((s) => marks[s]);
-  const benign = marked.filter((s) => marks[s].state === "benign").length;
+  const judged = marked.filter((s) => marks[s].state === "attack" || marks[s].state === "benign");
+  const benign = judged.filter((s) => marks[s].state === "benign").length;
   const tools = new Map<string, number>();
   for (const c of calls) if (c.verdict === "deny" && c.tool) tools.set(c.tool, (tools.get(c.tool) ?? 0) + 1);
   const held = new Map<string, { n: number; ran: number }>();
@@ -345,7 +376,7 @@ export function tuning(calls: Call[], marks: Record<string, Mark>) {
     held.set(key, row);
   }
   return {
-    marked: marked.length, benign, attacks: marked.length - benign,
+    marked: judged.length, benign, attacks: judged.length - benign,
     tools: [...tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
     // Held at least five times and let run nine times in ten: a candidate to loosen.
     loosen: [...held.entries()].map(([kind, r]) => ({ kind, ...r, share: r.ran / r.n })).filter((r) => r.n >= 5 && r.share >= 0.8).sort((a, b) => b.share - a.share || b.n - a.n),
