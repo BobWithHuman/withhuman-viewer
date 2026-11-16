@@ -434,27 +434,42 @@ function Origin({ t }: { t: Trail }) {
   );
 }
 
-/** How a value went: where it came in, the tools that carried it, where it ended up. */
+/** How a value went, as two ends joined by an arrow: where it came in, and where it ended up
+ * with the tool that sent it there. The arrow carries how it ended. */
 function Path({ trails, places, status }: { trails: Trail[]; places: string[]; status: Status }) {
-  // The tool of each Call that sent it, or, where the tool is not told, the command's first word.
-  const tools = [...new Set(trails.flatMap((t) => t.mentions.filter((m) => m.out).map((m) => m.tool ?? m.what?.trim().split(/\s+/)[0])).filter((x): x is string => !!x))];
   const first = trails[0], from = fromOf(first), Icon = FROM[from].icon;
-  const box = "flex min-w-0 flex-col gap-1 rounded-lg border bg-background px-3 py-2";
+  const typed = trails.some((t) => fromOf(t) === "user");
+  // Where it went, by service, with the tools of the Calls that sent it there.
+  const sends = trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place));
+  const to = services(places);
+  const toolsTo = (service: string) => [...new Set(sends.filter((m) => m.place!.split(" · ").pop() === service)
+    .map((m) => toolName(m.tool ?? m.what?.trim().split(/\s+/)[0]).split(" · ").pop()!).filter((x) => !!x))];
+  const tone = status === "out" ? "var(--deny)" : status === "blocked" ? "var(--review)" : "var(--border)";
+  const end = "flex min-w-0 flex-col gap-1 rounded-lg border bg-background px-3 py-2.5";
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)_16px_minmax(0,1fr)] items-stretch gap-1.5">
-      <div className={box}>
+    <div className="grid grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)] items-center">
+      <div className={cn(end, from === "agent" && !typed && "border-dashed")}>
         <span className="text-[11px] text-muted-foreground">들어온 곳</span>
-        <span className="flex min-w-0 items-center gap-1.5 text-[12.5px]"><Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">{first.source ? short(first.source) : FROM[from].label}</span></span>
+        {typed ? <span className="flex items-center gap-1.5 text-[13px] font-medium"><MessageSquareText className="size-3.5 text-muted-foreground" strokeWidth={1.9} />사용자 입력</span>
+          : first.source ? (
+            <>
+              <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium"><Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><SourceName name={first.source} /></span>
+              <span className="truncate text-[11.5px] text-muted-foreground" title={first.source}>{[first.sourceTool && toolName(first.sourceTool), short(first.source) !== first.source && first.source].filter(Boolean).join(" · ")}</span>
+            </>
+          ) : <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground"><Icon className="size-3.5" strokeWidth={1.9} />출처 불명</span>}
       </div>
-      <ArrowRight className="size-4 self-center text-muted-foreground" />
-      <div className={box}>
-        <span className="text-[11px] text-muted-foreground">보낸 도구</span>
-        {tools.length ? <span className="flex min-w-0 flex-wrap gap-1">{tools.slice(0, 2).map((x) => <Tool key={x} name={x} />)}{tools.length > 2 && <span className="tnum text-[11.5px] text-muted-foreground">+{tools.length - 2}</span>}</span> : <span className="text-[12.5px] text-muted-foreground">–</span>}
+      <div className="flex flex-col items-center gap-1 px-1.5">
+        {status !== "seen" && <span className="text-[11px] font-semibold" style={{ color: tone }}>{STATUS[status].label}</span>}
+        <span className="relative h-0.5 w-full rounded-full" style={{ background: tone }}><ArrowRight className="absolute -top-[7px] -right-1.5 size-4" style={{ color: tone }} /></span>
       </div>
-      <ArrowRight className="size-4 self-center text-muted-foreground" />
-      <div className={cn(box, status === "out" && "border-deny/50 bg-deny/8", status === "blocked" && "border-review/50 bg-review/8")}>
+      <div className={end} style={status !== "seen" ? { borderColor: `color-mix(in oklab, ${tone} 55%, transparent)`, background: `color-mix(in oklab, ${tone} 8%, var(--background))` } : undefined}>
         <span className="text-[11px] text-muted-foreground">간 곳</span>
-        {places.length ? <span className="flex min-w-0 items-center gap-1.5"><Places names={services(places).slice(0, 1)} />{services(places).length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{services(places).length - 1}</span>}</span> : <span className="text-[12.5px] text-muted-foreground">밖으로 안 나감</span>}
+        {to.length ? (
+          <>
+            <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium"><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{to.length - 1}</span>}</span>
+            {toolsTo(to[0]).length > 0 && <Masked className="truncate text-[11.5px] text-muted-foreground" >{toolsTo(to[0]).join(", ")}</Masked>}
+          </>
+        ) : <span className="text-[13px] text-muted-foreground">밖으로 안 나감</span>}
       </div>
     </div>
   );
@@ -490,7 +505,8 @@ function Machines({ trails, now }: { trails: Trail[]; now: number }) {
 /** A value: how it went, from where to where; where it came in, plainly; and who it was. */
 function ValueSheet({ v, all, now }: { v: Value; all: Trail[]; now: number }) {
   const Icon = CATEGORY[v.category as Category]?.icon;
-  const origins = all.filter((t, i, list) => list.findIndex((x) => (x.source ?? x.mentions.find((m) => m.said)?.said ?? fromOf(x)) === (t.source ?? t.mentions.find((m) => m.said)?.said ?? fromOf(t))) === i);
+  // What a person typed the value in, each prompt once; a document or tool is named in the path.
+  const typedOrigins = all.filter((t) => t.mentions.some((m) => m.said)).filter((t, i, list) => list.findIndex((x) => (x.source ?? x.mentions.find((m) => m.said)?.said ?? fromOf(x)) === (t.source ?? t.mentions.find((m) => m.said)?.said ?? fromOf(t))) === i);
   return (
     <>
       <SheetHeader className="gap-2 border-b pr-12">
@@ -499,9 +515,11 @@ function ValueSheet({ v, all, now }: { v: Value; all: Trail[]; now: number }) {
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
         <Path trails={all} places={v.status === "seen" ? [] : v.places} status={v.status} />
-        <Section title="들어온 곳" count={origins.length > 1 ? origins.length : undefined}>
-          {origins.slice(0, 3).map((t) => <Origin key={t.id} t={t} />)}
-        </Section>
+        {typedOrigins.length > 0 && (
+          <Section title="입력 프롬프트" count={typedOrigins.length > 1 ? typedOrigins.length : undefined}>
+            {typedOrigins.slice(0, 3).map((t) => <Origin key={t.id} t={t} />)}
+          </Section>
+        )}
         <Section title="단말" count={new Set(all.map(machineName)).size}>
           <Machines trails={all} now={now} />
         </Section>
