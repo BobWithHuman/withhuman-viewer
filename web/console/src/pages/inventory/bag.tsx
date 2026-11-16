@@ -3,9 +3,8 @@
 // as small marks in one line, and its sessions by engine mode. Each opens where it is handled.
 // The machine is picked here: its name opens a list to search.
 
-import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Inbox, KeyRound, Laptop, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Inbox, KeyRound, Laptop, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -13,7 +12,7 @@ import { Empty, ServiceLogo, ago } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark } from "./marks";
 import { isOn } from "./mcp/types";
-import { ENGINE, ENGINE_KEYS, STATE, agentLabel, type Machine, type View } from "./model";
+import { STATE, agentLabel, type Machine, type View } from "./model";
 import { KillSwitch } from "./kill";
 import { riskOf, tint } from "./threats";
 
@@ -185,8 +184,9 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
   // Each agent once: protected when the hooks are on it, with the shadow runs seen of it.
   const agents = [...new Set([...(m.agent && m.state !== "unregistered" ? [m.agent] : []), ...shadow.map((a) => a.agent)])]
     .map((a) => ({ a, guarded: a === m.agent && m.state !== "unregistered", runs: shadow.filter((x) => x.agent === a && !x.project).length }));
-  const modes = ENGINE_KEYS.map((k) => ({ k, n: sessions.filter((r) => view.sessionCalls[r.id]?.mode === k).length })).filter((x) => x.n);
   const st = view.standing[m.id] ?? { calls: 0, deny: 0, review: 0, worth: 0, pending: 0, out: 0, stopped: 0 };
+  // Its latest sessions, those going first.
+  const latest = [...sessions].sort((a, b) => Number(view.going(b)) - Number(view.going(a)) || (b.last_seen_at ?? b.created_at ?? 0) - (a.last_seen_at ?? a.created_at ?? 0)).slice(0, 4);
   const runs = shadow.filter((a) => !a.project).length;
 
   return (
@@ -194,9 +194,12 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
       <div className="flex shrink-0 items-center gap-2 pb-3">
         <Picker view={view} id={m.id} onPick={onPick} />
         <KillSwitch key={m.id} m={m} now={view.now} onStop={(stopped, reason) => onStop(m.id, stopped, reason)} />
-        <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onDevice(m.id)}><PanelRightOpen /></Button></TooltipTrigger><TooltipContent>상세 · 기기 멈춤</TooltipContent></Tooltip>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {/* Its background opens the machine's sheet; what is pressed inside opens its own. */}
+      <div role="button" tabIndex={0} aria-label="상세"
+        onClick={(e) => { if (!(e.target as HTMLElement).closest("button, a, input")) onDevice(m.id); }}
+        onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) onDevice(m.id); }}
+        className="-mx-2 -mb-2 flex min-h-0 flex-1 cursor-pointer flex-col gap-3 rounded-lg px-2 pb-2 transition-colors hover:bg-white/[0.025]">
         {/* How it stands: four figures, each opening where it is handled. */}
         <div className="grid shrink-0 grid-cols-4 gap-2">
           <Tile icon={ShieldX} label="차단" n={st.deny + st.review} tone="var(--deny)" onClick={() => onSessions(m.id)}
@@ -237,38 +240,21 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
           </div>
         </section>
 
-        {/* Its sessions, by the mode the engine ran them in. */}
-        <section className="flex shrink-0 flex-wrap items-center gap-1.5 text-[12px]">
-          <span className="mr-1 text-[11.5px] text-muted-foreground">세션 <b className="tnum font-medium text-foreground/80">{sessions.length}</b></span>
-          {modes.map(({ k, n }) => {
-            const E = ENGINE[k];
-            return (
-              <button key={k} onClick={() => onSessions(m.id, k)} className="inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 transition-colors hover:border-white/25 hover:bg-accent">
-                <E.icon className="size-3.5" strokeWidth={1.9} style={{ color: E.color }} />{E.label}<span className="tnum text-muted-foreground">{n}</span>
-              </button>
-            );
-          })}
-          {!sessions.length && <span className="text-muted-foreground/70">없음</span>}
-        </section>
-
-        {/* Its latest calls worth a look, each opening its record. */}
+        {/* What it was asked to do lately: its latest sessions by the prompt that began them. */}
         <section className="flex min-h-0 flex-1 flex-col">
-          <h3 className="mb-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">최근 탐지 <b className="tnum font-medium text-foreground/80">{st.worth}</b></h3>
+          <h3 className="mb-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">최근 작업 <b className="tnum font-medium text-foreground/80">{sessions.length}</b></h3>
           <div className="min-h-0 flex-1 overflow-hidden">
-            {!(st.recent ?? []).length && <span className="text-[12px] text-muted-foreground/70">없음</span>}
-            {(st.recent ?? []).map((c) => {
-              const v = c.leak ? { label: "유출", cls: "bg-deny/15 text-deny" } : c.decision === "DENY" ? { label: "차단", cls: "bg-deny/15 text-deny" } : c.decision === "REVIEW" ? { label: c.ran ? "승인 후 실행" : "확인", cls: "bg-review/15 text-review" } : { label: "허용", cls: "bg-white/8 text-muted-foreground" };
-              const tool = (c.tool ?? "").replace(/^mcp__(.+?)__/, "");
-              return (
-                <button key={`${c.session}-${c.seq}`} onClick={() => onSession(c.session)}
-                  className="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left transition-colors hover:bg-accent">
-                  <span className={cn("w-[74px] shrink-0 rounded px-1.5 text-center text-[11px] leading-5 font-semibold", v.cls)}>{v.label}</span>
-                  <span className="w-[86px] shrink-0 truncate font-mono text-[11.5px] text-muted-foreground" title={c.tool ?? ""}>{tool}</span>
-                  <code className="min-w-0 flex-1 truncate font-mono text-[12px]" title={c.target ?? ""}>{c.target ?? "–"}</code>
-                  <span className="tnum shrink-0 text-[11px] text-muted-foreground">{ago(c.at, view.now)}</span>
-                </button>
-              );
-            })}
+            {!latest.length && <span className="text-[12px] text-muted-foreground/70">없음</span>}
+            {latest.map((r) => (
+              <button key={r.id} onClick={() => onSession(r.id)}
+                className="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left transition-colors hover:bg-accent">
+                <i className={cn("size-1.5 shrink-0 rounded-full", view.going(r) ? "animate-pulse bg-allow" : "bg-white/20")} />
+                <span className={cn("min-w-0 flex-1 truncate text-[12.5px]", !r.title && "font-mono text-[12px] text-muted-foreground")}>{r.title ?? r.id.slice(0, 8)}</span>
+                {r.folder && <span className="max-w-[90px] shrink-0 truncate text-[11.5px] text-muted-foreground">{r.folder}</span>}
+                {(view.sessionCalls[r.id]?.deny ?? 0) > 0 && <span className="tnum shrink-0 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-medium text-deny">차단 {view.sessionCalls[r.id]!.deny}</span>}
+                <span className="tnum shrink-0 text-[11px] text-muted-foreground">{view.going(r) ? "진행 중" : ago(r.last_seen_at ?? r.created_at, view.now)}</span>
+              </button>
+            ))}
           </div>
         </section>
       </div>
