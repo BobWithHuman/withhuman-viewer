@@ -59,6 +59,7 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
     if let Some((_, name)) = crate::metro::mcp_parts(tool) {
         let name = name.to_lowercase();
         let has = |words: &[&str]| words.iter().any(|w| name.contains(w));
+        // Paying and giving access are told by the name; the rest by the registry's action.
         return if has(&["pay", "transfer", "refund", "charge", "payout", "purchase"]) {
             "pay"
         } else if has(&[
@@ -70,33 +71,14 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
             "add_member",
         ]) {
             "grant"
-        } else if has(&["delete", "remove", "trash", "drop", "purge", "destroy"]) {
-            "delete"
-        } else if has(&[
-            "send", "post", "reply", "upload", "publish", "email", "notify",
-        ]) {
-            "send"
-        } else if has(&[
-            "create",
-            "update",
-            "add",
-            "edit",
-            "merge",
-            "write",
-            "set",
-            "transition",
-            "close",
-            "move",
-            "rename",
-            "assign",
-            "comment",
-            "run",
-            "trigger",
-            "execute",
-        ]) {
-            "service"
         } else {
-            "other"
+            match super::mcp_tools::action(&name) {
+                Some("transact") => "pay",
+                Some("send") => "send",
+                Some("delete") => "delete",
+                Some("create" | "update" | "execute" | "delegate") => "service",
+                _ => "other",
+            }
         };
     }
     match tool {

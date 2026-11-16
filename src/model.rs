@@ -271,6 +271,9 @@ pub struct SecretMention {
     /// What the Call acted on (masked as stored).
     pub target: Option<String>,
     /// A result came back.
+    /// Whom or where a Call names to send to (a recipient, a channel, an account), when its
+    /// arguments say.
+    pub recipient: Option<String>,
     pub ran: bool,
 }
 

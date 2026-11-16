@@ -32,7 +32,7 @@ static OUTWARD: LazyLock<Regex> = LazyLock::new(|| {
 pub(super) fn outward(m: &SecretMention) -> bool {
     let tool = m.tool.as_deref().unwrap_or("");
     tool == "WebFetch"
-        || tool.starts_with("mcp__")
+        || crate::metro::mcp_parts(tool).is_some_and(|(_, name)| super::mcp_tools::sends_out(name))
         || (tool == "Bash" && m.target.as_deref().is_some_and(|t| OUTWARD.is_match(t)))
 }
 
@@ -75,11 +75,30 @@ static HOST: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"https?://([^/\s:?'"]+)|@([A-Za-z0-9.\-]+):"#).expect("valid regex")
 });
 
-/// Where an outward Call sends to: its MCP server, the host it names, or else its tool.
+/// A recipient as a row may show it: a mail address or a channel as it is, anything else (an
+/// account number, an ID) with its middle masked, since it may be a sensitive value itself.
+fn masked(recipient: &str) -> String {
+    let r = recipient.trim();
+    let plain = r.contains('@') || r.starts_with('#') || r.contains("://");
+    let n = r.chars().count();
+    if plain || n <= 8 {
+        return r.chars().take(48).collect();
+    }
+    let head: String = r.chars().take(4).collect();
+    let tail: String = r.chars().skip(n - 2).collect();
+    format!("{head}****{tail}")
+}
+
+/// Where an outward Call sends to: for an MCP tool whom its arguments name and its server, or
+/// the server alone; else the host it names, or its tool.
 pub(super) fn destination(m: &SecretMention) -> String {
     let tool = m.tool.as_deref().unwrap_or("");
     if let Some(rest) = tool.strip_prefix("mcp__") {
-        return format!("{} (MCP)", rest.split("__").next().unwrap_or(rest));
+        let server = rest.split("__").next().unwrap_or(rest);
+        return match m.recipient.as_deref().filter(|r| !r.trim().is_empty()) {
+            Some(to) => format!("{} · {server} (MCP)", masked(to)),
+            None => format!("{server} (MCP)"),
+        };
     }
     m.target
         .as_deref()
@@ -207,12 +226,26 @@ pub(super) fn source_of(t: &Trail) -> Option<String> {
 pub fn Secrets() -> Element {
     let mut state = use_context::<AppState>();
     let backend = use_context::<Arc<Backend>>();
-    let found = use_resource(move || {
+    let found = use_resource({
+        let backend = backend.clone();
+        move || {
+            let b = backend.clone();
+            let _ = (state.reload)();
+            let _ = (state.public)();
+            async move { (b.secrets().await, now_ms()) }
+        }
+    });
+    // Whose each session and machine is, from the inventory; unknown where the engine keeps none.
+    let inventory = use_resource(move || {
         let b = backend.clone();
         let _ = (state.reload)();
         let _ = (state.public)();
-        async move { (b.secrets().await, now_ms()) }
+        async move { b.inventory().await.ok().flatten() }
     });
+    let owners = match &*inventory.read() {
+        Some(Some(inv)) => super::secrets_web::Owners::of(inv),
+        _ => super::secrets_web::Owners::default(),
+    };
     let p = (state.public)();
     let titles: HashMap<String, String> = match &*state.sessions.read() {
         Load::Ready(list) => list
@@ -230,6 +263,7 @@ pub fn Secrets() -> Element {
     let data = super::secrets_web::page(
         &trails(&all),
         &titles,
+        &owners,
         &super::secrets_web::Head {
             now: now_ms(),
             loaded,

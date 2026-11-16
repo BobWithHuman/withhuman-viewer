@@ -5,7 +5,7 @@
 // as the engine keeps it, and a place it showed opens in 기록.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowUpRight, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, X } from "lucide-react";
+import { ArrowUpRight, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { send } from "@/bridge";
 import { Badge } from "@/components/ui/badge";
@@ -15,14 +15,14 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, VerdictBadge, ago, clock } from "@/kit";
+import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, VerdictBadge, ago, clock, People, Person } from "@/kit";
 import { cn } from "@/lib/utils";
 import {
-  CALL_VERDICT, CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, placesOf, sessionName, short, sources,
-  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Mention, type Source, type Status, type Trail,
+  CALL_VERDICT, CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values,
+  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Mention, type Source, type Status, type Trail, type Value,
 } from "./secrets/data";
 import { Flow } from "./secrets/flow";
-import { SourceBars } from "./secrets/sources";
+import { SourceBars, parts } from "./secrets/sources";
 
 const DAY = 24 * 3600e3;
 const PERIODS: [string, string][] = [["1", "24시간"], ["7", "7일"], ["30", "30일"], ["all", "전체"]];
@@ -37,7 +37,7 @@ const FOCUS: Record<Focus, (t: Trail) => boolean> = {
   tries: (t) => t.mentions.some((m) => m.out),
   sources: (t) => !!t.source,
 };
-type Open = { trail: Trail } | { attempt: Attempt } | { source: Source } | null;
+type Open = { value: Value } | { trail: Trail } | { attempt: Attempt } | { source: Source } | null;
 type Split = "kind" | "place" | "client";
 const SPLITS: [Split, string][] = [["kind", "종류"], ["place", "보낸 곳"], ["client", "단말"]];
 
@@ -50,7 +50,8 @@ function StatusBadge({ s }: { s: Status }) {
 
 /** A destination's mark: the service's logo for an MCP server, a globe for a host. */
 function PlaceMark({ name, size = 18 }: { name: string; size?: number }) {
-  if (name.endsWith("(MCP)")) return <ServiceLogo name={name} size={size} />;
+  // An MCP destination ends in its server, after whom the Call named: "bob@x.com · slack (MCP)".
+  if (name.endsWith("(MCP)")) return <ServiceLogo name={name.split(" · ").pop()!.replace(" (MCP)", "")} size={size} />;
   return <span className="grid shrink-0 place-items-center rounded-full bg-secondary text-muted-foreground" style={{ width: size, height: size }}><Globe style={{ width: size * 0.62, height: size * 0.62 }} strokeWidth={1.9} /></span>;
 }
 
@@ -97,7 +98,7 @@ export default function Page({ data }: { data: unknown | null }) {
   // picked in one stays in view beside what was not.
   const q = query.trim().toLowerCase();
   const shown = useMemo(
-    () => focused.filter((t) => passes(t, filter) && (!q || [t.text, t.kind, t.title, t.client, t.source, t.session].some((s) => s?.toLowerCase().includes(q)))),
+    () => focused.filter((t) => passes(t, filter) && (!q || [t.text, t.kind, t.title, t.client, t.host, t.user, t.source, t.session].some((s) => s?.toLowerCase().includes(q)))),
     [focused, filter, q],
   );
   const flowTrails = useMemo(() => focused.filter((t) => passes(t, filter, ["from", "source", "category", "status"])), [focused, filter]);
@@ -107,6 +108,7 @@ export default function Page({ data }: { data: unknown | null }) {
     () => bars(focused.filter((t) => passes(t, filter, [split])), (t) => (split === "kind" ? [t.kind] : split === "client" ? [t.client] : placesOf(t))),
     [focused, filter, split],
   );
+  const shownValues = useMemo(() => values(shown), [shown]);
   const shownTries = useMemo(() => attempts(shown), [shown]);
   const shownFrom = useMemo(() => sources(shown), [shown]);
   const chips = (Object.keys(filter) as Dim[]).filter((k) => filter[k] !== undefined);
@@ -131,7 +133,7 @@ export default function Page({ data }: { data: unknown | null }) {
 
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-6 pb-6">
         <div className="grid shrink-0 grid-cols-4 gap-4">
-          <Stat label="드러난 값" icon={ShieldAlert} value={inPeriod.length} unit="개" delta={delta((l) => l.length)}
+          <Stat label="드러난 값" icon={ShieldAlert} value={values(inPeriod).length} unit={`개 · 드러난 곳 ${inPeriod.length}`} delta={delta((l) => values(l).length)}
             active={focus === "all"} onClick={() => only("all", "values")} />
           <Stat label="프롬프트에 넣음" icon={MessageSquareText} value={prompted.length}
             unit={`회 · 세션 ${new Set(prompted.map((t) => t.session)).size} · 단말 ${new Set(prompted.map((t) => t.client)).size}`}
@@ -168,7 +170,7 @@ export default function Page({ data }: { data: unknown | null }) {
           title={
             <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
               <TabsList className="-ml-1">
-                {([["values", "값", shown.length], ["sessions", "유출 시도 세션", shownTries.length], ["sources", "읽어 온 곳", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
+                {([["values", "값", shownValues.length], ["sessions", "유출 시도 세션", shownTries.length], ["sources", "읽어 온 곳", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
                   <TabsTrigger key={v} value={v} className="gap-1.5 px-2.5 text-[12.5px]">{l}<span className="tnum text-[11.5px] text-muted-foreground">{n}</span></TabsTrigger>
                 ))}
               </TabsList>
@@ -183,10 +185,11 @@ export default function Page({ data }: { data: unknown | null }) {
             {chips.length > 1 && <Button variant="ghost" size="xs" onClick={() => setFilter({})}>지우기</Button>}
             <label className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·사용자·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
             </label>
           </>}>
-          {tab === "values" && <DataTable dense columns={valueColumns(d.now)} rows={shown} onRow={(t) => setOpen({ trail: t })} picked={(t) => !!open && "trail" in open && open.trail.id === t.id} />}
+          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt")} rows={shownValues} onRow={(v) => setOpen(v.trails.length === 1 ? { trail: v.trails[0] } : { value: v })}
+            picked={(v) => !!open && (("value" in open && open.value.key === v.key) || ("trail" in open && v.trails.some((t) => t.id === open.trail.id)))} />}
           {tab === "sessions" && <DataTable dense columns={attemptColumns(d.now)} rows={shownTries} onRow={(a) => setOpen({ attempt: a })} picked={(a) => !!open && "attempt" in open && open.attempt.session === a.session} />}
           {tab === "sources" && <DataTable dense columns={sourceColumns(d.now)} rows={shownFrom} onRow={(s) => setOpen({ source: s })} picked={(s) => !!open && "source" in open && open.source.name === s.name} />}
         </Panel>
@@ -194,6 +197,7 @@ export default function Page({ data }: { data: unknown | null }) {
 
       <Sheet open={open !== null} onOpenChange={(on) => !on && setOpen(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[520px] data-[side=right]:sm:max-w-[520px]" aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
+          {open && "value" in open && <ValueSheet v={open.value} onTrail={(t) => setOpen({ trail: t })} />}
           {open && "trail" in open && <TrailSheet t={open.trail} />}
           {open && "attempt" in open && <AttemptSheet a={open.attempt} />}
           {open && "source" in open && <SourceSheet s={open.source} />}
@@ -244,6 +248,21 @@ function SplitBars({ bars, split, picked, height, onPick }: { bars: Bar[]; split
 const Masked = ({ children, className }: { children: ReactNode; className?: string }) => <code className={cn("font-mono text-[12px]", className)}>{children}</code>;
 const Client = ({ name }: { name: string }) => <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-muted-foreground"><Laptop className="size-3.5 shrink-0" strokeWidth={1.9} /><span className="truncate">{name}</span></span>;
 
+/** How far something spread, marked when it is in more than one session. */
+function Spread({ sessions, clients }: { sessions: number; clients: number }) {
+  return <span className={cn("tnum whitespace-nowrap", sessions > 1 ? "font-medium" : "text-muted-foreground")}>세션 {sessions} · 단말 {clients}</span>;
+}
+
+/** Whose machine something happened on: the person when the inventory knows, and the machine. */
+function Who({ t }: { t: { user?: string | null; host?: string | null; client: string } }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      {t.user ? <Person name={t.user} size={20} label /> : <span className="text-muted-foreground">사용자 모름</span>}
+      <Client name={machineName(t)} />
+    </span>
+  );
+}
+
 function Places({ names }: { names: string[] }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
@@ -253,46 +272,105 @@ function Places({ names }: { names: string[] }) {
   );
 }
 
-const valueColumns = (now: number): ColumnDef<Trail>[] => [
-  { id: "text", header: "값", size: 232, accessorFn: (t) => t.text, cell: ({ row: { original: t } }) => {
-    const Icon = CATEGORY[t.category as Category]?.icon;
-    return <span className="flex min-w-0 items-center gap-2" title={t.text}>{Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}<Masked className="truncate">{t.text}</Masked></span>;
+/** A value over every session it showed in: how it ended at its worst, where it was sent, the
+ * Call that carried it, where it came from, and how far it spread. */
+const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
+  { id: "status", header: "결과", size: 132, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => <StatusBadge s={v.status} /> },
+  { id: "text", header: "값", size: 300, accessorFn: (v) => v.text, cell: ({ row: { original: v } }) => {
+    const Icon = CATEGORY[v.category as Category]?.icon;
+    return (
+      <span className="flex min-w-0 items-center gap-2" title={v.text}>
+        {Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
+        <Masked className="min-w-0 truncate">{v.text}</Masked>
+        <span className="shrink-0 text-[12px] text-muted-foreground">{v.kind}</span>
+      </span>
+    );
   } },
-  { id: "kind", header: "종류", size: 118, accessorFn: (t) => t.kind },
-  { id: "from", header: "들어온 곳", accessorFn: (t) => `${fromOf(t)} ${t.source ?? ""}`, cell: ({ row: { original: t } }) => (
-    <span className="flex min-w-0 items-center gap-1.5" title={t.source ?? undefined}>
-      <span className="shrink-0">{FROM[fromOf(t)].label}</span>
-      {t.source && <Masked className="truncate text-muted-foreground">{short(t.source)}</Masked>}
-    </span>
+  { id: "places", header: "보낸 곳", size: 200, accessorFn: (v) => v.places.join(" "), cell: ({ row: { original: v } }) => (v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground/60">–</span>) },
+  { id: "carrier", header: "실어 나른 호출", accessorFn: (v) => v.carrier ?? "", cell: ({ row: { original: v } }) => (v.carrier ? <Masked className="block truncate text-muted-foreground" >{v.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
+  typed
+    // Every value here was typed by a person: the prompt it was typed in tells more than where from.
+    ? { id: "typed", header: "넣은 프롬프트", size: 250, accessorFn: (v) => sessionName(v.trails[0]), cell: ({ row: { original: v } }) => (
+      <span className="flex min-w-0 items-center gap-1.5" title={v.trails.map(sessionName).join("\n")}>
+        <span className="truncate">{sessionName(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
+      </span>
+    ) }
+    : { id: "from", header: "출처", size: 210, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => (
+      <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
+        {v.sources.length
+          ? <><Masked className="truncate">{short(v.sources[0])}</Masked>{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>
+          : <span className="truncate">{v.froms.map((f) => FROM[f].label).join(" · ")}</span>}
+      </span>
+    ) },
+  { id: "users", header: "사용자", size: 120, accessorFn: (v) => v.users.join(" "), cell: ({ row: { original: v } }) => (
+    v.users.length === 1 ? <Person name={v.users[0]} size={20} label /> : v.users.length ? <People names={v.users} max={4} /> : <span className="text-muted-foreground/60">–</span>
   ) },
-  { id: "session", header: "세션", accessorFn: (t) => sessionName(t), cell: ({ row: { original: t } }) => <span className="block truncate text-muted-foreground" title={sessionName(t)}>{sessionName(t)}</span> },
-  { id: "calls", header: "호출", size: 64, accessorFn: (t) => t.calls, cell: ({ row: { original: t } }) => <span className={cn("tnum", !t.calls && "text-muted-foreground")}>{t.calls}</span> },
-  { id: "status", header: "결과", size: 132, accessorFn: (t) => RANK[t.status], cell: ({ row: { original: t } }) => <StatusBadge s={t.status} /> },
-  { id: "client", header: "단말", size: 168, accessorFn: (t) => t.client, cell: ({ row: { original: t } }) => <Client name={t.client} /> },
-  { id: "last", header: "마지막", size: 88, accessorFn: (t) => t.last ?? 0, cell: ({ row: { original: t } }) => <When at={t.last} now={now} /> },
+  { id: "spread", header: "퍼진 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
+  { id: "last", header: "마지막", size: 88, accessorFn: (v) => v.last ?? 0, cell: ({ row: { original: v } }) => <When at={v.last} now={now} /> },
 ];
 
+/** How many of each kind, the most first: "API 키 2 · IBAN 1". */
+function Kinds({ trails }: { trails: Trail[] }) {
+  const n = new Map<string, number>();
+  for (const t of trails) n.set(t.kind, (n.get(t.kind) ?? 0) + 1);
+  const list = [...n.entries()].sort((a, b) => b[1] - a[1]);
+  return (
+    <span className="flex min-w-0 items-center gap-1 overflow-hidden" title={list.map(([k, c]) => `${k} ${c}`).join(" · ")}>
+      {list.slice(0, 2).map(([k, c]) => <span key={k} className="shrink-0 rounded bg-secondary px-1.5 text-[11.5px] leading-[19px] text-foreground/85">{k}{c > 1 && <b className="tnum ml-1 font-medium">{c}</b>}</span>)}
+      {list.length > 2 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{list.length - 2}</span>}
+    </span>
+  );
+}
+
+/** How the Calls sending values out ended: those that ran, those kept back. */
+function Sent({ ran, held }: { ran: number; held: number }) {
+  return (
+    <span className="tnum flex items-center gap-2.5 text-[12px]">
+      <span className={cn("inline-flex items-center gap-1", ran ? "text-deny" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />나감 {ran}</span>
+      <span className={cn("inline-flex items-center gap-1", held ? "text-review" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />막힘 {held}</span>
+    </span>
+  );
+}
+
+/** A session that tried to send values out: what it is, where to, the Call that carried them,
+ * which values, and how its sends ended. */
 const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
   { id: "status", header: "결과", size: 132, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <StatusBadge s={a.ran > 0 ? "out" : "blocked"} /> },
-  { id: "session", header: "세션", accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
-  { id: "client", header: "단말", size: 168, accessorFn: (a) => a.client, cell: ({ row: { original: a } }) => <Client name={a.client} /> },
-  { id: "values", header: "값", size: 56, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <span className="tnum">{a.trails.length}</span> },
-  { id: "ran", header: "나감", size: 64, accessorFn: (a) => a.ran, cell: ({ row: { original: a } }) => <span className={cn("tnum", a.ran ? "text-deny" : "text-muted-foreground")}>{a.ran}</span> },
-  { id: "held", header: "막힘", size: 64, accessorFn: (a) => a.held, cell: ({ row: { original: a } }) => <span className={cn("tnum", a.held ? "text-review" : "text-muted-foreground")}>{a.held}</span> },
-  { id: "places", header: "보내려 한 곳", accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
+  { id: "session", header: "세션", size: 250, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
+  { id: "places", header: "보낸 곳", size: 200, accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
+  { id: "carrier", header: "실어 나른 호출", accessorFn: (a) => a.carrier ?? "", cell: ({ row: { original: a } }) => (a.carrier ? <Masked className="block truncate text-muted-foreground">{a.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
+  { id: "values", header: "값", size: 190, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
+  { id: "sent", header: "전송", size: 132, accessorFn: (a) => a.ran * 1000 + a.held, cell: ({ row: { original: a } }) => <Sent ran={a.ran} held={a.held} /> },
+  { id: "client", header: "단말", size: 150, accessorFn: (a) => a.client, cell: ({ row: { original: a } }) => <Client name={a.client} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (a) => a.last ?? 0, cell: ({ row: { original: a } }) => <When at={a.last} now={now} /> },
 ];
 
+/** A document, command or tool the agents read values from: what it is, how many values and how
+ * they ended, which kinds, and how far they spread. */
 const sourceColumns = (now: number): ColumnDef<Source>[] => [
-  { id: "name", header: "문서·출처", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => (
-    <span className="flex min-w-0 items-baseline gap-2" title={s.name}><Masked className="shrink-0">{short(s.name).slice(0, 48)}</Masked>{short(s.name) !== s.name && <span className="truncate text-[12px] text-muted-foreground">{s.name}</span>}</span>
-  ) },
-  { id: "tool", header: "읽은 도구", size: 190, accessorFn: (s) => s.tool, cell: ({ row: { original: s } }) => <span className="block truncate text-muted-foreground" title={s.tool}>{s.tool}</span> },
-  { id: "values", header: "값", size: 56, accessorFn: (s) => s.trails.length, cell: ({ row: { original: s } }) => <span className="tnum">{s.trails.length}</span> },
-  { id: "categories", header: "유형", size: 232, enableSorting: false, cell: ({ row: { original: s } }) => (
-    <span className="flex items-center gap-1 overflow-hidden">{s.categories.map((c) => <Badge key={c} variant="secondary" className="border-0 font-normal">{categoryLabel(c)}</Badge>)}</span>
-  ) },
-  { id: "sessions", header: "세션", size: 64, accessorFn: (s) => s.sessions, cell: ({ row: { original: s } }) => <span className="tnum">{s.sessions}</span> },
+  { id: "name", header: "읽어 온 곳", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => {
+    const p = parts(s.name);
+    return (
+      <span className="flex min-w-0 items-center gap-2" title={s.name}>
+        {p.server ? <ServiceLogo name={p.server} size={18} /> : p.command ? <SquareTerminal className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.9} /> : <FileText className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
+        <Masked className="min-w-12 truncate">{p.main}</Masked>
+        {p.rest && <span className="min-w-0 shrink-[1000] truncate text-[11.5px] text-muted-foreground">{p.rest}</span>}
+      </span>
+    );
+  } },
+  { id: "values", header: "값", size: 190, accessorFn: (s) => s.trails.length, cell: ({ row: { original: s } }) => <Kinds trails={s.trails} /> },
+  { id: "ended", header: "끝난 곳", size: 250, accessorFn: (s) => { const n = byStatus(s.trails); return n.out * 1e6 + n.blocked * 1e3 + s.trails.length; }, cell: ({ row: { original: s } }) => {
+    const n = byStatus(s.trails);
+    return (
+      <span className="flex items-center gap-2.5">
+        <span className="flex h-2 w-[92px] shrink-0 gap-px overflow-hidden rounded-full">
+          {STATUSES.filter((k) => n[k] > 0).map((k) => <i key={k} className="h-full" style={{ flex: `${n[k]} 0 4px`, background: STATUS[k].color, opacity: k === "seen" ? 0.35 : 1 }} />)}
+        </span>
+        <Sent ran={n.out} held={n.blocked} />
+      </span>
+    );
+  } },
+  { id: "spread", header: "퍼진 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (s) => s.last ?? 0, cell: ({ row: { original: s } }) => <When at={s.last} now={now} /> },
 ];
 
@@ -363,6 +441,42 @@ function OpenButton({ session, seq }: { session: string; seq: number | undefined
   );
 }
 
+/** A value that showed in several sessions: where it went and each session it showed in. */
+function ValueSheet({ v, onTrail }: { v: Value; onTrail: (t: Trail) => void }) {
+  const Icon = CATEGORY[v.category as Category]?.icon;
+  return (
+    <>
+      <SheetHeader className="gap-3 border-b pr-12">
+        <SheetTitle className="flex items-center gap-2 text-[15px]">{Icon && <Icon className="size-4 text-muted-foreground" strokeWidth={1.9} />}{v.kind}<StatusBadge s={v.status} /></SheetTitle>
+        <SheetDescription asChild><Masked className="block rounded-lg border bg-background px-3 py-2.5 text-[13px] break-all text-foreground">{v.text}</Masked></SheetDescription>
+      </SheetHeader>
+      <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
+        <Facts rows={[
+          ["사용자", v.users.length ? <span className="flex flex-wrap gap-x-3 gap-y-1">{v.users.map((u) => <Person key={u} name={u} size={20} label />)}</span> : <span className="text-muted-foreground">모름</span>],
+          ["퍼진 범위", <span className="tnum">세션 {v.sessions} · 단말 {v.clients.length}</span>],
+          ["보낸 곳", v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground">–</span>],
+          ["실어 나른 호출", v.carrier ? <Masked className="break-all">{v.carrier}</Masked> : <span className="text-muted-foreground">–</span>],
+          ["출처", <span className="break-all">{v.sources.length ? v.sources.map(short).join(", ") : v.froms.map((f) => FROM[f].label).join(" · ")}</span>],
+          ["마지막", <span className="tnum">{clock(v.last)}</span>],
+        ]} />
+        <Section title="드러난 세션" count={v.trails.length}>
+          <div className="grid gap-1">
+            {v.trails.map((t) => (
+              <button key={t.id} onClick={() => onTrail(t)} className="flex w-full min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
+                <span className="grid min-w-0 flex-1 gap-1">
+                  <span className="truncate">{sessionName(t)}</span>
+                  <span className="text-[12px]"><Who t={t} /></span>
+                </span>
+                <StatusBadge s={t.status} />
+              </button>
+            ))}
+          </div>
+        </Section>
+      </div>
+    </>
+  );
+}
+
 function TrailSheet({ t }: { t: Trail }) {
   const Icon = CATEGORY[t.category as Category]?.icon;
   return (
@@ -385,8 +499,9 @@ function TrailSheet({ t }: { t: Trail }) {
           ["들어온 곳", FROM[fromOf(t)].label],
           ...(t.source ? [["출처", <Masked className="break-all">{t.source}</Masked>] as [string, ReactNode]] : []),
           ...(placesOf(t).length ? [["보낸 곳", <Places names={placesOf(t)} />] as [string, ReactNode]] : []),
+          ["사용자", t.user ? <Person name={t.user} size={20} label /> : <span className="text-muted-foreground">모름</span>],
+          ["단말", <span className="flex min-w-0 items-center gap-2"><Client name={machineName(t)} />{t.host && t.host !== t.client && <Masked className="truncate text-muted-foreground">{t.client}</Masked>}</span>],
           ["세션", <span className="line-clamp-2">{sessionName(t)}</span>],
-          ["단말", <Client name={t.client} />],
           ["마지막", <span className="tnum">{clock(t.last)}</span>],
         ]} />
         <Section title="지나간 곳" count={t.mentions.length}>

@@ -37,6 +37,33 @@ fn field(column: &str, key: &str) -> String {
     format!(r#"substring({column} from '"{key}":"((?:[^"\\]|\\.)*)"')"#)
 }
 
+/// The first text of a list under a key of a JSON text column: `"key":["first", ...]`.
+fn first_of(column: &str, key: &str) -> String {
+    format!(r#"substring({column} from '"{key}":\s*\["((?:[^"\\]|\\.)*)"')"#)
+}
+
+/// Whom or where a Call's arguments name to send to: the first of the keys tools commonly use
+/// for a recipient, a channel or an account.
+fn recipient(column: &str) -> String {
+    let texts = [
+        "recipient",
+        "to",
+        "email",
+        "channel",
+        "channel_name",
+        "channel_id",
+        "account",
+        "iban",
+    ];
+    let lists = ["recipients", "to"];
+    let all: Vec<String> = texts
+        .iter()
+        .map(|k| field(column, k))
+        .chain(lists.iter().map(|k| first_of(column, k)))
+        .collect();
+    format!("coalesce({})", all.join(", "))
+}
+
 /// Whether a Call's tool ran: a result sharing its `tool_use_id` came back.
 fn ran(call: &str) -> String {
     format!(
@@ -118,6 +145,7 @@ SELECT m.session_id AS session, n.seq, n.kind AS node, m.slot,
        n.decision, n.client_id AS client, coalesce(n.decided_at, n.observed_at) AS at,
        {tool} AS tool,
        coalesce({command}, {url}, {file_path}) AS target,
+       CASE WHEN n.kind = 'Call' THEN {recipient} END AS recipient,
        (n.kind = 'Call' AND {ran}) AS ran
 FROM token_mentions m
 JOIN tokens t USING (session_id, key_kind, key, slot)
@@ -129,6 +157,7 @@ ORDER BY at DESC NULLS LAST LIMIT 20000
         command = field("n.payload_json", "command"),
         url = field("n.payload_json", "url"),
         file_path = field("n.payload_json", "file_path"),
+        recipient = recipient("n.payload_json"),
         ran = ran("n"),
     )
 });
@@ -402,6 +431,7 @@ impl Postgres<'_> {
         let mut rows = self.rows(&SECRETS, &[]).await?;
         for row in &mut rows {
             unescape(row, "target", 300);
+            unescape(row, "recipient", 120);
             unescape(row, "tool", 200);
         }
         Ok(Value::from(

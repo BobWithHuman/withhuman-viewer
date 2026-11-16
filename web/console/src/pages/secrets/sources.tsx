@@ -10,7 +10,7 @@ import { STATUS, STATUSES, byStatus, categoryLabel, short, type Source } from ".
 
 /** A source's name in two parts: what tells it apart, and where that is. An MCP tool is its
  * tool and its server; a document its file and its folder; a command is itself. */
-function parts(name: string): { server?: string; main: string; rest?: string; command: boolean } {
+export function parts(name: string): { server?: string; main: string; rest?: string; command: boolean } {
   const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
   if (mcp) return { server: mcp[1], main: mcp[2], rest: mcp[1], command: false };
   if (name.includes(" ")) return { main: name, command: true };
