@@ -3,11 +3,11 @@
 // masked: the engine keeps no more than that.
 
 import {
-  Bot, CreditCard, Eye, FileText, IdCard, KeyRound, MessageSquareText, Send, ShieldCheck, Smartphone, Wrench, type LucideIcon,
+  Bot, CreditCard, Eye, FileText, IdCard, KeyRound, MessageSquareText, Send, ShieldCheck, Smartphone, type LucideIcon,
 } from "lucide-react";
 
 export type From = "user" | "external" | "agent";
-export type Status = "out" | "blocked" | "used" | "seen";
+export type Status = "out" | "blocked" | "seen";
 export type Category = "credential" | "pii" | "financial" | "device";
 export type CallVerdict = "deny" | "approved" | "asked" | "allow";
 
@@ -73,11 +73,10 @@ export const CATEGORY: Record<Category, { label: string; icon: LucideIcon }> = {
   financial: { label: "금융정보", icon: CreditCard },
   device: { label: "기기 식별자", icon: Smartphone },
 };
-export const STATUSES: Status[] = ["out", "blocked", "used", "seen"];
+export const STATUSES: Status[] = ["out", "blocked", "seen"];
 export const STATUS: Record<Status, { label: string; color: string; cls: string; icon: LucideIcon }> = {
   out: { label: "유출", color: "var(--deny)", cls: "bg-deny/15 text-deny", icon: Send },
   blocked: { label: "차단", color: "var(--review)", cls: "bg-review/15 text-review", icon: ShieldCheck },
-  used: { label: "내부 사용", color: "var(--write)", cls: "bg-write/15 text-write", icon: Wrench },
   seen: { label: "노출만", color: "var(--info)", cls: "bg-white/8 text-muted-foreground", icon: Eye },
 };
 export const CALL_VERDICT: Record<CallVerdict, { label: string; v: "allow" | "review" | "deny" }> = {
@@ -175,7 +174,7 @@ export const NO_USER = "사용자 모름";
 export const valueKey = (t: Trail) => `${t.kind}\u0000${t.text}`;
 /** A machine as a row names it: its host name when known, else its ID. */
 export const machineName = (t: { host?: string | null; client: string }) => t.host || t.client;
-const WORST: Status[] = ["out", "blocked", "used", "seen"];
+const WORST: Status[] = ["out", "blocked", "seen"];
 
 /** The trails gathered by value (the same masked text of the same kind), the worst ended first,
  * then the latest. */
@@ -226,7 +225,7 @@ export function sources(trails: Trail[]): Source[] {
 
 /** How many of a list ended each way. */
 export const byStatus = (trails: Trail[]) => {
-  const n: Record<Status, number> = { out: 0, blocked: 0, used: 0, seen: 0 };
+  const n: Record<Status, number> = { out: 0, blocked: 0, seen: 0 };
   for (const t of trails) n[t.status] += 1;
   return n;
 };
@@ -369,10 +368,10 @@ function demo(): Data {
     trails.push({
       id: `${session}|sha256:${i}`, session, title, kind: k.kind, category: k.category, text, from,
       source: from === "external" ? source : null, sourceTool: from === "external" ? tool : null, client,
-      calls, outRan, outStopped, status: outRan ? "out" : outStopped ? "blocked" : calls ? "used" : "seen", last: at, mentions,
+      calls, outRan, outStopped, status: outRan ? "out" : outStopped ? "blocked" : "seen", last: at, mentions,
     });
   }
-  const rank = { out: 3, blocked: 2, used: 1, seen: 0 };
+  const rank = { out: 3, blocked: 2, seen: 0 };
   trails.sort((a, b) => rank[b.status] - rank[a.status] || (b.last ?? 0) - (a.last ?? 0));
   return { now, loaded: now, error: null, store: "데모 데이터", demo: true, trails };
 }

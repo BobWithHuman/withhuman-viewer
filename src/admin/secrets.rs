@@ -145,9 +145,9 @@ impl Trail {
             (3, "out")
         } else if self.out_stopped > 0 {
             (2, "blocked")
-        } else if self.calls > 0 {
-            (1, "used")
         } else {
+            // A value put in a Call that sent nothing out is no more than one seen: the team
+            // has nothing to do about it.
             (0, "seen")
         }
     }

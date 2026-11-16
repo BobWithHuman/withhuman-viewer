@@ -26,7 +26,7 @@ import { SourceBars, parts } from "./secrets/sources";
 
 const DAY = 24 * 3600e3;
 const PERIODS: [string, string][] = [["1", "24시간"], ["7", "7일"], ["30", "30일"], ["all", "전체"]];
-const RANK: Record<Status, number> = { out: 3, blocked: 2, used: 1, seen: 0 };
+const RANK: Record<Status, number> = { out: 3, blocked: 2, seen: 0 };
 type Tab = "values" | "sessions" | "sources";
 /** What a figure pressed leaves on the page: every value, those put in a prompt, those a session
  * tried to send out, or those that came out of a document or a tool result. */
@@ -148,13 +148,13 @@ export default function Page({ data }: { data: unknown | null }) {
           <Stat label="유출 시도" icon={Send} value={tries.length} tone={tries.some((a) => a.ran > 0) ? "var(--deny)" : undefined}
             unit={`개 · 유출 ${tries.filter((a) => a.ran > 0).length} · 차단 ${tries.filter((a) => a.ran === 0).length}`}
             active={focus === "tries"} onClick={() => only("tries", "sessions")} />
-          <Stat label="노출 출처" icon={FileText} value={from.length} unit={`곳 · 값 ${from.reduce((a, s) => a + s.trails.length, 0)}`}
+          <Stat label="출처" icon={FileText} value={from.length} unit={`곳 · 값 ${from.reduce((a, s) => a + s.trails.length, 0)}`}
             active={focus === "sources"} onClick={() => only("sources", "values")} />
         </div>
 
         <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_340px] gap-4 min-[1600px]:grid-cols-[minmax(0,1fr)_400px]">
           {focus === "sources" ? (
-            <Panel title="노출 출처" count={flowSources.length} aside={<Legend items={STATUSES.map((k) => ({ label: STATUS[k].label, color: STATUS[k].color, value: ended[k] }))} />}>
+            <Panel title="출처" count={flowSources.length} aside={<Legend items={STATUSES.map((k) => ({ label: STATUS[k].label, color: STATUS[k].color, value: ended[k] }))} />}>
               <SourceBars sources={flowSources} picked={filter.source} height={flowHeight} onPick={(name) => setFilter({ ...filter, source: filter.source === name ? undefined : name })} />
             </Panel>
           ) : (
@@ -176,7 +176,7 @@ export default function Page({ data }: { data: unknown | null }) {
           title={
             <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
               <TabsList className="-ml-1">
-                {([["values", "값", shownValues.length], ["sessions", "유출 시도", shownTries.length], ["sources", "노출 출처", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
+                {([["values", "값", shownValues.length], ["sessions", "유출 시도", shownTries.length], ["sources", "출처", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
                   <TabsTrigger key={v} value={v} className="gap-1.5 px-2.5 text-[12.5px]">{l}<span className="tnum text-[11.5px] text-muted-foreground">{n}</span></TabsTrigger>
                 ))}
               </TabsList>
@@ -286,7 +286,10 @@ const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionNam
 /** A value over every session it showed in: how it ended at its worst, where it was sent, the
  * Call that carried it, where it came from, and how far it spread. */
 const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
-  { id: "status", header: "결과", size: 132, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => <StatusBadge s={v.status} /> },
+  { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => (
+    // Where a value that left, or was about to, was sent: the result names it.
+    <span className="flex min-w-0 items-center gap-2"><StatusBadge s={v.status} />{v.places.length > 0 && v.status !== "seen" && <Places names={v.places.slice(0, 1)} />}{v.places.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{v.places.length - 1}</span>}</span>
+  ) },
   { id: "text", header: "값", size: 300, accessorFn: (v) => v.text, cell: ({ row: { original: v } }) => {
     const Icon = CATEGORY[v.category as Category]?.icon;
     return (
@@ -297,8 +300,6 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
       </span>
     );
   } },
-  { id: "places", header: "전송 대상", size: 200, accessorFn: (v) => v.places.join(" "), cell: ({ row: { original: v } }) => (v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground/60">–</span>) },
-  { id: "carrier", header: "전송 호출", accessorFn: (v) => v.carrier ?? "", cell: ({ row: { original: v } }) => (v.carrier ? <Masked className="block truncate text-muted-foreground" >{v.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
   typed
     // Every value here was typed by a person: the prompt it was typed in tells more than where from.
     ? { id: "typed", header: "입력 프롬프트", size: 250, accessorFn: (v) => typedIn(v.trails[0]), cell: ({ row: { original: v } }) => (
@@ -306,11 +307,10 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
         <span className="truncate">{typedIn(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
       </span>
     ) }
-    : { id: "from", header: "출처", size: 210, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => (
+    : { id: "from", header: "유입 경로", size: 280, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => (
       <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
-        {v.sources.length
-          ? <><Masked className="truncate">{short(v.sources[0])}</Masked>{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>
-          : <span className="truncate">{v.froms.map((f) => FROM[f].label).join(" · ")}</span>}
+        <span className="shrink-0 rounded bg-secondary px-1.5 text-[11.5px] leading-[19px] text-foreground/85">{FROM[v.froms[0]].label}</span>
+        {v.sources.length > 0 && <><Masked className="truncate">{short(v.sources[0])}</Masked>{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>}
       </span>
     ) },
   { id: "users", header: "사용자", size: 120, accessorFn: (v) => v.users.join(" "), cell: ({ row: { original: v } }) => (
@@ -357,7 +357,6 @@ const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
   { id: "status", header: "결과", size: 132, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <StatusBadge s={a.ran > 0 ? "out" : "blocked"} /> },
   { id: "session", header: "세션", size: 250, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
   { id: "places", header: "전송 대상", size: 200, accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
-  { id: "carrier", header: "전송 호출", accessorFn: (a) => a.carrier ?? "", cell: ({ row: { original: a } }) => (a.carrier ? <Masked className="block truncate text-muted-foreground">{a.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
   { id: "values", header: "값", size: 190, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
   { id: "sent", header: "전송", size: 132, accessorFn: (a) => a.ran * 1000 + a.held, cell: ({ row: { original: a } }) => <Sent ran={a.ran} held={a.held} /> },
   { id: "client", header: "단말", size: 150, accessorFn: (a) => a.client, cell: ({ row: { original: a } }) => <Client name={a.client} /> },
@@ -367,7 +366,7 @@ const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
 /** A document, command or tool the agents read values from: what it is, how many values and how
  * they ended, which kinds, and how far they spread. */
 const sourceColumns = (now: number): ColumnDef<Source>[] => [
-  { id: "name", header: "노출 출처", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => {
+  { id: "name", header: "출처", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => {
     const p = parts(s.name);
     return (
       <span className="flex min-w-0 items-center gap-2" title={s.name}>
@@ -544,8 +543,8 @@ function TrailSheet({ t, others, onTrail }: { t: Trail; others: Trail[]; onTrail
         <SheetDescription asChild><Masked className="block rounded-lg border bg-background px-3 py-2.5 text-[13px] break-all text-foreground">{t.text}</Masked></SheetDescription>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <div className="grid grid-cols-3 gap-2">
-          {([["호출 사용", t.calls, "var(--write)"], ["유출", t.outRan, "var(--deny)"], ["차단", t.outStopped, "var(--review)"]] as [string, number, string][]).map(([l, n, c]) => (
+        <div className="grid grid-cols-2 gap-2">
+          {([["유출", t.outRan, "var(--deny)"], ["차단", t.outStopped, "var(--review)"]] as [string, number, string][]).map(([l, n, c]) => (
             <div key={l} className="rounded-lg border px-3 py-2">
               <div className="text-[12px] text-muted-foreground">{l}</div>
               <div className="tnum text-[20px] leading-tight font-semibold" style={{ color: n ? c : "var(--muted-foreground)" }}>{n}</div>
