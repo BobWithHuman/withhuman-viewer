@@ -27,6 +27,7 @@ import { isOn } from "./inventory/mcp/types";
 import { END, ENGINE, derive, runName, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
 import { Bag, machineOrder } from "./inventory/bag";
 import { DeviceSheet } from "./inventory/sheets";
+import { StoppedMachines } from "./inventory/kill";
 
 const TABS: [Tab, string][] = [["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
 /** A tab the app named, when this page has it. */
@@ -171,6 +172,8 @@ export default function Page({ data }: { data: unknown | null }) {
         <SelectTrigger size="sm" className="gap-1.5 text-[12.5px]"><span className="text-muted-foreground">활동 기준</span><SelectValue /></SelectTrigger>
         <SelectContent align="end">{[10, 30, 60].map((m) => <SelectItem key={m} value={String(m)}>최근 {m}분</SelectItem>)}</SelectContent>
       </Select>
+      <StoppedMachines machines={view.machines} now={view.now} onPick={setFocus}
+        onRelease={(id) => request({ type: "stop_device", device: id, stopped: false, actor: d.actor, reason: "" })} />
       <Button variant="outline" size="sm" onClick={() => setAsk({ kind: "admin" })}>
         <PlugZap />관리 API
         <i className={cn("size-1.5 rounded-full", d.source.demo ? "bg-catch" : d.admin.has_token ? "bg-allow" : "bg-white/25")} />

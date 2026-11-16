@@ -2,8 +2,9 @@
 // machine, what stopping does, and why (kept with the stop); a stopped machine is let go again
 // at once. The panel and the machine's sheet both use it.
 
-import { Loader2, OctagonX } from "lucide-react";
+import { Laptop, Loader2, OctagonX } from "lucide-react";
 import { AlertDialog } from "radix-ui";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,5 +76,39 @@ export function KillSwitch({ m, now, busy, onStop, size = "sm" }: {
         </AlertDialog.Content>
       </AlertDialog.Portal>
     </AlertDialog.Root>
+  );
+}
+
+/** The machines the kill switch stopped, managed in one place: a button that counts them and opens
+ * them with when, by whom and why each was stopped and the calls refused since, each let go from
+ * here or picked to look at. */
+export function StoppedMachines({ machines, now, onPick, onRelease }: {
+  machines: Machine[]; now: number; onPick: (id: string) => void; onRelease: (id: string) => void;
+}) {
+  const stopped = machines.filter((m) => m.stopped).sort((a, b) => (b.stopped!.at ?? 0) - (a.stopped!.at ?? 0));
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className={cn("gap-1.5", stopped.length && "border-deny/50 text-deny hover:bg-deny/15 hover:text-deny")}>
+          <OctagonX />멈춘 기기<span className="tnum">{stopped.length}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[420px] gap-0 p-0">
+        <div className="flex items-center gap-1.5 border-b px-3 py-2.5 text-[12.5px] font-semibold"><OctagonX className="size-3.5 text-deny" />멈춘 기기<span className="tnum font-normal text-muted-foreground">{stopped.length}</span></div>
+        <div className="scroll max-h-[360px] overflow-y-auto p-1">
+          {!stopped.length && <div className="px-3 py-4 text-center text-[12.5px] text-muted-foreground">없음</div>}
+          {stopped.map((m) => (
+            <div key={m.id} className="flex items-start gap-2.5 rounded-md px-2 py-2 hover:bg-accent/50">
+              <button onClick={() => onPick(m.id)} className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium"><Laptop className="size-3.5 text-muted-foreground" strokeWidth={1.8} /><span className="truncate hover:underline">{m.name}</span></span>
+                <span className="text-[12.5px] break-words">{m.stopped!.reason || <span className="text-muted-foreground">사유 없음</span>}</span>
+                <span className="tnum text-[11px] text-muted-foreground">{ago(m.stopped!.at, now)}{m.stopped!.by ? ` · ${m.stopped!.by}` : ""}{m.stopped!.denied ? ` · 막힌 호출 ${m.stopped!.denied}` : ""}</span>
+              </button>
+              <Button size="xs" variant="outline" className="shrink-0" onClick={() => onRelease(m.id)}>풀기</Button>
+            </div>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

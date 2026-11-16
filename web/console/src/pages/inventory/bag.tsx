@@ -42,10 +42,13 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
   const found = all.filter((m) => !needle || [m.name, m.id, m.serial].some((t) => t?.toLowerCase().includes(needle)));
   // Each machine in its first group, the groups in order: the list as it is drawn and walked.
   // Two groups: the machines that want a look (shadow AI, calls waiting for the team, or stopped), and the rest.
-  const look = (x: Machine) => x.shadow > 0 || !!x.stopped || (view.standing[x.id]?.pending ?? 0) > 0;
+  // Three groups: stopped by the kill switch; to watch (shadow AI, or calls waiting for the team); and fine.
+  const waiting = (x: Machine) => view.standing[x.id]?.pending ?? 0;
+  const watch = (x: Machine) => !x.stopped && (x.shadow > 0 || waiting(x) > 0);
   const groups = [
-    { key: "look", label: "살펴볼 기기", list: found.filter(look) },
-    { key: "rest", label: "그 외", list: found.filter((x) => !look(x)) },
+    { key: "stopped", label: "멈춤", list: found.filter((x) => !!x.stopped) },
+    { key: "watch", label: "주의", list: found.filter(watch) },
+    { key: "fine", label: "정상", list: found.filter((x) => !x.stopped && !watch(x)) },
   ].filter((g) => g.list.length);
   const flat = groups.flatMap((g) => g.list);
   const m = all.find((x) => x.id === id);
@@ -82,7 +85,8 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
             {!flat.length && <Empty />}
             {groups.map((g) => (
               <div key={g.key} className="pb-1">
-                <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground">
+                <div className={cn("flex items-center gap-1.5 px-2 pt-1.5 pb-1 text-[11px] font-semibold", g.key === "stopped" ? "text-deny" : g.key === "watch" ? "text-catch" : "text-muted-foreground")}>
+                  <i className={cn("size-1.5 rounded-full", g.key === "stopped" ? "bg-deny" : g.key === "watch" ? "bg-catch" : "bg-allow")} />
                   {g.label}<span className="tnum opacity-70">{g.list.length}</span>
                 </div>
                 {g.list.map((x) => {
@@ -93,9 +97,11 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
                       {dot(x)}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{x.name}</span>
-                        <span className="block truncate text-[11px] text-muted-foreground">{[x.agent && agentLabel(x.agent), x.last && ago(x.last, view.now)].filter(Boolean).join(" · ") || "신호 없음"}</span>
+                        <span className={cn("block truncate text-[11px]", x.stopped ? "text-deny/80" : "text-muted-foreground")}>{x.stopped ? (x.stopped.reason || "사유 없음") : [x.agent && agentLabel(x.agent), x.last && ago(x.last, view.now)].filter(Boolean).join(" · ") || "신호 없음"}</span>
                       </span>
-                      {x.shadow > 0 && <span className="tnum inline-flex shrink-0 items-center gap-1 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-medium text-deny"><ShieldOff className="size-3" strokeWidth={2.2} />{x.shadow}</span>}
+                      {x.stopped && <span className="shrink-0 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-semibold text-deny">멈춤</span>}
+                      {!x.stopped && x.shadow > 0 && <span className="tnum inline-flex shrink-0 items-center gap-1 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-medium text-deny"><ShieldOff className="size-3" strokeWidth={2.2} />섀도 {x.shadow}</span>}
+                      {!x.stopped && waiting(x) > 0 && <span className="tnum shrink-0 rounded bg-catch/15 px-1.5 text-[11px] leading-[18px] font-medium text-catch">대기 {waiting(x)}</span>}
                       {x.id === id && <Check className="size-3.5 shrink-0 text-primary" />}
                     </button>
                   );
