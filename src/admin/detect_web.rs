@@ -269,6 +269,7 @@ pub(super) fn data(read: &Read) -> String {
         "demo": read.demo,
         "triage": read.triage.marks,
         "blocked": read.triage.sources,
+        "shared": read.triage.shared,
         "alerts": read.alerts,
         "case": read.case,
         "saved": read.saved,

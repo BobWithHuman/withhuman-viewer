@@ -75,6 +75,8 @@ pub(super) fn page(
         .edr
         .iter()
         .flatten()
+        // Agent 000 is the EDR's own manager, not a machine of the company's.
+        .filter(|e| e.agent_id != "000")
         .filter(|e| {
             !inv.clients
                 .iter()

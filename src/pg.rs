@@ -465,6 +465,33 @@ impl Postgres<'_> {
         ))
     }
 
+    /// What the security team marked and distrusts, as the engine keeps it for everyone
+    /// (`session_marks`, `distrusted_sources`); null for an engine that keeps neither yet.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn triage(&self) -> Result<Value, ApiError> {
+        let found = self
+            .rows(
+                "SELECT to_regclass('public.session_marks') IS NOT NULL \
+                 AND to_regclass('public.distrusted_sources') IS NOT NULL AS ok",
+                &[],
+            )
+            .await?;
+        if !found
+            .first()
+            .and_then(|r| r.get("ok"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Ok(Value::Null);
+        }
+        let all = |rows: Rows| Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>());
+        Ok(json!({
+            "marks": all(self.rows("SELECT session_id, state, set_by, set_at FROM session_marks", &[]).await?),
+            "sources": all(self.rows(
+                "SELECT source, set_by, set_at, session_id, seq FROM distrusted_sources ORDER BY set_at DESC", &[]).await?),
+        }))
+    }
+
     /// The engine's agent inventory, or null for an engine that keeps none yet (no such tables).
     /// A key's hash is never read.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]

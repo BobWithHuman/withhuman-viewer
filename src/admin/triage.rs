@@ -1,5 +1,7 @@
-//! What the security team decided about what it looked at, kept in a file beside the settings
-//! (`triage.json`) on this Mac until the engine keeps it for the whole team: each session marked
+//! What the security team decided about what it looked at. An engine that keeps it
+//! (`session_marks`, `distrusted_sources`) shares it with the whole team, and the app reads and
+//! writes it there ([`crate::api::Backend::triage`]); for the demo and an older engine it is
+//! kept in a file beside the settings (`triage.json`) on this Mac: each session marked
 //! as being looked at, an attack, nothing wrong or closed, and the sources (a document, a URL, a tool) it chose to distrust.
 
 use std::collections::HashMap;
@@ -30,6 +32,46 @@ pub struct Blocked {
 pub struct Store {
     pub marks: HashMap<String, Mark>,
     pub sources: Vec<Blocked>,
+    /// Kept by the engine for everyone, not in this Mac's file.
+    #[serde(skip)]
+    pub shared: bool,
+}
+
+impl Store {
+    /// The engine's rows (`Postgres::triage`) as a store.
+    pub fn from_engine(v: &serde_json::Value) -> Self {
+        let text = |r: &serde_json::Value, k: &str| r[k].as_str().unwrap_or_default().to_owned();
+        Store {
+            marks: v["marks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|r| {
+                    (
+                        text(r, "session_id"),
+                        Mark {
+                            state: text(r, "state"),
+                            by: text(r, "set_by"),
+                            at: r["set_at"].as_i64().unwrap_or(0),
+                        },
+                    )
+                })
+                .collect(),
+            sources: v["sources"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|r| Blocked {
+                    source: text(r, "source"),
+                    by: text(r, "set_by"),
+                    at: r["set_at"].as_i64().unwrap_or(0),
+                    session: text(r, "session_id"),
+                    seq: r["seq"].as_i64().unwrap_or(0),
+                })
+                .collect(),
+            shared: true,
+        }
+    }
 }
 
 fn path() -> std::path::PathBuf {
@@ -49,6 +91,7 @@ pub fn load() -> Store {
         Store {
             marks: serde_json::from_value(value).unwrap_or_default(),
             sources: Vec::new(),
+            shared: false,
         }
     }
 }
@@ -90,4 +133,11 @@ pub fn block(store: &mut Store, source: &str, blocked: Option<Blocked>) {
         store.sources.insert(0, b);
     }
     save(store);
+}
+
+/// The file's marks and sources set aside once they were handed to the engine, so they are
+/// handed over only once.
+pub fn set_aside() {
+    let from = path();
+    let _ = std::fs::rename(&from, from.with_file_name("triage.moved.json"));
 }

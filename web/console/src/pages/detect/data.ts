@@ -40,6 +40,8 @@ export type Data = {
   /** What the team marked each session as, the case opened, and what the last save said. */
   triage?: Record<string, Mark>; case?: Case | null; saved?: string | null;
   /** The sources the team distrusts, and the machines to tell it about. */
+  /** Whether the marks and distrusted sources are the engine's, shared by the team, or this Mac's own. */
+  shared?: boolean;
   blocked?: Blocked[]; alerts?: { new: Alert[]; silent: Alert[]; installed?: Alert[]; unregistered?: Alert[] } | null;
 };
 // A source the team distrusts, and the Call that showed it.

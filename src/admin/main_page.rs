@@ -154,7 +154,24 @@ pub fn Main() -> Element {
     let super::Facts(found, refreshed) = use_context::<super::Facts>();
     let backend = use_context::<std::sync::Arc<crate::api::Backend>>();
     // What the team marked each session as, the case opened, and what a save said.
-    let mut marks = use_signal(super::triage::load);
+    // Read again after each change; the engine's where it keeps them, else this Mac's file.
+    let mut marked = use_signal(|| 0u32);
+    let triage = use_resource({
+        let backend = backend.clone();
+        move || {
+            let b = backend.clone();
+            let _ = (state.reload)();
+            let _ = (state.public)();
+            let _ = marked();
+            async move { b.triage().await }
+        }
+    });
+    let mut marks = use_signal(super::triage::Store::default);
+    use_effect(move || {
+        if let Some(store) = &*triage.read() {
+            marks.set(store.clone());
+        }
+    });
     // The inventory, for whose each session is and which machines to tell the team about.
     let inventory = use_resource({
         let backend = backend.clone();
@@ -243,11 +260,23 @@ pub fn Main() -> Element {
                     // One session marked, or every session of a case at once.
                     (Some("triage"), _) => {
                         let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
-                        let state = m.get("state").and_then(Value::as_str);
-                        let sessions = m.get("sessions").and_then(Value::as_array).into_iter().flatten();
-                        for session in sessions.filter_map(Value::as_str).chain(m.get("session").and_then(Value::as_str)) {
-                            super::triage::mark(&mut marks.write(), session, state, &by, now_ms());
-                        }
+                        let state = m.get("state").and_then(Value::as_str).map(str::to_owned);
+                        let sessions: Vec<String> = m
+                            .get("sessions")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .chain(m.get("session").and_then(Value::as_str))
+                            .map(str::to_owned)
+                            .collect();
+                        let (backend, shared) = (backend.clone(), marks.peek().shared);
+                        spawn(async move {
+                            if let Err(e) = backend.mark_sessions(shared, &sessions, state.as_deref(), &by).await {
+                                saved.set(Some(format!("표시 실패 · {e}")));
+                            }
+                            marked += 1;
+                        });
                     }
                     (Some("copy"), _) => {
                         let text = serde_json::to_string(m.get("text").and_then(Value::as_str).unwrap_or_default()).unwrap_or_default();
@@ -256,13 +285,16 @@ pub fn Main() -> Element {
                     }
                     // A source distrusted, or trusted again (`on` false).
                     (Some("source"), call) => {
-                        if let Some(source) = m.get("source").and_then(Value::as_str) {
+                        if let Some(source) = m.get("source").and_then(Value::as_str).map(str::to_owned) {
                             let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
-                            let blocked = (m.get("on").and_then(Value::as_bool) != Some(false)).then(|| {
-                                let (session, seq) = call.unwrap_or_default();
-                                super::triage::Blocked { source: source.to_owned(), by, at: now_ms(), session, seq }
+                            let on = m.get("on").and_then(Value::as_bool) != Some(false);
+                            let (backend, shared) = (backend.clone(), marks.peek().shared);
+                            spawn(async move {
+                                if let Err(e) = backend.distrust(shared, &source, on, &by, call).await {
+                                    saved.set(Some(format!("출처 차단 실패 · {e}")));
+                                }
+                                marked += 1;
                             });
-                            super::triage::block(&mut marks.write(), source, blocked);
                         }
                     }
                     // The kill switch from a case: every key of the person revoked.

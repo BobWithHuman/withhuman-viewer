@@ -15,7 +15,7 @@ mod main_page;
 mod policy;
 mod posture;
 mod secrets;
-mod triage;
+pub mod triage;
 // The dashboards' page (web/console) in a frame, and each screen's data for it.
 mod detect_web;
 mod inventory_web;
