@@ -268,8 +268,15 @@ function Places({ names }: { names: string[] }) {
   );
 }
 
-/** Where values went, by service: "bob@x.com · slack (MCP)" is slack. */
-const services = (places: string[]) => [...new Set(places.map((p) => p.split(" · ").pop()!))];
+/** Whom or where a value was sent to, apart from the MCP server that carried it: "bob@x.com ·
+ * slack (MCP)" is bob@x.com by slack; "slack (MCP)" is unknown by slack; a host is itself. */
+const targetOf = (place: string) => {
+  if (!place.endsWith("(MCP)")) return { target: place, server: null as string | null };
+  const parts = place.replace(" (MCP)", "").split(" · ");
+  return parts.length > 1 ? { target: parts[0], server: parts[1] } : { target: null, server: parts[0] };
+};
+/** The targets values went to, each once; those whose target is unknown are named by their server. */
+const targets = (places: string[]) => [...new Set(places.map((p) => targetOf(p).target ?? `${targetOf(p).server} (MCP)`))];
 
 /** A document or tool a value came out of, as a cell names it: an MCP tool by its server's logo
  * and its own name, a path by its file name. */
@@ -288,7 +295,7 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
   { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => (
     // Where a value that left, or was about to, was sent: the result names it.
     <span className="flex min-w-0 items-center gap-2"><StatusBadge s={v.status} />{(() => {
-      const to = services(v.places);
+      const to = targets(v.places);
       return v.status !== "seen" && to.length > 0 && <><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</>;
     })()}</span>
   ) },
@@ -434,22 +441,24 @@ function Origin({ t }: { t: Trail }) {
   );
 }
 
-/** How a value went, as two ends joined by an arrow: where it came in, and where it ended up
- * with the tool that sent it there. The arrow carries how it ended. */
-function Path({ trails, places, status }: { trails: Trail[]; places: string[]; status: Status }) {
+/** How a value went, as two ends joined by an arrow: how it came in, and whom it was sent to
+ * with the tool that sent it. The arrow carries how it ended. */
+function Path({ trails, status }: { trails: Trail[]; status: Status }) {
   const first = trails[0], from = fromOf(first), Icon = FROM[from].icon;
   const typed = trails.some((t) => fromOf(t) === "user");
-  // Where it went, by service, with the tools of the Calls that sent it there.
-  const sends = trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place));
-  const to = services(places);
-  const toolsTo = (service: string) => [...new Set(sends.filter((m) => m.place!.split(" · ").pop() === service)
-    .map((m) => toolName(m.tool ?? m.what?.trim().split(/\s+/)[0]).split(" · ").pop()!).filter((x) => !!x))];
+  // The Calls that sent it, the first that got out leading.
+  const sends = trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place)).sort((a, b) => Number(a.held) - Number(b.held));
+  const lead = sends[0];
+  const where = lead ? targetOf(lead.place!) : null;
+  const others = new Set(sends.map((m) => targetOf(m.place!).target ?? targetOf(m.place!).server)).size - 1;
+  // The tool that sent it: an MCP tool by its server's logo and its name; else the tool, or the command's first word.
+  const tool = lead && toolName(lead.tool ?? lead.what?.trim().split(/\s+/)[0]).split(" · ").pop();
   const tone = status === "out" ? "var(--deny)" : status === "blocked" ? "var(--review)" : "var(--border)";
   const end = "flex min-w-0 flex-col gap-1 rounded-lg border bg-background px-3 py-2.5";
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)] items-center">
       <div className={cn(end, from === "agent" && !typed && "border-dashed")}>
-        <span className="text-[11px] text-muted-foreground">들어온 곳</span>
+        <span className="text-[11px] text-muted-foreground">유입 경로</span>
         {typed ? <span className="flex items-center gap-1.5 text-[13px] font-medium"><MessageSquareText className="size-3.5 text-muted-foreground" strokeWidth={1.9} />사용자 입력</span>
           : first.source ? (
             <>
@@ -463,11 +472,14 @@ function Path({ trails, places, status }: { trails: Trail[]; places: string[]; s
         <span className="relative h-0.5 w-full rounded-full" style={{ background: tone }}><ArrowRight className="absolute -top-[7px] -right-1.5 size-4" style={{ color: tone }} /></span>
       </div>
       <div className={end} style={status !== "seen" ? { borderColor: `color-mix(in oklab, ${tone} 55%, transparent)`, background: `color-mix(in oklab, ${tone} 8%, var(--background))` } : undefined}>
-        <span className="text-[11px] text-muted-foreground">간 곳</span>
-        {to.length ? (
+        <span className="text-[11px] text-muted-foreground">전송 대상</span>
+        {where ? (
           <>
-            <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium"><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{to.length - 1}</span>}</span>
-            {toolsTo(to[0]).length > 0 && <Masked className="truncate text-[11.5px] text-muted-foreground" >{toolsTo(to[0]).join(", ")}</Masked>}
+            <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium">
+              {where.target ? <><PlaceMark name={where.server ? where.target : lead!.place!} size={16} /><span className="truncate">{where.target}</span></> : <span className="text-muted-foreground">대상 모름</span>}
+              {others > 0 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{others}</span>}
+            </span>
+            {tool && <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">{where.server && <ServiceLogo name={where.server} size={14} />}<Masked className="truncate">{tool}</Masked></span>}
           </>
         ) : <span className="text-[13px] text-muted-foreground">밖으로 안 나감</span>}
       </div>
@@ -514,7 +526,7 @@ function ValueSheet({ v, all, now }: { v: Value; all: Trail[]; now: number }) {
         <SheetDescription className="sr-only">{v.kind}</SheetDescription>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <Path trails={all} places={v.status === "seen" ? [] : v.places} status={v.status} />
+        <Path trails={all} status={v.status} />
         {typedOrigins.length > 0 && (
           <Section title="입력 프롬프트" count={typedOrigins.length > 1 ? typedOrigins.length : undefined}>
             {typedOrigins.slice(0, 3).map((t) => <Origin key={t.id} t={t} />)}
@@ -538,7 +550,7 @@ function AttemptSheet({ a, now }: { a: Attempt; now: number }) {
         <SheetDescription className="sr-only">유출 시도</SheetDescription>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <Path trails={a.trails} places={a.places} status={a.ran > 0 ? "out" : "blocked"} />
+        <Path trails={a.trails} status={a.ran > 0 ? "out" : "blocked"} />
         <Section title="사용자 요청">
           <div className="rounded-lg border bg-background px-3 py-2.5 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{said ?? <span className="text-muted-foreground">프롬프트 없음</span>}</div>
         </Section>
