@@ -20,6 +20,7 @@ mod secrets;
 // The dashboards' page (web/console) in a frame, and each screen's data for it.
 mod detect_web;
 mod inventory_web;
+mod mcp_tools;
 mod mcp_web;
 mod secrets_web;
 pub mod web;

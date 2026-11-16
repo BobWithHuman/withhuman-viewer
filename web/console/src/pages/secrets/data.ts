@@ -36,6 +36,9 @@ export type Trail = {
   source: string | null;
   sourceTool: string | null;
   client: string;
+  /** Whose the session is and the machine's name, when the inventory tells. */
+  user?: string | null;
+  host?: string | null;
   calls: number;
   outRan: number;
   outStopped: number;
@@ -122,8 +125,9 @@ export type Attempt = {
   held: number;
   places: string[];
   last: number | null;
-  /** The latest of those Calls, to open. */
+  /** The latest of those Calls, to open, and what it ran. */
   latest: number;
+  carrier: string | null;
 };
 
 /** The sessions with a Call sending a value outside: those that got one out first, then the latest. */
@@ -133,7 +137,7 @@ export function attempts(trails: Trail[]): Attempt[] {
     const sends = t.mentions.filter((m) => m.out);
     if (!sends.length) continue;
     let a = by.get(t.session);
-    if (!a) by.set(t.session, (a = { session: t.session, title: t.title, client: t.client, trails: [], ran: 0, held: 0, places: [], last: null, latest: sends[0].seq }));
+    if (!a) by.set(t.session, (a = { session: t.session, title: t.title, client: t.client, trails: [], ran: 0, held: 0, places: [], last: null, latest: sends[0].seq, carrier: sends[0].what }));
     a.trails.push(t);
     for (const m of sends) {
       if (m.held) a.held += 1;
@@ -142,14 +146,56 @@ export function attempts(trails: Trail[]): Attempt[] {
       if ((m.at ?? 0) >= (a.last ?? 0)) {
         a.last = m.at ?? a.last;
         a.latest = m.seq;
+        a.carrier = m.what ?? a.carrier;
       }
     }
   }
   return [...by.values()].sort((a, b) => Number(b.ran > 0) - Number(a.ran > 0) || (b.last ?? 0) - (a.last ?? 0));
 }
 
+/** One sensitive value over every session it showed in. */
+export type Value = {
+  key: string; text: string; kind: string; category: string; trails: Trail[];
+  /** How it ended at its worst. */
+  status: Status;
+  /** Where it was sent or was about to be, and the latest Call that carried it. */
+  places: string[]; carrier: string | null;
+  /** Who wrote it first, and the documents or tool results it came out of. */
+  froms: From[]; sources: string[];
+  sessions: number; clients: string[]; users: string[]; last: number | null;
+};
+/** A machine as a row names it: its host name when known, else its ID. */
+export const machineName = (t: { host?: string | null; client: string }) => t.host || t.client;
+const WORST: Status[] = ["out", "blocked", "used", "seen"];
+
+/** The trails gathered by value (the same masked text of the same kind), the worst ended first,
+ * then the latest. */
+export function values(trails: Trail[]): Value[] {
+  const by = new Map<string, Value>();
+  for (const t of trails) {
+    const key = `${t.kind}\u0000${t.text}`;
+    let v = by.get(key);
+    if (!v) by.set(key, (v = { key, text: t.text, kind: t.kind, category: t.category, trails: [], status: "seen", places: [], carrier: null, froms: [], sources: [], sessions: 0, clients: [], users: [], last: null }));
+    v.trails.push(t);
+    if (WORST.indexOf(t.status) < WORST.indexOf(v.status)) v.status = t.status;
+    for (const p of placesOf(t)) if (!v.places.includes(p)) v.places.push(p);
+    if (!v.froms.includes(fromOf(t))) v.froms.push(fromOf(t));
+    if (t.source && !v.sources.includes(t.source)) v.sources.push(t.source);
+    if (!v.clients.includes(t.client)) v.clients.push(t.client);
+    if (t.user && !v.users.includes(t.user)) v.users.push(t.user);
+    v.last = Math.max(v.last ?? 0, t.last ?? 0) || null;
+  }
+  for (const v of by.values()) {
+    v.sessions = new Set(v.trails.map((t) => t.session)).size;
+    // The Call that carried it: the latest that sent it out, else the latest that used it.
+    const calls = v.trails.flatMap((t) => t.mentions).filter((m) => m.call && m.what).sort((a, b) => Number(b.out) - Number(a.out) || (b.at ?? 0) - (a.at ?? 0));
+    v.carrier = calls[0]?.what ?? null;
+  }
+  return [...by.values()].sort((a, b) => WORST.indexOf(a.status) - WORST.indexOf(b.status) || (b.last ?? 0) - (a.last ?? 0));
+}
+
 /** A document or tool result values first came out of. */
-export type Source = { name: string; tool: string; trails: Trail[]; sessions: number; categories: string[]; last: number | null };
+export type Source = { name: string; tool: string; trails: Trail[]; sessions: number; clients: number; categories: string[]; last: number | null };
 
 /** The places values came out of, those that gave the most first. */
 export function sources(trails: Trail[]): Source[] {
@@ -157,12 +203,13 @@ export function sources(trails: Trail[]): Source[] {
   for (const t of trails) {
     if (!t.source) continue;
     let s = by.get(t.source);
-    if (!s) by.set(t.source, (s = { name: t.source, tool: t.sourceTool ?? "", trails: [], sessions: 0, categories: [], last: null }));
+    if (!s) by.set(t.source, (s = { name: t.source, tool: t.sourceTool ?? "", trails: [], sessions: 0, clients: 0, categories: [], last: null }));
     s.trails.push(t);
     s.last = Math.max(s.last ?? 0, t.last ?? 0) || null;
   }
   for (const s of by.values()) {
     s.sessions = new Set(s.trails.map((t) => t.session)).size;
+    s.clients = new Set(s.trails.map((t) => t.client)).size;
     s.categories = CATEGORIES.filter((c) => s.trails.some((t) => t.category === c));
   }
   return [...by.values()].sort((a, b) => b.trails.length - a.trails.length || (b.last ?? 0) - (a.last ?? 0) || a.name.localeCompare(b.name));

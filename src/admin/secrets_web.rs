@@ -51,8 +51,49 @@ fn mention(m: &SecretMention) -> Value {
     })
 }
 
-/// The page's data: the trails, the worst first, each with its session's title.
-pub(super) fn page(trails: &[Trail], titles: &HashMap<String, String>, head: &Head) -> String {
+/// Whose the sessions and machines are, and the machines' names, as the inventory tells.
+#[derive(Default)]
+pub(super) struct Owners {
+    by_session: HashMap<String, String>,
+    by_machine: HashMap<String, String>,
+    pub(super) host: HashMap<String, String>,
+}
+
+impl Owners {
+    pub(super) fn of(inv: &crate::model::Inventory) -> Self {
+        let mut owners = Self::default();
+        for d in &inv.clients {
+            if let Some(user) = &d.user_email {
+                owners.by_machine.insert(d.client_id.clone(), user.clone());
+            }
+            if let Some(host) = &d.hostname {
+                owners.host.insert(d.client_id.clone(), host.clone());
+            }
+        }
+        for r in &inv.sessions {
+            if let Some(user) = &r.user_email {
+                owners.by_session.insert(r.session_id.clone(), user.clone());
+            }
+        }
+        owners
+    }
+
+    /// The person a session is: the one its session row names, else its machine's.
+    pub(super) fn user(&self, session: &str, machine: &str) -> Option<&String> {
+        self.by_session
+            .get(session)
+            .or_else(|| self.by_machine.get(machine))
+    }
+}
+
+/// The page's data: the trails, the worst first, each with its session's title, whose it is and
+/// its machine's name.
+pub(super) fn page(
+    trails: &[Trail],
+    titles: &HashMap<String, String>,
+    owners: &Owners,
+    head: &Head,
+) -> String {
     let trails: Vec<Value> = trails
         .iter()
         .map(|t| {
@@ -68,6 +109,8 @@ pub(super) fn page(trails: &[Trail], titles: &HashMap<String, String>, head: &He
                 "source": source,
                 "sourceTool": source.as_ref().and_then(|_| t.mentions.first()?.tool.clone()),
                 "client": if t.client.is_empty() { NO_NAME } else { &t.client },
+                "user": owners.user(&t.session, &t.client),
+                "host": owners.host.get(&t.client),
                 "calls": t.calls,
                 "outRan": t.out_ran,
                 "outStopped": t.out_stopped,
