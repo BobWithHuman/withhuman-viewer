@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::main_page::NO_NAME;
 use super::secrets::{
-    Trail, destination, held, in_call, kind_label, node_label, outward, source_of,
+    Trail, destination, held, in_call, kind_label, node_label, outward, source_of, source_tool,
 };
 use crate::model::SecretMention;
 
@@ -108,7 +108,7 @@ pub(super) fn page(
                 "text": t.text,
                 "from": t.from,
                 "source": source,
-                "sourceTool": source.as_ref().and_then(|_| t.mentions.first()?.tool.clone()),
+                "sourceTool": source.as_ref().and_then(|_| source_tool(t)),
                 "client": if t.client.is_empty() { NO_NAME } else { &t.client },
                 "user": owners.user(&t.session, &t.client),
                 "host": owners.host.get(&t.client),

@@ -231,8 +231,15 @@ pub(super) fn held(m: &SecretMention) -> bool {
     m.decision.as_deref() == Some("DENY") || (m.decision.as_deref() == Some("REVIEW") && !m.ran)
 }
 
+/// A tool name that names nothing: what a client sends when it does not know the tool.
+fn named(tool: &Option<String>) -> Option<String> {
+    tool.clone()
+        .filter(|t| !t.trim().is_empty() && !t.eq_ignore_ascii_case("unknown"))
+}
+
 /// The document or tool result a value first came out of: the file, URL or command of its first
-/// mention. None for a value a person or the agent wrote first.
+/// mention, else of the Call that result answered, else that Call's or the result's tool. None
+/// for a value a person or the agent wrote first.
 pub(super) fn source_of(t: &Trail) -> Option<String> {
     if t.from != "external" {
         return None;
@@ -242,9 +249,17 @@ pub(super) fn source_of(t: &Trail) -> Option<String> {
         first
             .target
             .clone()
-            .or_else(|| first.tool.clone())
-            .unwrap_or_else(|| "알 수 없는 곳".into()),
+            .or_else(|| first.by_target.clone())
+            .or_else(|| named(&first.by_tool))
+            .or_else(|| named(&first.tool))
+            .unwrap_or_else(|| "도구 모름".into()),
     )
+}
+
+/// The tool a value first came out of, by the same reading as [`source_of`].
+pub(super) fn source_tool(t: &Trail) -> Option<String> {
+    let first = t.mentions.first()?;
+    named(&first.by_tool).or_else(|| named(&first.tool))
 }
 
 #[component]
@@ -349,6 +364,24 @@ mod tests {
         assert_eq!(t.from, "external", "it first came from a tool result");
         assert_eq!((t.calls, t.out_ran, t.out_stopped), (2, 1, 0));
         assert_eq!(t.status().1, "out");
+    }
+
+    #[test]
+    fn a_result_that_names_no_tool_is_named_by_the_call_it_answered() {
+        // A client sent the result with the tool "unknown" and no target; the Call it
+        // answered read a file.
+        let mut read = seen(2, 20, "external", "Segment");
+        read.tool = Some("unknown".into());
+        read.by_tool = Some("Read".into());
+        read.by_target = Some("/repo/config.json".into());
+        let list = trails(&[read.clone()]);
+        assert_eq!(source_of(&list[0]).as_deref(), Some("/repo/config.json"));
+        assert_eq!(source_tool(&list[0]).as_deref(), Some("Read"));
+        // With nothing to tell, it is said so, not "unknown".
+        read.by_tool = None;
+        read.by_target = None;
+        let list = trails(&[read]);
+        assert_eq!(source_of(&list[0]).as_deref(), Some("도구 모름"));
     }
 
     #[test]

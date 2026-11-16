@@ -279,6 +279,9 @@ pub struct SecretMention {
     /// arguments say.
     pub recipient: Option<String>,
     pub ran: bool,
+    /// For a tool result, the tool and target of the Call it answered.
+    pub by_tool: Option<String>,
+    pub by_target: Option<String>,
 }
 
 /// A JSON document stored as a string property; anything unreadable reads as nothing.

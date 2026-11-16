@@ -170,10 +170,20 @@ SELECT m.session_id AS session, n.seq, n.kind AS node, m.slot,
        {tool} AS tool,
        coalesce({command}, {url}, {file_path}) AS target,
        CASE WHEN n.kind = 'Call' THEN {recipient} END AS recipient,
-       (n.kind = 'Call' AND {ran}) AS ran
+       (n.kind = 'Call' AND {ran}) AS ran,
+       -- For a tool result, the Call it answered: its tool and target name where the value
+       -- came from even when the result itself does not say.
+       {by_tool} AS by_tool,
+       coalesce({by_command}, {by_url}, {by_file_path}, {by_pattern}) AS by_target
 FROM token_mentions m
 JOIN tokens t USING (session_id, key_kind, key, slot)
 JOIN nodes n ON n.session_id = m.session_id AND n.seq = m.node_seq
+LEFT JOIN LATERAL (
+  SELECT c.payload_json FROM nodes c
+  WHERE n.kind IN ('Segment', 'Error') AND c.session_id = n.session_id
+    AND c.tool_use_id = n.tool_use_id AND c.kind = 'Call'
+  LIMIT 1
+) c ON true
 WHERE t.category IN ('credential', 'pii', 'financial', 'device')
 ORDER BY at DESC NULLS LAST LIMIT 20000
 "#,
@@ -183,6 +193,11 @@ ORDER BY at DESC NULLS LAST LIMIT 20000
         file_path = field("n.payload_json", "file_path"),
         recipient = recipient("n.payload_json"),
         ran = ran("n"),
+        by_tool = field("c.payload_json", "tool_name"),
+        by_command = field("c.payload_json", "command"),
+        by_url = field("c.payload_json", "url"),
+        by_file_path = field("c.payload_json", "file_path"),
+        by_pattern = field("c.payload_json", "pattern"),
     )
 });
 
@@ -458,6 +473,8 @@ impl Postgres<'_> {
         for row in &mut rows {
             unescape(row, "target", 300);
             unescape(row, "recipient", 120);
+            unescape(row, "by_tool", 200);
+            unescape(row, "by_target", 300);
             unescape(row, "tool", 200);
         }
         Ok(Value::from(
@@ -1115,3 +1132,4 @@ mod tests {
         }
     }
 }
+
