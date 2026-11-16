@@ -1,8 +1,8 @@
-// What a picked row tells, in the sheet on the right. A machine: what it said at install, its
-// projects and whether each is protected, the MCP servers set up on it, how its sessions were
-// let run, its latest sessions, and the switch that stops it.
+// What a picked row tells, in the sheet on the right. A machine: what it did over the last two
+// weeks, what it said at install, its projects and whether each is protected, the MCP servers set
+// up on it, how its sessions were let run, and the switch that stops it.
 
-import { ArrowUpRight, BadgeCheck, Laptop, OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
+import { BadgeCheck, Laptop, OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 import { Legend, ServiceLogo, SplitBar, Warn, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark, Chip, Dash, EngineBadge, PermBadge, StateBadge } from "./marks";
+import { DeviceActivity } from "./activity";
 import { isOn } from "./mcp/types";
 import { EDR_STATUS, PERM, PERM_KEYS, agentLabel, type Machine, type View } from "./model";
 
@@ -57,7 +58,6 @@ export function DeviceSheet({ m, view, onSession, onServer, onStop }: {
   const projects = view.projects.filter((p) => p.device === m.id);
   const shadow = view.shadow.filter((a) => a.device === m.id);
   const runs = view.sessions.filter((r) => r.device === m.id);
-  const latest = [...runs].sort((a, b) => (b.last_seen_at ?? b.created_at ?? 0) - (a.last_seen_at ?? a.created_at ?? 0)).slice(0, 8);
   const modes = PERM_KEYS.map((k) => ({ key: k, label: PERM[k].label, color: PERM[k].color, value: runs.filter((r) => r.permission_mode === k).length }));
   return (
     <>
@@ -82,6 +82,8 @@ export function DeviceSheet({ m, view, onSession, onServer, onStop }: {
         </div>
       </SheetHeader>
       <div className="scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
+        <DeviceActivity key={m.id} m={m} view={view} onSession={onSession} />
+
         <Facts rows={[
           ["EDR", m.edr
             ? <span className="inline-flex items-center gap-1.5"><BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />{EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"}<span className="font-mono text-[11.5px] text-muted-foreground">에이전트 {m.edr.id}</span></span>
@@ -142,21 +144,6 @@ export function DeviceSheet({ m, view, onSession, onServer, onStop }: {
               <Legend items={modes.filter((x) => x.value > 0)} />
             </div>
           )}
-        </Section>
-
-        <Section title="최근 세션" count={latest.length}>
-          {latest.length === 0 && <span className="px-2.5 text-[12.5px] text-muted-foreground">없음</span>}
-          <div className="flex flex-col">
-            {latest.map((r) => (
-              <Line key={r.id} onClick={r.opens ? () => onSession(r.id) : undefined}>
-                <i className={cn("size-2 shrink-0 rounded-full", view.going(r) ? "animate-pulse bg-allow" : "bg-white/20")} />
-                <span className={cn("min-w-0 truncate", !r.title && "font-mono text-[12px] text-muted-foreground")}>{r.title ?? r.id.slice(0, 8)}</span>
-                {r.permission_mode === "bypassPermissions" && <Badge variant="secondary" className="shrink-0 border-0 bg-deny/15 font-semibold text-deny">확인 없이</Badge>}
-                <When>{ago(r.last_seen_at ?? r.created_at, view.now)}</When>
-                {r.opens && <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />}
-              </Line>
-            ))}
-          </div>
         </Section>
       </div>
     </>

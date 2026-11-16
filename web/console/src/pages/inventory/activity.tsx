@@ -1,19 +1,15 @@
-// What each machine is doing and has done. On the left every machine, with its last two weeks of
-// calls as a sparkline; on the right the machine picked: what is set up on it, its calls by day,
-// and the tools, sessions and latest calls behind them. A day, a tool or a session pressed narrows
-// the others to it; a session or a call opens its record.
+// What a machine is doing and has done, in its sheet: its calls by day, and the tools, sessions
+// and latest calls behind them. A day, a tool or a session pressed narrows the others to it; a
+// session or a call opens its record.
 
-import { ArrowUpRight, FilePen, FilePlus2, FileText, FolderGit2, Globe, Laptop, OctagonX, PanelRightOpen, Search, ShieldCheck, ShieldOff, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { ArrowUpRight, FilePen, FilePlus2, FileText, Globe, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { Bar, BarChart, Cell, XAxis } from "recharts";
-import { Button } from "@/components/ui/button";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
-import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Empty, Legend, ServiceLogo, VERDICT, VerdictBadge, ago, clock, num, type Verdict } from "@/kit";
 import { cn } from "@/lib/utils";
-import { AgentMark, EngineBadge, PermBadge } from "./marks";
-import { DAY, agentLabel, type Activity, type Machine, type View } from "./model";
+import { DAY, type Activity, type Machine, type View } from "./model";
 
 const VERDICTS: Verdict[] = ["allow", "review", "deny"];
 type Counts = [number, number, number];
@@ -32,78 +28,6 @@ function ToolMark({ tool, size = 16 }: { tool: string; size?: number }) {
 }
 const toolLabel = (tool: string) => mcpOf(tool)?.[2] ?? tool;
 
-/** A machine's calls each day, oldest first. */
-const perDay = (a: Activity | undefined, days: number) => {
-  const out = Array.from({ length: days }, () => [0, 0, 0] as Counts);
-  for (const c of a?.cells ?? []) add(out[c[0]], c);
-  return out;
-};
-
-/** The machines in the order they want a look: running first, then the busiest, then the latest heard. */
-export function machineOrder(view: View) {
-  const calls = (m: Machine) => (view.activity[m.id]?.cells ?? []).reduce((n, c) => n + c[3] + c[4] + c[5], 0);
-  return view.machines
-    .filter((m) => m.state !== "unregistered" || m.running)
-    .map((m) => ({ m, n: calls(m) }))
-    .sort((a, b) => Number(b.m.running) - Number(a.m.running) || b.n - a.n || (b.m.last ?? 0) - (a.m.last ?? 0))
-    .map((x) => x.m);
-}
-
-/** Two weeks of calls as small bars, the blocked part of each in red. */
-function Spark({ days }: { days: Counts[] }) {
-  const most = Math.max(1, ...days.map(total));
-  return (
-    <span className="flex h-5 w-[70px] shrink-0 items-end gap-px" aria-hidden>
-      {days.map((d, i) => {
-        const h = total(d) ? Math.max(2, (total(d) / most) * 20) : 1;
-        return (
-          <i key={i} className="flex w-1 flex-col-reverse overflow-hidden rounded-[1px]" style={{ height: h }}>
-            <span className="block bg-foreground/40" style={{ height: `${(d[0] / Math.max(1, total(d))) * 100}%` }} />
-            <span className="block bg-review" style={{ height: `${(d[1] / Math.max(1, total(d))) * 100}%` }} />
-            <span className="block bg-deny" style={{ height: `${(d[2] / Math.max(1, total(d))) * 100}%` }} />
-            {!total(d) && <span className="block h-px bg-foreground/15" />}
-          </i>
-        );
-      })}
-    </span>
-  );
-}
-
-const dot = (m: Machine) => <i className={cn("size-1.5 shrink-0 rounded-full", m.state === "running" ? "animate-pulse bg-allow" : m.state === "installed" ? "bg-catch" : "bg-foreground/35")} />;
-
-export function DeviceList({ view, picked, onPick }: { view: View; picked: string | null; onPick: (id: string) => void }) {
-  const [q, setQ] = useState("");
-  const all = useMemo(() => machineOrder(view), [view]);
-  const needle = q.trim().toLowerCase();
-  const found = all.filter((m) => !needle || [m.name, m.id, m.serial].some((t) => t?.toLowerCase().includes(needle)));
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <label className="relative mb-2 block shrink-0">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·ID·시리얼" className="h-8 pl-8 text-[12.5px] md:text-[12.5px]" />
-      </label>
-      <div className="scroll -mx-2 min-h-0 flex-1 overflow-y-auto px-2">
-        {!found.length && <Empty />}
-        {found.map((m) => (
-          <button key={m.id} onClick={() => onPick(m.id)} aria-pressed={m.id === picked}
-            className={cn("flex h-11 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] transition-colors hover:bg-accent", m.id === picked && "bg-accent ring-1 ring-ring ring-inset")}>
-            {dot(m)}
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{m.name}</span>
-              <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
-                {m.agent && <AgentMark agent={m.agent} size={11} />}{m.last ? ago(m.last, view.now) : "신호 없음"}
-              </span>
-            </span>
-            {m.stopped && <OctagonX className="size-3.5 shrink-0 text-deny" strokeWidth={2.2} />}
-            {m.shadow > 0 && <span className="tnum inline-flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-deny"><ShieldOff className="size-3" strokeWidth={2.2} />{m.shadow}</span>}
-            <Spark days={perDay(view.activity[m.id], view.days)} />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /** A chip saying what the lists are narrowed to, with a cross to let it go. */
 function Narrow({ children, onClear }: { children: ReactNode; onClear: () => void }) {
   return (
@@ -114,12 +38,12 @@ function Narrow({ children, onClear }: { children: ReactNode; onClear: () => voi
   );
 }
 
-/** A column of rows under a small title. */
+/** A list of rows under a small title, scrolling past a few. */
 function Column({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
-    <section className="flex min-h-0 min-w-0 flex-col">
-      <h3 className="mb-1.5 flex shrink-0 items-center gap-1.5 px-1 text-[12px] font-medium text-muted-foreground">{title}<span className="tnum rounded-full bg-secondary px-1.5 text-[11px]">{count}</span></h3>
-      <div className="scroll -mr-1 min-h-0 flex-1 overflow-y-auto pr-1">{count ? children : <Empty />}</div>
+    <section className="flex min-w-0 flex-col">
+      <h3 className="mb-1 flex shrink-0 items-center gap-1.5 text-[12px] font-medium text-muted-foreground">{title}<span className="tnum rounded-full bg-secondary px-1.5 text-[11px]">{count}</span></h3>
+      <div className="scroll -mx-1 max-h-[208px] overflow-y-auto px-1">{count ? children : <Empty />}</div>
     </section>
   );
 }
@@ -141,9 +65,7 @@ const Held = ({ c }: { c: Counts }) => (
   </span>
 );
 
-export function DeviceActivity({ m, view, onDetail, onSession, onServer }: {
-  m: Machine; view: View; onDetail: () => void; onSession: (id: string) => void; onServer: (name: string) => void;
-}) {
+export function DeviceActivity({ m, view, onSession }: { m: Machine; view: View; onSession: (id: string) => void }) {
   const a = view.activity[m.id];
   const days = view.days;
   const [day, setDay] = useState<number | null>(null);
@@ -180,43 +102,13 @@ export function DeviceActivity({ m, view, onDetail, onSession, onServer }: {
     && (tool === null || c.tool === a!.tools[tool]) && (session === null || c.session === a!.sessions[session])).slice(0, 60);
   const titleOf = (id: string) => runs.get(id)?.title ?? id.slice(0, 8);
 
-  const servers = view.serversOn(m);
-  const shadow = view.shadow.filter((x) => x.device === m.id);
-  const projects = view.projects.filter((p) => p.device === m.id);
-  const guarded = m.agent && m.state !== "unregistered" ? m.agent : null;
-  const wild = [...new Set(shadow.map((x) => x.agent))];
   const tip = (mark: ReactNode, text: ReactNode) => <Tooltip><TooltipTrigger asChild>{mark}</TooltipTrigger><TooltipContent>{text}</TooltipContent></Tooltip>;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      {/* The machine and what is set up on it. */}
-      <div className="flex shrink-0 items-center gap-3">
-        <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-white/8"><Laptop className="size-5" strokeWidth={1.7} /></span>
-        <div className="flex min-w-0 flex-col">
-          <span className="flex items-center gap-2 text-[15px] font-semibold">{m.name}{dot(m)}</span>
-          <span className="truncate font-mono text-[11px] text-muted-foreground">{m.id}</span>
-        </div>
-        <div className="ml-3 flex min-w-0 items-center gap-1.5">
-          {guarded && tip(<span className="relative"><AgentMark agent={guarded} size={22} /><ShieldCheck className="absolute -right-1.5 -bottom-1.5 size-3.5 rounded-full bg-card p-px text-allow" strokeWidth={2.2} /></span>, <>{agentLabel(guarded)} · 보호됨</>)}
-          {wild.map((x) => tip(<span key={x} className="relative rounded-full outline-2 outline-offset-2 outline-deny"><AgentMark agent={x} size={22} /><ShieldOff className="absolute -right-1.5 -bottom-1.5 size-3.5 rounded-full bg-card p-px text-deny" strokeWidth={2.2} /></span>, <>섀도 AI · {agentLabel(x)}</>))}
-          {servers.length > 0 && <i className="mx-1 h-5 w-px bg-border" />}
-          {servers.slice(0, 8).map((s) => tip(<button key={s.name} onClick={() => onServer(s.name)} className="rounded-full transition-opacity hover:opacity-80"><ServiceLogo name={s.name} size={20} /></button>, s.name))}
-          {servers.length > 8 && <span className="tnum text-[11.5px] text-muted-foreground">+{servers.length - 8}</span>}
-          {(projects.length > 0 || shadow.length > 0) && <i className="mx-1 h-5 w-px bg-border" />}
-          {projects.length > 0 && tip(<span className="tnum inline-flex items-center gap-1 text-[12px] text-allow"><FolderGit2 className="size-3.5" strokeWidth={1.9} />{projects.length}</span>, <>보호된 프로젝트 {projects.length}</>)}
-          {shadow.length > 0 && tip(<span className="tnum inline-flex items-center gap-1 text-[12px] text-deny"><FolderGit2 className="size-3.5" strokeWidth={1.9} />{shadow.length}</span>, <>훅 없는 프로젝트 {shadow.length}</>)}
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2 text-[12.5px]">
-          {m.stopped && <span className="inline-flex items-center gap-1 rounded bg-deny/15 px-1.5 text-[11.5px] leading-5 font-semibold text-deny"><OctagonX className="size-3" strokeWidth={2.2} />멈춤</span>}
-          <EngineBadge mode={m.engine_mode} />
-          {m.permission_mode && <PermBadge mode={m.permission_mode} />}
-          <Button size="sm" variant="secondary" onClick={onDetail}><PanelRightOpen />상세</Button>
-        </div>
-      </div>
-
+    <div className="flex flex-col gap-4">
       {/* Its calls by day. */}
       <div className="flex shrink-0 flex-col gap-1 rounded-lg bg-white/[0.03] px-3 pt-2.5 pb-1">
-        <div className="flex h-6 items-center gap-2 text-[12px]">
+        <div className="flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
           <span className="font-medium text-muted-foreground">호출</span>
           <span className="tnum text-[13px] font-semibold">{num(total(all))}</span>
           {day !== null && <Narrow onClear={() => setDay(null)}>{dayName(day)}</Narrow>}
@@ -226,7 +118,7 @@ export function DeviceActivity({ m, view, onDetail, onSession, onServer }: {
         </div>
         <ChartContainer config={config} className="aspect-auto h-[112px] w-full">
           <BarChart data={chart} margin={{ top: 4, right: 4, bottom: 0, left: 4 }} barCategoryGap={3}>
-            <XAxis dataKey="day" interval={0} tickLine={false} axisLine={false} tickMargin={4} height={18} tick={{ fontSize: 10.5 }} />
+            <XAxis dataKey="day" interval={1} tickLine={false} axisLine={false} tickMargin={4} height={18} tick={{ fontSize: 10.5 }} />
             <ChartTooltip cursor={{ fill: "rgb(255 255 255 / 0.06)" }} content={<ChartTooltipContent />} />
             {(["allow", "review", "deny"] as const).map((k, n) => (
               <Bar key={k} dataKey={k} stackId="calls" fill={`var(--color-${k})`} radius={n === 2 ? [2, 2, 0, 0] : 0} isAnimationActive={false} className="cursor-pointer" onClick={(_, i) => setDay(day === i ? null : i)}>
@@ -238,8 +130,8 @@ export function DeviceActivity({ m, view, onDetail, onSession, onServer }: {
       </div>
 
       {/* What was behind them. */}
-      {!a ? <div className="grid min-h-0 flex-1 place-items-center"><Empty>호출 없음</Empty></div> : (
-        <div className="grid min-h-0 flex-1 grid-cols-3 gap-4">
+      {a && (
+        <>
           <Column title="도구" count={tools.length}>
             {tools.map((t) => (
               <button key={t.name} onClick={() => setTool(tool === t.i ? null : t.i)} aria-pressed={tool === t.i}
@@ -289,7 +181,7 @@ export function DeviceActivity({ m, view, onDetail, onSession, onServer }: {
               );
             })}
           </Column>
-        </div>
+        </>
       )}
     </div>
   );
