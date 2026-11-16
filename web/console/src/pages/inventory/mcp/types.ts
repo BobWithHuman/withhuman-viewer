@@ -23,6 +23,8 @@ export type Mcp = {
   /** Every MCP call of the last 30 days by verdict, day by day, the oldest first. */
   days?: Record<Verdict, number>[];
   servers: Server[];
+  /** Told from the machines' calls, as the engine collects no installs: only what was called. */
+  from_calls?: boolean;
 };
 
 export const DAYS = 30;

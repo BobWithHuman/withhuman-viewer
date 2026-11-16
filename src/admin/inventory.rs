@@ -62,18 +62,25 @@ pub fn InventoryPage() -> Element {
                 Load::Ready(list) => list.iter().map(|s| (s.id.clone(), s.clone())).collect(),
                 _ => HashMap::new(),
             };
-            let (modes, calls) = match &*facts.0.read() {
-                Some(Ok(list)) => (
-                    inventory_web::engine_modes(list),
-                    inventory_web::session_calls(list),
-                ),
-                _ => (HashMap::new(), json!({})),
+            let facts = facts.0.read();
+            let list = match &*facts {
+                Some(Ok(list)) => Some(list),
+                _ => None,
             };
+            let modes = list
+                .map(|l| inventory_web::engine_modes(l))
+                .unwrap_or_default();
             let mut page = inventory_web::page(inv, &titles, &modes, &around(*at));
-            page["session_calls"] = calls;
-            // The servers the machines have set up; none while the engine does not collect them.
-            if let Ok(Some(c)) = mcp {
-                page["mcp"] = super::mcp_web::mcp(c, *at);
+            page["session_calls"] = list.map_or(json!({}), |l| inventory_web::session_calls(l));
+            // The servers the machines have set up, or, while the engine does not collect them,
+            // those whose tools the machines called.
+            match (mcp, list) {
+                (Ok(Some(c)), _) => page["mcp"] = super::mcp_web::mcp(c, *at),
+                (_, Some(l)) => {
+                    page["mcp"] = super::mcp_web::mcp(&super::mcp_web::called(l), *at);
+                    page["mcp"]["from_calls"] = json!(true);
+                }
+                _ => {}
             }
             page
         }

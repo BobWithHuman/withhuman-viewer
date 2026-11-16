@@ -3,7 +3,7 @@
 // one product.
 
 import {
-  ArrowDown, ArrowUp, ArrowUpDown, Eye, Landmark, Pencil, Send, Trash2, TriangleAlert, type LucideIcon,
+  ArrowDown, ArrowUp, ArrowUpDown, CircleHelp, Eye, Landmark, Pencil, Send, Trash2, TriangleAlert, type LucideIcon,
 } from "lucide-react";
 import {
   type ColumnDef, type SortingState, flexRender, getCoreRowModel, getSortedRowModel, useReactTable,
@@ -26,13 +26,14 @@ export const VERDICT: Record<Verdict, { label: string; color: string; cls: strin
   deny: { label: "차단", color: "var(--deny)", cls: "bg-deny/15 text-deny" },
 };
 /** What a tool can do, as 인벤토리의 MCP 탭 and the registry name it. */
-export type Nature = "read" | "write" | "delete" | "send" | "money";
+export type Nature = "read" | "write" | "delete" | "send" | "money" | "unknown";
 export const NATURE: Record<Nature, { label: string; color: string; icon: LucideIcon }> = {
   read: { label: "읽기", color: "var(--read)", icon: Eye },
   write: { label: "쓰기", color: "var(--write)", icon: Pencil },
   delete: { label: "삭제", color: "var(--deny)", icon: Trash2 },
   send: { label: "외부 전송", color: "var(--send)", icon: Send },
   money: { label: "돈·계정", color: "var(--money)", icon: Landmark },
+  unknown: { label: "분류 없음", color: "var(--muted-foreground)", icon: CircleHelp },
 };
 export type Severity = "crit" | "high" | "med" | "low" | "info";
 export const SEVERITY: Record<Severity, { label: string; cls: string; color: string }> = {

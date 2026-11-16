@@ -1,6 +1,6 @@
-// 인벤토리: the machines the engine protects and what is on them. On the left the picture of every
-// machine by the agents and MCP servers on it; a machine pressed there, or picked in the panel
-// beside it, is the one the panel and the lists under them show: its sessions, the shadow AI seen
+// 인벤토리: the machines the engine protects and what is on them. On the left the MCP tools that
+// are a threat, across every machine; the machine picked in the panel beside it is the one the
+// panel and the lists under them show, and the tools it called are marked on the left: its sessions, the shadow AI seen
 // on it and its MCP servers, each row in brief and opening in full. A machine's sheet is where it is stopped; the app does
 // that (`src/admin/inventory.rs`) and answers in `data.reply`.
 
@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
 import { Asks, type Ask } from "./inventory/dialogs";
 import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./inventory/marks";
-import { Fleet, FleetLegend } from "./inventory/fleet";
+import { Threats, ThreatsLegend } from "./inventory/threats";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { isOn } from "./inventory/mcp/types";
 import { END, ENGINE, WHY, derive, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
@@ -94,7 +94,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const closeAsk = () => { setAsk(null); setError(null); setPending(null); };
 
   const has = (...parts: (string | null | undefined)[]) => !q.trim() || parts.some((p) => p?.toLowerCase().includes(q.trim().toLowerCase()));
-  const everyone = view.machines.filter((m) => m.state !== "unregistered" || m.running);
   const current = view.machines.find((m) => m.id === focus) ?? machineOrder(view)[0];
   const mine = <T extends { device: string | null }>(list: T[]) => (current ? list.filter((x) => x.device === current.id) : []);
   const allSessions = mine(view.sessions), allShadow = mine(view.shadow);
@@ -219,9 +218,9 @@ export default function Page({ data }: { data: unknown | null }) {
       {header}
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-6">
         <div className="grid shrink-0 grid-cols-12 gap-4">
-          <Panel className="col-span-8 min-w-0" title="기기별 에이전트와 MCP" aside={<FleetLegend />}>
+          <Panel className="col-span-8 min-w-0" title="MCP 위협" aside={<>{view.mcp?.from_calls && <Chip>호출 기준</Chip>}<ThreatsLegend /></>}>
             <div className="h-[360px]">
-              <Fleet view={view} machines={everyone} servers={servers} picked={current?.id ?? null} onDevice={setFocus} onServer={openServer} />
+              <Threats servers={servers} focus={current ?? null} onServer={openServer} onTool={openTool} />
             </div>
           </Panel>
           <Panel className="col-span-4 min-w-0" title="인벤토리">
