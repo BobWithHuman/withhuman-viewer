@@ -70,7 +70,10 @@ pub fn InventoryPage() -> Element {
             let modes = list
                 .map(|l| inventory_web::engine_modes(l))
                 .unwrap_or_default();
-            let mut page = inventory_web::page(inv, &titles, &modes, &around(*at));
+            let called = list
+                .map(|l| inventory_web::last_calls(l))
+                .unwrap_or_default();
+            let mut page = inventory_web::page(inv, &titles, &modes, &called, &around(*at));
             page["session_calls"] = list.map_or(json!({}), |l| inventory_web::session_calls(l));
             // The servers the machines have set up, or, while the engine does not collect them,
             // those whose tools the machines called.

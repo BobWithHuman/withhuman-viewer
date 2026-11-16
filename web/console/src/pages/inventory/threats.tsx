@@ -26,13 +26,20 @@ const atRisk = (t: Tool) => t.calls > 0 && riskOf(t) >= 10;
 /** How red a risk is drawn, 0 to 1: full from 45. */
 const heat = (risk: number) => Math.min(1, risk / 45);
 /** A chip's or a badge's colours for a risk: a red that deepens with it, none at 0. */
-const tint = (risk: number) => {
+export const tint = (risk: number) => {
   const h = heat(risk);
   return h > 0
     ? { background: `color-mix(in oklab, var(--deny) ${Math.round(5 + 27 * h)}%, var(--secondary))`, borderColor: `color-mix(in oklab, var(--deny) ${Math.round(12 + 48 * h)}%, transparent)` }
     : undefined;
 };
-const ink = (risk: number) => `color-mix(in oklab, var(--deny) ${Math.round(45 + 55 * heat(risk))}%, var(--muted-foreground))`;
+/** A chip's fill: its calls blocked, held for the user and let through, as parts of its width
+ * from the left, the way the tool's sheet draws them, softly. */
+const split = (t: Tool) => {
+  const d = (100 * t.deny) / t.calls, r = (100 * t.review) / t.calls;
+  const deny = "color-mix(in oklab, var(--deny) 30%, var(--secondary))", held = "color-mix(in oklab, var(--review) 26%, var(--secondary))";
+  return `linear-gradient(90deg, ${deny} 0 ${d}%, ${held} ${d}% ${d + r}%, var(--secondary) ${d + r}% 100%)`;
+};
+export const ink = (risk: number) => `color-mix(in oklab, var(--deny) ${Math.round(45 + 55 * heat(risk))}%, var(--muted-foreground))`;
 const callsBy = (t: Tool, m: Machine) => t.users.reduce((a, u) => a + (isOn(u.client, m) ? u.n : 0), 0);
 /** The riskiest first, then what can do the most harm, then the most called. */
 const order = (a: Tool, b: Tool) => riskOf(b) - riskOf(a) || Number(a.calls === 0) - Number(b.calls === 0) || KINDS.indexOf(a.nature) - KINDS.indexOf(b.nature) || b.calls - a.calls;
@@ -41,9 +48,9 @@ export function ThreatsLegend() {
   const item = (mark: ReactNode, label: string) => <span className="inline-flex items-center gap-1.5">{mark}{label}</span>;
   return (
     <div className="flex items-center gap-3.5 text-[12px] text-muted-foreground">
-      <span className="inline-flex items-center gap-1.5">막은 비율
-        <i className="h-2.5 w-20 rounded-sm" style={{ background: "linear-gradient(90deg, var(--secondary), color-mix(in oklab, var(--deny) 32%, var(--secondary)))" }} />
-      </span>
+      {item(<i className="size-2.5 rounded-sm" style={{ background: "color-mix(in oklab, var(--deny) 30%, var(--secondary))" }} />, "차단")}
+      {item(<i className="size-2.5 rounded-sm" style={{ background: "color-mix(in oklab, var(--review) 26%, var(--secondary))" }} />, "사용자 확인")}
+      {item(<i className="size-2.5 rounded-sm bg-secondary" />, "허용")}
       {item(<i className="size-2.5 rounded-sm border border-dashed border-foreground/40" />, "호출 없음")}
       {item(<i className="size-1.5 rounded-full bg-primary" />, "고른 기기")}
     </div>
@@ -130,7 +137,7 @@ function Chip({ t, focus, onClick }: { t: Tool; focus: Machine | null; onClick: 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button onClick={onClick} style={t.calls ? tint(risk) : undefined}
+        <button onClick={onClick} style={t.calls ? { background: split(t), borderColor: tint(risk)?.borderColor } : undefined}
           className={cn("relative inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border px-2 transition-colors hover:border-white/40",
             t.calls === 0 ? "border-dashed border-white/15 text-muted-foreground" : "border-transparent bg-secondary text-foreground/85",
             heat(risk) > 0.55 && "font-semibold text-foreground")}>

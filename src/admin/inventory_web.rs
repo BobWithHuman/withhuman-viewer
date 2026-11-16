@@ -43,6 +43,19 @@ pub(super) fn engine_modes(facts: &[CallFact]) -> HashMap<String, String> {
         .collect()
 }
 
+/// When each machine's latest Call was seen, by client ID: a machine that called is heard from,
+/// whatever its sessions say.
+pub(super) fn last_calls(facts: &[CallFact]) -> HashMap<String, i64> {
+    let mut latest: HashMap<String, i64> = HashMap::new();
+    for f in facts {
+        if let (Some(client), Some(at)) = (&f.client, f.at) {
+            let t = latest.entry(client.clone()).or_insert(at);
+            *t = (*t).max(at);
+        }
+    }
+    latest
+}
+
 /// The page's data when there is no inventory to show: still loading, failed to load, or an
 /// engine that keeps none (`status` is `loading`, `failed` or `none`).
 pub(super) fn without(status: &str, error: Option<&str>, around: &Around) -> Value {
@@ -57,6 +70,7 @@ pub(super) fn page(
     inv: &Inventory,
     titles: &HashMap<String, Session>,
     modes: &HashMap<String, String>,
+    called: &HashMap<String, i64>,
     around: &Around,
 ) -> Value {
     let host: HashMap<&str, &str> = inv
@@ -70,7 +84,7 @@ pub(super) fn page(
     page["status"] = json!("ready");
     // Shadow AI is known from a check of the projects, or from the EDR's process scans.
     page["shadow_known"] = json!(inv.shadow.is_some() || inv.edr.is_some());
-    page["devices"] = devices(inv, modes);
+    page["devices"] = devices(inv, modes, called);
     // The machines the EDR lists that no registered machine was matched to.
     page["edr_known"] = json!(inv.edr.is_some());
     page["edr_only"] = inv
@@ -295,7 +309,11 @@ fn frame(around: &Around) -> Value {
 
 /// Each machine with what its sessions add: how many, when it was last heard through them, how
 /// its latest one was let run.
-fn devices(inv: &Inventory, modes: &HashMap<String, String>) -> Value {
+fn devices(
+    inv: &Inventory,
+    modes: &HashMap<String, String>,
+    called: &HashMap<String, i64>,
+) -> Value {
     let mut by: BTreeMap<&str, Vec<&SessionRun>> = BTreeMap::new();
     for r in &inv.sessions {
         if let Some(c) = r.client_id.as_deref() {
@@ -309,7 +327,8 @@ fn devices(inv: &Inventory, modes: &HashMap<String, String>) -> Value {
             let latest = runs.iter().max_by_key(|r| r.last_seen_at.or(r.created_at));
             let last = d
                 .last_seen
-                .max(runs.iter().filter_map(|r| r.last_seen_at).max());
+                .max(runs.iter().filter_map(|r| r.last_seen_at).max())
+                .max(called.get(&d.client_id).copied());
             json!({
                 "id": d.client_id, "host": d.hostname, "os": d.os,
                 "agent": d.agent, "hook_version": d.hook_version,
@@ -376,7 +395,7 @@ mod tests {
                 ..CallFact::default()
             },
         ];
-        let rows = devices(&inv, &engine_modes(&facts));
+        let rows = devices(&inv, &engine_modes(&facts), &last_calls(&facts));
         assert_eq!(rows[0]["last"], 90, "heard later through a session");
         assert_eq!(rows[0]["sessions"], 2);
         assert_eq!(rows[0]["permission_mode"], "bypassPermissions");
