@@ -140,19 +140,52 @@ impl Backend {
     }
 
     /// Every Call, cut down to what the security team's charts count.
+    ///
+    /// Reading them all from PostgreSQL takes long (each Call's tool and target are cut out of
+    /// its JSON there), so what was read is kept in a file beside the settings and the next
+    /// read asks only for the Calls since a day before the newest kept. `full` reads them all
+    /// again, as the reload button does, in case older Calls changed or were removed.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn call_facts(&self) -> Result<Vec<crate::model::CallFact>, String> {
+    pub async fn call_facts(&self, full: bool) -> Result<Vec<crate::model::CallFact>, String> {
         let settings = self.current();
         let value = if settings.demo {
             Ok(self.demo.lock().expect("demo lock").call_facts())
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres {
+                let pg = crate::pg::Postgres {
                     settings: &settings,
                     pool: &self.pg,
-                }
-                .call_facts()
-                .await
+                };
+                let path = facts_cache(&settings.neo4j_url);
+                let kept: Vec<Value> = if full {
+                    Vec::new()
+                } else {
+                    std::fs::read(&path)
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                        .unwrap_or_default()
+                };
+                let at = |row: &Value| row["at"].as_i64();
+                let since = kept
+                    .iter()
+                    .filter_map(at)
+                    .max()
+                    .map(|t| t - FACTS_OVERLAP_MS);
+                pg.call_facts(since).await.map(|fresh| {
+                    let mut all = match fresh {
+                        Value::Array(rows) => rows,
+                        _ => Vec::new(),
+                    };
+                    if let Some(since) = since {
+                        all.extend(kept.into_iter().filter(|r| at(r).is_none_or(|t| t < since)));
+                    }
+                    all.sort_by_key(|r| std::cmp::Reverse(at(r)));
+                    all.truncate(FACTS_KEPT);
+                    if let Ok(text) = serde_json::to_vec(&all) {
+                        let _ = std::fs::write(&path, text);
+                    }
+                    Value::Array(all)
+                })
             } else {
                 Neo4j {
                     client: &self.client,
@@ -592,6 +625,20 @@ fn clone_change(c: &Change) -> Change {
         password: c.password.clone(),
         demo: c.demo,
     }
+}
+
+/// The Calls read again on every read: those of the last day before the newest kept, whose
+/// decisions and results may still have come in.
+const FACTS_OVERLAP_MS: i64 = 24 * 60 * 60 * 1000;
+/// As many Calls as one read of the store hands over.
+const FACTS_KEPT: usize = 50_000;
+
+/// The file a store's Calls are kept in between reads, named after the store's address.
+fn facts_cache(url: &str) -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut hasher);
+    config_dir().join(format!("facts-{:016x}.json", hasher.finish()))
 }
 
 fn typed<T: DeserializeOwned>(value: Result<Value, ApiError>) -> Result<T, String> {

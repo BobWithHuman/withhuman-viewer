@@ -57,11 +57,12 @@ pub fn use_facts_loader(backend: Arc<Backend>, state: AppState) {
     use_context_provider(|| ToApprovals(Signal::new(None)));
     let mut facts = use_context_provider(|| Facts(Signal::new(None), Signal::new(None)));
     use_effect(move || {
-        let _ = (state.reload)();
+        // The reload button reads every Call again; a launch or a new connection reads what is new.
+        let full = (state.reload)() > 0;
         let _ = (state.public)();
         let b = backend.clone();
         spawn(async move {
-            let found = b.call_facts().await;
+            let found = b.call_facts(full).await;
             facts.0.set(Some(found));
             facts.1.set(Some(main_page::now_ms()));
         });
