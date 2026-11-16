@@ -25,7 +25,12 @@ export function KillSwitch({ m, now, busy, onStop, size = "sm" }: {
         <TooltipTrigger asChild>
           <Button size={size} className="shrink-0 gap-1.5 bg-deny text-white hover:bg-deny/85" onClick={() => onStop(false, "")}><OctagonX />멈춤 풀기</Button>
         </TooltipTrigger>
-        <TooltipContent>멈춤 · {ago(m.stopped.at, now)}{m.stopped.by ? ` · ${m.stopped.by}` : ""}{m.stopped.denied ? ` · 막힌 호출 ${m.stopped.denied}` : ""}</TooltipContent>
+        <TooltipContent className="max-w-[280px]">
+          <div className="flex flex-col gap-0.5 py-0.5">
+            <span className="tnum">멈춤 · {ago(m.stopped.at, now)}{m.stopped.by ? ` · ${m.stopped.by}` : ""}{m.stopped.denied ? ` · 막힌 호출 ${m.stopped.denied}` : ""}</span>
+            {m.stopped.reason && <span className="opacity-80">{m.stopped.reason}</span>}
+          </div>
+        </TooltipContent>
       </Tooltip>
     );
   }

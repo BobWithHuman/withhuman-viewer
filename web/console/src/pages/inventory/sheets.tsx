@@ -76,6 +76,16 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
         </div>
       </SheetHeader>
       <div className="scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
+        {/* Why and by whom the machine was stopped. */}
+        {m.stopped && (
+          <div className="flex flex-col gap-1.5 rounded-lg border border-deny/40 bg-deny/[0.07] p-3.5">
+            <span className="flex items-center gap-1.5 text-[12px] font-semibold text-deny"><OctagonX className="size-3.5" />멈춤
+              <span className="tnum font-normal text-muted-foreground">{clock(m.stopped.at)} · {ago(m.stopped.at, view.now)}{m.stopped.by ? ` · ${m.stopped.by}` : ""}</span>
+            </span>
+            <span className="text-[13px] break-words">{m.stopped.reason || <span className="text-muted-foreground">사유 없음</span>}</span>
+            {(m.stopped.denied ?? 0) > 0 && <span className="tnum text-[12px] text-muted-foreground">막힌 호출 {m.stopped.denied}</span>}
+          </div>
+        )}
         <Facts rows={[
           ["EDR", m.edr
             ? <span className="inline-flex items-center gap-1.5"><BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />{EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"}<span className="font-mono text-[11.5px] text-muted-foreground">에이전트 {m.edr.id}</span></span>
