@@ -643,59 +643,6 @@ impl Demo {
         }
     }
 
-    /// The demo's key actions, so the pages can be tried: issue a key, revoke one, stop a person.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn issue_key(
-        &mut self,
-        now: i64,
-        email: &str,
-        actor: &str,
-        note: &str,
-    ) -> (String, String) {
-        let inventory = self.inventory.get_or_insert_with(Default::default);
-        let key_id = format!("k-{:04x}", (now / 1000) % 0xffff);
-        let secret = format!("whk_demo_{:x}", now);
-        if !inventory.users.iter().any(|u| u.email == email) {
-            inventory.users.push(crate::model::Person {
-                email: email.into(),
-                created_at: Some(now),
-                kind: Some("person".into()),
-            });
-        }
-        inventory.keys.push(crate::model::ApiKey {
-            key_id: key_id.clone(),
-            user_email: email.into(),
-            created_at: Some(now),
-            created_by: Some(actor.into()),
-            note: Some(note.into()).filter(|n: &String| !n.is_empty()),
-            ..Default::default()
-        });
-        inventory.events.insert(
-            0,
-            crate::model::KeyEvent {
-                kind: "issued".into(),
-                actor: Some(actor.into()),
-                user_email: Some(email.into()),
-                key_id: Some(key_id.clone()),
-                at: Some(now),
-                ..Default::default()
-            },
-        );
-        (key_id, secret)
-    }
-
-    /// Names a machine's owner, or takes the name off.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn assign_owner(&mut self, now: i64, client: &str, email: Option<&str>) -> bool {
-        let mut inv = self.inventory(now);
-        let Some(d) = inv.clients.iter_mut().find(|d| d.client_id == client) else {
-            return false;
-        };
-        d.owner_email = email.map(str::to_owned);
-        self.inventory = Some(inv);
-        true
-    }
-
     /// Stops a machine, or lets it go again.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub fn stop_device(
@@ -715,42 +662,6 @@ impl Demo {
         d.stop_reason = stopped.then(|| reason.to_owned());
         self.inventory = Some(inv);
         true
-    }
-
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn revoke(
-        &mut self,
-        now: i64,
-        key_id: Option<&str>,
-        email: Option<&str>,
-        actor: &str,
-        reason: &str,
-    ) -> usize {
-        let inventory = self.inventory.get_or_insert_with(Default::default);
-        let mut done = Vec::new();
-        for k in inventory.keys.iter_mut().filter(|k| k.revoked_at.is_none()) {
-            if key_id.is_some_and(|id| k.key_id == id) || email.is_some_and(|e| k.user_email == e) {
-                k.revoked_at = Some(now);
-                k.revoked_by = Some(actor.into());
-                k.revoke_reason = Some(reason.into());
-                done.push((k.key_id.clone(), k.user_email.clone()));
-            }
-        }
-        for (key, user) in &done {
-            inventory.events.insert(
-                0,
-                crate::model::KeyEvent {
-                    kind: "revoked".into(),
-                    actor: Some(actor.into()),
-                    reason: Some(reason.into()),
-                    user_email: Some(user.clone()),
-                    key_id: Some(key.clone()),
-                    at: Some(now),
-                    ..Default::default()
-                },
-            );
-        }
-        done.len()
     }
 
     pub fn graph(&self, session: &str) -> Result<Value, ApiError> {

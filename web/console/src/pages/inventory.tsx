@@ -1,9 +1,9 @@
-// 인벤토리: the machines and sessions the engine protects, by machine alone. The page opens on the
-// picture of which machine has what (the agents and MCP servers on each), and beside it what the
-// machine picked holds, slot by slot. Under it the machines, sessions and shadow AI as lists, and
-// the MCP servers set up on the machines as a board of their tools by what the engine did with
-// the calls; a machine, a server or a tool opens in a sheet, where a machine is stopped. The app
-// does that (`src/admin/inventory.rs`) and answers in `data.reply`.
+// 인벤토리: what each machine is doing and has done, by machine alone. The page opens on every
+// machine beside the one picked: what is set up on it, its calls by day, and the tools, sessions
+// and calls behind them. Under it the machines, sessions and shadow AI as lists, and the MCP
+// servers set up on the machines as a board of their tools by what the engine did with the
+// calls; a machine, a server or a tool opens in a sheet, where a machine is stopped. The app does
+// that (`src/admin/inventory.rs`) and answers in `data.reply`.
 
 import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpRight, Check, Laptop, PackageOpen, PlugZap, Search, ShieldOff, TriangleAlert, X } from "lucide-react";
@@ -23,13 +23,12 @@ import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
 import { Asks, type Ask } from "./inventory/dialogs";
 import { AgentMark, Chip, Dash, EngineBadge, PermBadge, StateBadge } from "./inventory/marks";
-import { Fleet, FleetLegend } from "./inventory/fleet";
 import { Band } from "./inventory/mcp/band";
 import { Board } from "./inventory/mcp/board";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { NATURES, toolKey, type Server, type Tool } from "./inventory/mcp/types";
 import { END, PERM, SOURCE, derive, type Data, type Machine, type Run, type Shadow, type Tab } from "./inventory/model";
-import { Bag, machineOrder } from "./inventory/bag";
+import { DeviceActivity, DeviceList, machineOrder } from "./inventory/activity";
 import { DeviceSheet } from "./inventory/sheets";
 
 const TABS: [Tab, string][] = [["devices", "기기"], ["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
@@ -53,9 +52,8 @@ export default function Page({ data }: { data: unknown | null }) {
   const [nature, setNature] = useState<Nature | null>(null);
   const [all, setAll] = useState(false);
   const [filter, setFilter] = useState<Filter | null>(null);
-  // The machine whose holdings are shown beside the picture: the first in it until one is picked
-  // from the panel's own list, which then narrows the lists to it.
-  const [scope, setScope] = useState<string | null>(null);
+  // The machine whose activity is shown: the first in the list until one is picked.
+  const [focus, setFocus] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Open | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -105,21 +103,16 @@ export default function Page({ data }: { data: unknown | null }) {
   const closeAsk = () => { setAsk(null); setError(null); setPending(null); };
 
   const has = (...parts: (string | null | undefined)[]) => !q.trim() || parts.some((p) => p?.toLowerCase().includes(q.trim().toLowerCase()));
-  // The lists show only the machine picked in the panel's own list, until that is let go.
-  const ofScope = (device?: string | null) => !scope || device === scope;
-  const everyone = view.machines.filter((m) => all || m.state !== "unregistered" || m.running);
-  const base = everyone.filter((m) => ofScope(m.id));
+  const base = view.machines.filter((m) => all || m.state !== "unregistered" || m.running);
   const machines = base.filter((m) =>
     (!filter || m.permission_mode === filter.value)
     && has(m.name, m.id, m.serial, m.agent));
   const sessions = view.sessions.filter((r) =>
-    ofScope(r.device) && (!filter || r.permission_mode === filter.value)
+    (!filter || r.permission_mode === filter.value)
     && has(r.host, r.device, r.title, r.folder, r.id, r.model));
-  const shadow = view.shadow.filter((a) => ofScope(a.device) && has(a.host, a.device, a.project, a.agent));
+  const shadow = view.shadow.filter((a) => has(a.host, a.device, a.project, a.agent));
   const servers = view.mcp?.servers ?? [];
-  // The servers the lists show: those on the picked machine.
-  const scoped = scope ? view.machines.find((m) => m.id === scope) : undefined;
-  const listed = scoped ? view.serversOn(scoped) : servers;
+  const listed = servers;
   const lit = (s: Server, t: Tool) => (!nature || t.nature === nature) && has(s.name, t.name);
   const sifted = nature !== null || q.trim() !== "";
 
@@ -197,7 +190,7 @@ export default function Page({ data }: { data: unknown | null }) {
         {header}
         {d.status === "loading" ? (
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 pb-6">
-            <div className="grid h-[352px] shrink-0 grid-cols-12 gap-4"><Skeleton className="col-span-8 rounded-xl" /><Skeleton className="col-span-4 rounded-xl" /></div>
+            <div className="grid h-[540px] shrink-0 grid-cols-12 gap-4"><Skeleton className="col-span-3 rounded-xl" /><Skeleton className="col-span-9 rounded-xl" /></div>
             <Skeleton className="min-h-0 flex-1 rounded-xl" />
           </div>
         ) : (
@@ -226,28 +219,20 @@ export default function Page({ data }: { data: unknown | null }) {
   const openTool = (s: string, t: string) => setOpen({ kind: "tool", server: s, tool: t });
   const openDevice = (id: string) => setOpen({ kind: "device", id });
   const chip = filter && PERM[filter.value].label;
-  const shown = scope ?? machineOrder(view)[0]?.id ?? null;
-  const counts: Record<Tab, number> = {
-    devices: base.length,
-    sessions: view.sessions.filter((r) => ofScope(r.device)).length, shadow: view.shadow.filter((a) => ofScope(a.device)).length, mcp: listed.length,
-  };
+  const focused = view.machines.find((m) => m.id === focus) ?? machineOrder(view)[0];
+  const counts: Record<Tab, number> = { devices: base.length, sessions: view.sessions.length, shadow: view.shadow.length, mcp: listed.length };
   const shownCount = { devices: machines.length, sessions: sessions.length, shadow: shadow.length, mcp: listed.filter((s) => s.tools.some((t) => lit(s, t))).length }[tab];
 
   return (
     <div className="flex h-full flex-col">
       {header}
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-6">
-        <div className="grid shrink-0 grid-cols-12 gap-4">
-          <Panel className="col-span-8 min-w-0" title="기기별 에이전트와 MCP" aside={<FleetLegend />}>
-            <div className="h-[360px]">
-              <Fleet view={view} machines={everyone} servers={servers} picked={picked} onDevice={openDevice} onServer={openServer} />
-            </div>
+        <div className="grid h-[540px] shrink-0 grid-cols-12 gap-4">
+          <Panel className="col-span-3 min-w-0 [&>[data-slot=card-content]]:min-h-0 [&>[data-slot=card-content]]:flex-1 flex flex-col" title="기기" count={machineOrder(view).length}>
+            <DeviceList view={view} picked={focused?.id ?? null} onPick={setFocus} />
           </Panel>
-          <Panel className="col-span-4 min-w-0" title="인벤토리">
-            <div className="h-[360px]">
-              <Bag view={view} id={shown} onPick={setScope} onDevice={openDevice} onServer={openServer}
-                onSessions={(id, mode) => { setScope(id); setFilter(mode ? { kind: "perm", value: mode } : null); setTab("sessions"); }} />
-            </div>
+          <Panel className="col-span-9 min-w-0 flex flex-col [&>[data-slot=card-content]]:min-h-0 [&>[data-slot=card-content]]:flex-1">
+            {focused ? <DeviceActivity key={focused.id} m={focused} view={view} onDetail={() => openDevice(focused.id)} onSession={openSession} onServer={openServer} /> : <Empty />}
           </Panel>
         </div>
 
@@ -262,12 +247,6 @@ export default function Page({ data }: { data: unknown | null }) {
                 ))}
               </TabsList>
             </Tabs>
-            {scoped && (
-              <Badge variant="secondary" className="h-6 gap-1.5 border-0 bg-primary/15 pr-1 font-medium text-primary">
-                <Laptop className="size-3.5" strokeWidth={1.9} />{scoped.name}
-                <button aria-label="기기 지우기" onClick={() => setScope(null)} className="grid size-4 place-items-center rounded-full hover:bg-primary/20"><X className="size-3" /></button>
-              </Badge>
-            )}
             {chip && (
               <Badge variant="secondary" className="h-6 gap-1 border-0 bg-primary/15 pr-1 font-medium text-primary">
                 {chip}<span className="tnum opacity-70">{shownCount}</span>

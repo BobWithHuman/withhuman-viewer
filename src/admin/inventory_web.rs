@@ -1,11 +1,12 @@
 //! 인벤토리's data for the dashboards' page (`web/console/src/pages/inventory.tsx`), as JSON.
 //!
 //! The page decides what is running (a session not ended and heard from within the window the
-//! person picks there), so what goes over is what does not depend on that: each machine joined
-//! with its sessions and its latest modes, each person with their keys counted, the sessions with
-//! the titles the route map knows, and `now`, the moment the inventory was read.
+//! security team picks there), so what goes over is what does not depend on that: each machine
+//! joined with its sessions and its latest modes, the sessions with the titles the route map
+//! knows, and `now`, the moment the inventory was read. People are not shown: a machine is known
+//! by its own ID.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{Value, json};
 
@@ -105,32 +106,8 @@ pub(super) fn page(
             json!({
                 "device": a.client_id,
                 "host": a.client_id.as_deref().and_then(|c| host.get(c)),
-                "user": a.user_email, "agent": a.agent, "project": a.project,
+                "agent": a.agent, "project": a.project,
                 "last_seen": a.last_seen,
-            })
-        })
-        .collect();
-    page["people"] = people(inv);
-    page["keys"] = inv
-        .keys
-        .iter()
-        .map(|k| {
-            json!({
-                "id": k.key_id, "email": k.user_email, "created_at": k.created_at,
-                "created_by": k.created_by, "note": k.note, "last_used_at": k.last_used_at,
-                "revoked_at": k.revoked_at, "revoked_by": k.revoked_by,
-                "revoke_reason": k.revoke_reason, "first_denied_at": k.first_denied_at,
-                "denied_count": k.denied_count,
-            })
-        })
-        .collect();
-    page["events"] = inv
-        .events
-        .iter()
-        .map(|e| {
-            json!({
-                "kind": e.kind, "actor": e.actor, "reason": e.reason, "email": e.user_email,
-                "key_id": e.key_id, "at": e.at,
             })
         })
         .collect();
@@ -142,7 +119,6 @@ pub(super) fn page(
             json!({
                 "id": r.session_id, "device": r.client_id,
                 "host": r.client_id.as_deref().and_then(|c| host.get(c)),
-                "user": r.user_email,
                 "title": known.map(|s| s.title()).filter(|t| !t.is_empty()),
                 "folder": known.map(Session::folder).filter(|f| !f.is_empty()),
                 "opens": known.is_some(),
@@ -153,6 +129,99 @@ pub(super) fn page(
         })
         .collect();
     page
+}
+
+/// How many days of each machine's Calls [`activity`] gathers, today the last.
+pub(super) const DAYS: usize = 14;
+/// How many of a machine's latest Calls each day go over as they are.
+const RECENT: usize = 30;
+
+/// What each machine did over the last [`DAYS`] days, from its Calls, by client ID. Its Calls are
+/// counted by day, tool and session together (`cells`: day, tool, session as indexes into
+/// `tools` and `sessions`, then the Calls allowed, held for the user and blocked), so the page
+/// can narrow any of the three by the others; the latest [`RECENT`] of each day go over as they
+/// are. Days
+/// are this Mac's calendar days, day 0 the first and `DAYS - 1` today.
+pub(super) fn activity(facts: &[CallFact], now: i64) -> Value {
+    use chrono::TimeZone;
+    let day_of = |ms: i64| {
+        chrono::Local
+            .timestamp_millis_opt(ms)
+            .single()
+            .map(|t| t.date_naive())
+    };
+    let Some(today) = day_of(now) else {
+        return json!({});
+    };
+    #[derive(Default)]
+    struct Of<'a> {
+        tools: Vec<&'a str>,
+        sessions: Vec<&'a str>,
+        cells: BTreeMap<(usize, usize, usize), [u32; 3]>,
+        calls: Vec<(usize, &'a CallFact)>,
+    }
+    let mut by: BTreeMap<&str, Of> = BTreeMap::new();
+    for f in facts {
+        let (Some(client), Some(at)) = (f.client.as_deref(), f.at) else {
+            continue;
+        };
+        let Some(day) = day_of(at) else { continue };
+        let ago = (today - day).num_days();
+        if !(0..DAYS as i64).contains(&ago) {
+            continue;
+        }
+        let of = by.entry(client).or_default();
+        let tool = f.tool.as_deref().unwrap_or("?");
+        let t = index(&mut of.tools, tool);
+        let s = index(&mut of.sessions, f.session.as_str());
+        let verdict = match f.decision.as_deref() {
+            Some("DENY") => 2,
+            Some("REVIEW") => 1,
+            _ => 0,
+        };
+        let day = DAYS - 1 - ago as usize;
+        of.cells.entry((day, t, s)).or_default()[verdict] += 1;
+        of.calls.push((day, f));
+    }
+    by.into_iter()
+        .map(|(client, mut of)| {
+            of.calls.sort_by_key(|(_, f)| std::cmp::Reverse(f.at));
+            let mut kept = [0usize; DAYS];
+            let recent: Vec<Value> = of
+                .calls
+                .iter()
+                .filter(|(day, _)| {
+                    kept[*day] += 1;
+                    kept[*day] <= RECENT
+                })
+                .map(|(_, f)| {
+                    json!({
+                        "session": f.session, "seq": f.seq, "at": f.at, "tool": f.tool,
+                        "target": f.target.as_deref().map(|t| t.chars().take(200).collect::<String>()),
+                        "decision": f.decision, "ran": f.ran,
+                    })
+                })
+                .collect();
+            let cells: Vec<Value> = of
+                .cells
+                .iter()
+                .map(|(&(d, t, s), n)| json!([d, t, s, n[0], n[1], n[2]]))
+                .collect();
+            (
+                client.to_owned(),
+                json!({ "tools": of.tools, "sessions": of.sessions, "cells": cells, "recent": recent }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+/// Where `x` is in `list`, put at its end when it is not there yet.
+fn index<'a>(list: &mut Vec<&'a str>, x: &'a str) -> usize {
+    list.iter().position(|y| *y == x).unwrap_or_else(|| {
+        list.push(x);
+        list.len() - 1
+    })
 }
 
 /// What every state of the page carries.
@@ -169,7 +238,7 @@ fn frame(around: &Around) -> Value {
 }
 
 /// Each machine with what its sessions add: how many, when it was last heard through them, how
-/// its latest one was let run, and whose it is when it did not say at install.
+/// its latest one was let run.
 fn devices(inv: &Inventory, modes: &HashMap<String, String>) -> Value {
     let mut by: BTreeMap<&str, Vec<&SessionRun>> = BTreeMap::new();
     for r in &inv.sessions {
@@ -186,14 +255,13 @@ fn devices(inv: &Inventory, modes: &HashMap<String, String>) -> Value {
                 .last_seen
                 .max(runs.iter().filter_map(|r| r.last_seen_at).max());
             json!({
-                "id": d.client_id, "host": d.hostname, "team": d.team, "os": d.os,
-                "os_user": d.os_user, "agent": d.agent, "hook_version": d.hook_version,
-                "user": d.user_email.clone().or_else(|| latest.and_then(|r| r.user_email.clone())),
+                "id": d.client_id, "host": d.hostname, "os": d.os,
+                "agent": d.agent, "hook_version": d.hook_version,
                 "registered_at": d.registered_at, "first_seen": d.first_seen, "last": last,
                 "sessions": runs.len(),
                 "permission_mode": latest.and_then(|r| r.permission_mode.clone()),
                 "engine_mode": modes.get(&d.client_id),
-                "serial": d.serial, "owner": d.owner_email,
+                "serial": d.serial,
                 "stopped": d.stopped_at.map(|at| json!({
                     "at": at, "by": d.stopped_by, "reason": d.stop_reason, "denied": d.stop_denied_count,
                 })),
@@ -203,57 +271,10 @@ fn devices(inv: &Inventory, modes: &HashMap<String, String>) -> Value {
         .collect()
 }
 
-/// Everyone a key was issued to, with their machines, sessions and keys counted; the people
-/// stopped (every key revoked) first, then those who used a key most recently.
-fn people(inv: &Inventory) -> Value {
-    let mut emails: Vec<&str> = inv.users.iter().map(|u| u.email.as_str()).collect();
-    for k in &inv.keys {
-        if !emails.contains(&k.user_email.as_str()) {
-            emails.push(&k.user_email);
-        }
-    }
-    let mut rows: Vec<(bool, Option<i64>, Value)> = emails
-        .into_iter()
-        .map(|email| {
-            let keys: Vec<_> = inv.keys.iter().filter(|k| k.user_email == email).collect();
-            let runs: Vec<_> = inv
-                .sessions
-                .iter()
-                .filter(|r| r.user_email.as_deref() == Some(email))
-                .collect();
-            let mut machines: HashSet<&str> =
-                runs.iter().filter_map(|r| r.client_id.as_deref()).collect();
-            machines.extend(
-                inv.clients
-                    .iter()
-                    .filter(|c| c.user_email.as_deref() == Some(email))
-                    .map(|c| c.client_id.as_str()),
-            );
-            let mut machines: Vec<&str> = machines.into_iter().collect();
-            machines.sort_unstable();
-            let active = keys.iter().filter(|k| k.revoked_at.is_none()).count();
-            let revoked = keys.len() - active;
-            let stopped = active == 0 && revoked > 0;
-            let last_used = keys.iter().filter_map(|k| k.last_used_at).max();
-            let row = json!({
-                "email": email,
-                "kind": inv.users.iter().find(|u| u.email == email).and_then(|u| u.kind.clone()),
-                "devices": machines, "sessions": runs.len(),
-                "active_keys": active, "revoked_keys": revoked, "stopped": stopped,
-                "last_used": last_used,
-                "denied": keys.iter().filter_map(|k| k.denied_count).sum::<i64>(),
-            });
-            (stopped, last_used, row)
-        })
-        .collect();
-    rows.sort_by_key(|(stopped, last_used, _)| (!stopped, std::cmp::Reverse(*last_used)));
-    rows.into_iter().map(|(_, _, row)| row).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ApiKey, Device};
+    use crate::model::Device;
 
     fn run(client: Option<&str>, user: Option<&str>, last: i64) -> SessionRun {
         SessionRun {
@@ -267,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn a_machine_takes_its_person_and_modes_from_its_latest_session() {
+    fn a_machine_takes_its_modes_from_its_latest_session() {
         let mut bypass = run(Some("a"), Some("kim"), 90);
         bypass.permission_mode = Some("bypassPermissions".into());
         let inv = Inventory {
@@ -300,7 +321,6 @@ mod tests {
             },
         ];
         let rows = devices(&inv, &engine_modes(&facts));
-        assert_eq!(rows[0]["user"], "kim");
         assert_eq!(rows[0]["last"], 90, "heard later through a session");
         assert_eq!(rows[0]["sessions"], 2);
         assert_eq!(rows[0]["permission_mode"], "bypassPermissions");
@@ -310,34 +330,48 @@ mod tests {
     }
 
     #[test]
-    fn a_person_with_every_key_revoked_is_stopped_and_listed_first() {
-        let key = |id: &str, user: &str, revoked: bool| ApiKey {
-            key_id: id.into(),
-            user_email: user.into(),
-            revoked_at: revoked.then_some(5),
-            denied_count: revoked.then_some(2),
-            ..ApiKey::default()
+    fn a_machine_s_calls_are_counted_by_day_tool_and_session() {
+        let now = 1_763_280_000_000; // 2025-11-16, midday or so wherever the test runs
+        let call = |session: &str, tool: &str, at: i64, decision: Option<&str>| CallFact {
+            session: session.into(),
+            client: Some("a".into()),
+            tool: Some(tool.into()),
+            at: Some(at),
+            decision: decision.map(str::to_owned),
+            ..CallFact::default()
         };
-        let inv = Inventory {
-            keys: vec![
-                key("k1", "kim", false),
-                key("k2", "park", true),
-                key("k3", "lee", true),
-                key("k4", "lee", false),
-            ],
-            sessions: vec![
-                run(Some("a"), Some("kim"), 10),
-                run(Some("b"), Some("kim"), 20),
-            ],
-            ..Inventory::default()
-        };
-        let rows = people(&inv);
-        let rows = rows.as_array().unwrap();
-        assert_eq!(rows[0]["email"], "park");
-        assert_eq!(rows[0]["stopped"], true);
-        let of = |email: &str| rows.iter().find(|r| r["email"] == email).unwrap();
-        assert_eq!(of("lee")["stopped"], false, "one key still active");
-        assert_eq!(of("lee")["denied"], 2);
-        assert_eq!(of("kim")["devices"], json!(["a", "b"]));
+        let facts = vec![
+            call("s1", "Bash", now, Some("ALLOW")),
+            call("s1", "Bash", now, Some("DENY")),
+            call("s1", "Read", now, Some("REVIEW")),
+            call("s2", "Bash", now - 3 * 86_400_000, None),
+            call("s3", "Bash", now - 30 * 86_400_000, Some("ALLOW")),
+            CallFact {
+                client: None,
+                ..call("s4", "Bash", now, None)
+            },
+        ];
+        let all = activity(&facts, now);
+        let a = &all["a"];
+        assert_eq!(a["tools"], json!(["Bash", "Read"]));
+        assert_eq!(
+            a["sessions"],
+            json!(["s1", "s2"]),
+            "a month ago is past the window"
+        );
+        let today = (DAYS - 1) as u64;
+        let cells = a["cells"].as_array().unwrap();
+        assert!(cells.contains(&json!([today, 0, 0, 1, 0, 1])), "{cells:?}");
+        assert!(cells.contains(&json!([today, 1, 0, 0, 1, 0])));
+        assert!(
+            cells.contains(&json!([today - 3, 0, 1, 1, 0, 0])),
+            "no decision counts as allowed"
+        );
+        assert_eq!(a["recent"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            all.as_object().unwrap().len(),
+            1,
+            "a Call with no machine is no machine's"
+        );
     }
 }

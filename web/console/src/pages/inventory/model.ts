@@ -1,18 +1,17 @@
 // The inventory as the app hands it over (`src/admin/inventory_web.rs`), and what the page works
-// out from it: which sessions are still going within the window the person picked and how each
-// machine stands.
+// out from it: which sessions are still going within the window picked, how each machine stands,
+// and what each machine did.
 
 import { Eye, FileText, ShieldCheck, type LucideIcon } from "lucide-react";
 import { isOn, type Mcp } from "./mcp/types";
 
 export type Device = {
-  id: string; host: string | null; team: string | null; os: string | null; os_user: string | null;
-  agent: string | null; hook_version: string | null; user: string | null;
+  id: string; host: string | null; os: string | null;
+  agent: string | null; hook_version: string | null;
   registered_at: number | null; first_seen: number | null; last: number | null;
   sessions: number; permission_mode: string | null; engine_mode: string | null;
-  /** The hardware serial number, and the person the security team named as the owner (`user`
-   * is whoever's key the machine last presented). */
-  serial?: string | null; owner?: string | null;
+  /** The hardware serial number. */
+  serial?: string | null;
   /** The EDR's agent on the machine, when the engine matched one. */
   edr?: { id: string; status: string | null } | null;
   /** The security team stopped the machine: every tool call from it is refused. */
@@ -22,35 +21,34 @@ export type Device = {
 export type EdrOnly = { id: string; name: string; os: string | null; status: string | null; serial: string | null; last: number | null; agent: string | null };
 export const EDR_STATUS: Record<string, string> = { active: "연결됨", disconnected: "끊김", never_connected: "연결된 적 없음", pending: "대기" };
 export type Project = { device: string; project: string; agent: string | null; hook_version: string | null; installed_at: number | null };
-export type Shadow = { device: string | null; host: string | null; user: string | null; agent: string; project: string | null; last_seen: number | null };
-export type PersonRow = {
-  email: string; kind: string | null; devices: string[]; sessions: number;
-  active_keys: number; revoked_keys: number; stopped: boolean; last_used: number | null; denied: number;
-};
-export type Key = {
-  id: string; email: string; created_at: number | null; created_by: string | null; note: string | null;
-  last_used_at: number | null; revoked_at: number | null; revoked_by: string | null; revoke_reason: string | null;
-  first_denied_at: number | null; denied_count: number | null;
-};
-export type KeyEvent = { kind: string; actor: string | null; reason: string | null; email: string | null; key_id: string | null; at: number | null };
+export type Shadow = { device: string | null; host: string | null; agent: string; project: string | null; last_seen: number | null };
 export type Run = {
-  id: string; device: string | null; host: string | null; user: string | null;
+  id: string; device: string | null; host: string | null;
   title: string | null; folder: string | null; opens: boolean; source: string | null;
   permission_mode: string | null; model: string | null;
   created_at: number | null; last_seen_at: number | null; ended_at: number | null; end_reason: string | null;
 };
 /** The app's answer to the request with the same `req`. */
 export type Reply = {
-  req: number; ok: boolean; error?: string; done?: "issued" | "revoked" | "stopped" | "admin" | "owner" | "device_stopped" | "device_released";
-  email?: string; key_id?: string; key?: string; count?: number;
+  req: number; ok: boolean; error?: string; done?: "admin" | "device_stopped" | "device_released";
 };
+/** What a machine did over the last `days` days, by day, tool and session together: each cell is
+ * [day, tool, session, allowed, held for the user, blocked], day and the others indexes; day 0 is
+ * the first and the last is today. `recent` are the latest Calls of each day as they are. */
+export type Activity = {
+  tools: string[]; sessions: string[];
+  cells: [number, number, number, number, number, number][];
+  recent: Call[];
+};
+export type Call = { session: string; seq: number; at: number | null; tool: string | null; target: string | null; decision: string | null; ran: boolean };
 export type Tab = "devices" | "sessions" | "shadow" | "mcp";
 export type Data = {
   status: "ready" | "loading" | "failed" | "none"; error: string | null; now: number;
   source: { label: string; demo: boolean }; admin: { api: string; has_token: boolean };
   actor: string; reply: Reply | null; shadow_known?: boolean;
-  devices?: Device[]; projects?: Project[]; shadow?: Shadow[]; people?: PersonRow[];
-  keys?: Key[]; events?: KeyEvent[]; sessions?: Run[];
+  devices?: Device[]; projects?: Project[]; shadow?: Shadow[]; sessions?: Run[];
+  /** What each machine did, by its ID, over the last `days` days. */
+  activity?: Record<string, Activity>; days?: number;
   /** Whether the engine reads an EDR's machines, and those of them with no hooks. */
   edr_known?: boolean; edr_only?: EdrOnly[];
   /** The tab the lists open on. */
@@ -87,7 +85,6 @@ export const AGENT: Record<string, { label: string; color: string }> = {
 export const agentLabel = (a: string | null) => (a ? AGENT[a]?.label ?? a : "–");
 export const SOURCE: Record<string, string> = { startup: "새로 시작", resume: "이어 하기", clear: "지우고 시작", compact: "요약 뒤", fork: "갈라짐" };
 export const END: Record<string, string> = { prompt_input_exit: "종료", logout: "로그아웃", clear: "지움", resume: "이어 하기로" };
-export const EVENT: Record<string, string> = { issued: "키 발급", revoked: "회수", denied: "회수된 키 호출 거부" };
 
 // ---------------------------------------------------------------- what the page works out
 export const DAY = 24 * 60 * 60e3;
@@ -123,7 +120,7 @@ export function derive(d: Data, windowMin: number) {
     now, going, sessions, machines, registered, shadow, projects,
     shadowKnown: d.shadow_known ?? false,
     edrKnown: d.edr_known ?? false, edrOnly: d.edr_only ?? [],
-    people: d.people ?? [], keys: d.keys ?? [], events: d.events ?? [],
+    activity: d.activity ?? {}, days: d.days ?? 14,
     unregistered: machines.length - registered.length,
     runningSessions: sessions.filter(going).length,
     noId: sessions.filter((r) => !r.device).length,
