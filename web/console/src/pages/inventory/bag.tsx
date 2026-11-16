@@ -1,11 +1,9 @@
-// What one machine holds, laid out like a game's inventory: on top its status window (calls
-// stopped, sensitive values sent out, what waits for the team, shadow AI), then a slot for each
-// agent (protected, and the shadow runs seen of it), each MCP server (in the colour of its riskiest tool)
-// and each mode the engine ran its sessions in. A slot names what it holds and how many under it;
-// a slot pressed opens what it holds; a shelf with nothing says so. The machine is picked here:
-// its name opens a list to search.
+// What one machine holds and how it stands, all in view at once: four figures (calls stopped,
+// sensitive values sent out, what waits for the team, shadow AI runs), its agents and MCP servers
+// as small marks in one line, and its sessions by engine mode. Each opens where it is handled.
+// The machine is picked here: its name opens a list to search.
 
-import { Check, ChevronDown, ChevronUp, ChevronsUpDown, History, Inbox, KeyRound, Laptop, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Inbox, KeyRound, Laptop, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,39 +14,8 @@ import { cn } from "@/lib/utils";
 import { AgentMark } from "./marks";
 import { isOn } from "./mcp/types";
 import { ENGINE, ENGINE_KEYS, STATE, agentLabel, type Machine, type View } from "./model";
-import { ink, riskOf, tint } from "./threats";
+import { riskOf, tint } from "./threats";
 
-
-/** One slot: what it holds, a mark in its corner, and under it its name and a count. */
-function Slot({ children, name, sub, corner, style, faint, tip, onClick }: {
-  children: ReactNode; name: string; sub?: ReactNode; corner?: ReactNode; style?: React.CSSProperties; faint?: boolean; tip: ReactNode; onClick?: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button onClick={onClick} disabled={!onClick} className="group flex w-[68px] flex-col items-center gap-1 text-left">
-          <span className={cn("relative grid size-[52px] place-items-center rounded-lg border bg-background/70 transition-colors group-enabled:group-hover:border-white/30", faint && "border-dashed")} style={style}>
-            <span className={cn(faint && "opacity-40")}>{children}</span>
-            {corner !== undefined && <span className="absolute -right-1 -bottom-1">{corner}</span>}
-          </span>
-          <span className="w-full truncate text-center text-[11px] leading-tight text-foreground/85" title={name}>{name}</span>
-          {sub !== undefined && <span className="tnum -mt-0.5 w-full truncate text-center text-[10.5px] leading-tight text-muted-foreground">{sub}</span>}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{tip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/** A kind of thing held; one with nothing says so in a line. */
-function Shelf({ title, count, wide, children }: { title: string; count: number; wide?: boolean; children: ReactNode[] }) {
-  return (
-    <section className={wide ? "col-span-2" : undefined}>
-      <h3 className="mb-1.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">{title}<b className="tnum font-medium text-foreground/80">{count}</b></h3>
-      {children.length ? <div className="flex flex-wrap gap-x-1.5 gap-y-2">{children}</div> : <span className="text-[12px] text-muted-foreground/70">없음</span>}
-    </section>
-  );
-}
 
 /** The machines to pick from, shadow AI first, then stopped, then running: those the engine knows,
  * and those only the EDR lists. */
@@ -56,6 +23,9 @@ export const machineOrder = (view: View) => [...view.machines]
   .filter((m) => m.state !== "unregistered" || m.running || m.edrOnly)
   .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 const rank = (m: Machine) => (m.shadow ? 0 : m.stopped ? 1 : m.state === "running" ? 2 : 3);
+
+/** The MCP servers the panel shows before the rest are counted. */
+const MANY = 5;
 
 /** The groups the list of machines is in, in this order. */
 const GROUPS: { key: string; label: string; of: (m: Machine) => boolean }[] = [
@@ -146,29 +116,19 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
   );
 }
 
-/** One line of a status window: what it counts, a bar of ten blocks lit by its share, and the count. */
-function Stat({ icon: Icon, label, parts, total, value, onClick, tip }: {
-  icon: LucideIcon; label: string; parts: { n: number; color: string }[]; total: number; value: ReactNode; onClick?: () => void; tip: ReactNode;
+/** One figure of how a machine stands: what it counts, the number, and what it is out of. */
+function Tile({ icon: Icon, label, n, sub, tone, onClick, tip }: {
+  icon: LucideIcon; label: string; n: number; sub?: ReactNode; tone: string; onClick?: () => void; tip: ReactNode;
 }) {
-  // Ten blocks, each lit in the colour of the part it falls in; one block at least for any part that is not 0.
-  const blocks: (string | null)[] = [];
-  let lit = 0;
-  for (const p of parts) {
-    const n = p.n ? Math.max(1, Math.round((10 * p.n) / Math.max(1, total))) : 0;
-    for (let i = 0; i < n && lit < 10; i++, lit++) blocks.push(p.color);
-  }
-  while (blocks.length < 10) blocks.push(null);
-  const on = parts.some((p) => p.n > 0);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button onClick={onClick} disabled={!onClick} className="grid w-full grid-cols-[18px_64px_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors enabled:hover:bg-accent">
-          <Icon className={cn("size-4", on ? "text-foreground" : "text-muted-foreground")} strokeWidth={1.8} />
-          <span className={cn("text-[12px]", on ? "text-foreground" : "text-muted-foreground")}>{label}</span>
-          <span className="flex h-2.5 gap-[3px]">
-            {blocks.map((c, i) => <i key={i} className="h-full flex-1 rounded-[2px]" style={{ background: c ?? "rgb(255 255 255 / 0.07)" }} />)}
-          </span>
-          <span className="tnum min-w-[72px] text-right text-[12px]">{value}</span>
+        <button onClick={onClick} disabled={!onClick}
+          className="flex min-w-0 flex-col gap-0.5 rounded-lg border bg-background/50 px-2.5 py-2 text-left transition-colors enabled:hover:border-white/30 enabled:hover:bg-accent"
+          style={n ? { borderColor: `color-mix(in oklab, ${tone} 45%, transparent)`, background: `color-mix(in oklab, ${tone} 8%, transparent)` } : undefined}>
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Icon className="size-3.5 shrink-0" strokeWidth={1.9} style={n ? { color: tone } : undefined} /><span className="truncate">{label}</span></span>
+          <span className="tnum text-[20px] leading-tight font-semibold" style={n ? { color: tone } : { color: "var(--muted-foreground)" }}>{n.toLocaleString()}</span>
+          <span className="tnum truncate text-[10.5px] text-muted-foreground">{sub ?? "\u00a0"}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent>{tip}</TooltipContent>
@@ -176,33 +136,23 @@ function Stat({ icon: Icon, label, parts, total, value, onClick, tip }: {
   );
 }
 
-/** How a machine stands, like a game's status window: its calls stopped, the sensitive values
- * sent out, what waits for the team, and the shadow AI seen on it. */
-function StatusWindow({ m, view, onSessions, onShadow, onGo }: {
-  m: Machine; view: View; onSessions: () => void; onShadow: () => void; onGo: (to: "main" | "secrets") => void;
+/** A small thing held: its mark, a sign in its corner, and its name under it. */
+function Item({ children, name, corner, style, faint, tip, onClick }: {
+  children: ReactNode; name: string; corner?: ReactNode; style?: React.CSSProperties; faint?: boolean; tip: ReactNode; onClick?: () => void;
 }) {
-  const st = view.standing[m.id] ?? { calls: 0, deny: 0, review: 0, worth: 0, pending: 0, out: 0, stopped: 0 };
-  const runs = view.shadow.filter((a) => a.device === m.id && !a.project).length;
-  const dim = (n: number, text: ReactNode) => <span className={n ? "font-semibold" : "text-muted-foreground"}>{text}</span>;
   return (
-    <section className="col-span-2 rounded-lg border bg-background/50 p-1.5">
-      <Stat icon={ShieldX} label="차단" total={st.calls} onClick={onSessions}
-        parts={[{ n: st.deny, color: "var(--deny)" }, { n: st.review, color: "var(--review)" }]}
-        value={<>{dim(st.deny + st.review, <><span className="text-deny">{st.deny}</span><span className="text-muted-foreground"> · </span><span className="text-review">{st.review}</span></>)}<span className="text-muted-foreground"> / {st.calls.toLocaleString()}</span></>}
-        tip={<>호출 {st.calls.toLocaleString()} · 차단 {st.deny} · 사용자 확인 {st.review}</>} />
-      <Stat icon={KeyRound} label="민감 정보" total={Math.max(st.out + st.stopped, 5)} onClick={() => onGo("secrets")}
-        parts={[{ n: st.out, color: "var(--deny)" }, { n: st.stopped, color: "var(--review)" }]}
-        value={dim(st.out + st.stopped, <><span className={st.out ? "text-deny" : ""}>유출 {st.out}</span><span className="text-muted-foreground"> · 막음 {st.stopped}</span></>)}
-        tip={<>민감한 값을 밖으로 보낸 호출 {st.out} · 막힌 호출 {st.stopped}</>} />
-      <Stat icon={Inbox} label="처리 대기" total={Math.max(st.worth, 1)} onClick={() => onGo("main")}
-        parts={[{ n: st.pending, color: "var(--catch)" }, { n: st.worth - st.pending, color: "rgb(255 255 255 / 0.25)" }]}
-        value={dim(st.pending, <>{st.pending}<span className="text-muted-foreground"> / {st.worth}</span></>)}
-        tip={<>탐지 {st.worth} · 처리 대기 {st.pending}</>} />
-      <Stat icon={ShieldOff} label="섀도 AI" total={10} onClick={runs ? onShadow : undefined}
-        parts={[{ n: Math.min(runs, 10), color: "var(--deny)" }]}
-        value={dim(runs, <span className={runs ? "text-deny" : ""}>{runs}회</span>)}
-        tip={<>보호 밖에서 돈 실행 {runs}</>} />
-    </section>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button onClick={onClick} className="group flex w-[52px] shrink-0 flex-col items-center gap-1">
+          <span className={cn("relative grid size-10 place-items-center rounded-lg border bg-background/70 transition-colors group-hover:border-white/30", faint && "border-dashed")} style={style}>
+            <span className={cn(faint && "opacity-40")}>{children}</span>
+            {corner && <span className="absolute -right-1 -bottom-1">{corner}</span>}
+          </span>
+          <span className="w-full truncate text-center text-[10.5px] leading-tight text-muted-foreground">{name}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{tip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -230,6 +180,8 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
     .map((a) => ({ a, guarded: a === m.agent && m.state !== "unregistered", runs: shadow.filter((x) => x.agent === a && !x.project).length }));
   const modes = ENGINE_KEYS.map((k) => ({ k, n: sessions.filter((r) => view.sessionCalls[r.id]?.mode === k).length })).filter((x) => x.n);
   const e = m.engine_mode ? ENGINE[m.engine_mode] : undefined;
+  const st = view.standing[m.id] ?? { calls: 0, deny: 0, review: 0, worth: 0, pending: 0, out: 0, stopped: 0 };
+  const runs = shadow.filter((a) => !a.project).length;
 
   return (
     <div className="flex h-full flex-col">
@@ -242,38 +194,60 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
         {e && <Tooltip><TooltipTrigger asChild><e.icon className="size-4 shrink-0" strokeWidth={1.9} style={{ color: e.color }} /></TooltipTrigger><TooltipContent>엔진 {e.label}</TooltipContent></Tooltip>}
         <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onDevice(m.id)}><PanelRightOpen /></Button></TooltipTrigger><TooltipContent>상세 · 기기 멈춤</TooltipContent></Tooltip>
       </div>
-      <div className="scroll -mr-2 grid min-h-0 flex-1 grid-cols-2 content-start gap-x-4 gap-y-2.5 overflow-y-auto pr-2">
-        <StatusWindow m={m} view={view} onSessions={() => onSessions(m.id)} onShadow={onShadow} onGo={onGo} />
-        <Shelf title="에이전트" count={agents.length} wide>
-          {agents.map(({ a, guarded, runs }) => (
-            <Slot key={a} name={agentLabel(a)} onClick={() => onDevice(m.id)}
-              sub={[guarded && "보호됨", runs > 0 && `섀도 ${runs}`].filter(Boolean).join(" · ") || "미보호"}
-              style={runs ? { borderColor: "color-mix(in oklab, var(--deny) 55%, transparent)" } : undefined}
-              corner={guarded
-                ? <ShieldCheck className={cn("size-4 rounded-full bg-card p-px", runs ? "text-review" : "text-allow")} strokeWidth={2.2} />
-                : <ShieldOff className="size-4 rounded-full bg-card p-px text-deny" strokeWidth={2.2} />}
-              tip={<>{agentLabel(a)}{guarded ? ` · 보호됨${m.hook_version ? ` · 훅 ${m.hook_version}` : ""}` : ""}{runs ? ` · 섀도 실행 ${runs}` : ""}</>}>
-              <AgentMark agent={a} size={26} />
-            </Slot>
-          ))}
-        </Shelf>
-        <Shelf title="MCP 서버" count={servers.length} wide>
-          {servers.map(({ s, calls, risk }) => (
-            <Slot key={s.name} name={s.name} onClick={() => onServer(s.name)} faint={!calls} style={calls ? tint(risk) : undefined}
-              sub={calls ? <>호출 {calls.toLocaleString()}{risk >= 10 && <b className="ml-1 font-semibold" style={{ color: ink(risk) }}>{risk}</b>}</> : "안 씀"}
-              tip={<>{s.name} · {calls ? `호출 ${calls.toLocaleString()} · 위험도 ${risk}` : "설치만 됨 · 호출 없음"}</>}>
-              <ServiceLogo name={s.name} size={26} />
-            </Slot>
-          ))}
-        </Shelf>
-        <Shelf title="세션" count={sessions.length} wide>
-          {modes.map(({ k, n }) => (
-            <Slot key={k} name={`엔진 ${ENGINE[k].label}`} sub={`${n.toLocaleString()}개`} onClick={() => onSessions(m.id, k)}
-              tip={<>엔진 {ENGINE[k].label} · 세션 {n.toLocaleString()}</>}>
-              <History className="size-6" strokeWidth={1.6} style={{ color: ENGINE[k].color }} />
-            </Slot>
-          ))}
-        </Shelf>
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        {/* How it stands: four figures, each opening where it is handled. */}
+        <div className="grid shrink-0 grid-cols-4 gap-2">
+          <Tile icon={ShieldX} label="차단" n={st.deny + st.review} tone="var(--deny)" onClick={() => onSessions(m.id)}
+            sub={<>호출 {st.calls.toLocaleString()}</>} tip={<>호출 {st.calls.toLocaleString()} · 차단 {st.deny} · 사용자 확인 {st.review}</>} />
+          <Tile icon={KeyRound} label="민감 정보" n={st.out} tone="var(--deny)" onClick={() => onGo("secrets")}
+            sub={<>막음 {st.stopped}</>} tip={<>민감한 값을 밖으로 보낸 호출 {st.out} · 막힌 호출 {st.stopped}</>} />
+          <Tile icon={Inbox} label="처리 대기" n={st.pending} tone="var(--catch)" onClick={() => onGo("main")}
+            sub={<>탐지 {st.worth}</>} tip={<>탐지 {st.worth} · 처리 대기 {st.pending}</>} />
+          <Tile icon={ShieldOff} label="섀도 AI" n={runs} tone="var(--deny)" onClick={runs ? onShadow : undefined}
+            sub="실행" tip={<>보호 밖에서 돈 실행 {runs}</>} />
+        </div>
+
+        {/* What it holds: its agents, then its MCP servers in the colour of their riskiest tool. */}
+        <section className="min-w-0 shrink-0">
+          <h3 className="mb-1.5 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">에이전트 <b className="tnum font-medium text-foreground/80">{agents.length}</b><span className="opacity-40">·</span>MCP <b className="tnum font-medium text-foreground/80">{servers.length}</b></h3>
+          <div className="flex items-start gap-1 overflow-hidden">
+            {agents.map(({ a, guarded, runs: n }) => (
+              <Item key={a} name={agentLabel(a).replace(" Code", "")} onClick={() => onDevice(m.id)}
+                style={n ? { borderColor: "color-mix(in oklab, var(--deny) 55%, transparent)" } : undefined}
+                corner={guarded
+                  ? <ShieldCheck className={cn("size-3.5 rounded-full bg-card p-px", n ? "text-review" : "text-allow")} strokeWidth={2.2} />
+                  : <ShieldOff className="size-3.5 rounded-full bg-card p-px text-deny" strokeWidth={2.2} />}
+                tip={<>{agentLabel(a)}{guarded ? " · 보호됨" : " · 미보호"}{n ? ` · 섀도 실행 ${n}` : ""}</>}>
+                <AgentMark agent={a} size={22} />
+              </Item>
+            ))}
+            {agents.length > 0 && servers.length > 0 && <i className="mx-1 mt-2 h-6 w-px shrink-0 bg-border" />}
+            {servers.slice(0, MANY).map(({ s, calls, risk }) => (
+              <Item key={s.name} name={s.name} onClick={() => onServer(s.name)} faint={!calls} style={calls ? tint(risk) : undefined}
+                tip={<>{s.name} · {calls ? `호출 ${calls.toLocaleString()} · 위험도 ${risk}` : "호출 없음"}</>}>
+                <ServiceLogo name={s.name} size={22} />
+              </Item>
+            ))}
+            {servers.length > MANY && (
+              <button onClick={() => onDevice(m.id)} className="tnum mt-2.5 shrink-0 rounded-md px-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground">+{servers.length - MANY}</button>
+            )}
+            {!agents.length && !servers.length && <span className="text-[12px] text-muted-foreground/70">없음</span>}
+          </div>
+        </section>
+
+        {/* Its sessions, by the mode the engine ran them in. */}
+        <section className="flex shrink-0 flex-wrap items-center gap-1.5 text-[12px]">
+          <span className="mr-1 text-[11.5px] text-muted-foreground">세션 <b className="tnum font-medium text-foreground/80">{sessions.length}</b></span>
+          {modes.map(({ k, n }) => {
+            const E = ENGINE[k];
+            return (
+              <button key={k} onClick={() => onSessions(m.id, k)} className="inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 transition-colors hover:border-white/25 hover:bg-accent">
+                <E.icon className="size-3.5" strokeWidth={1.9} style={{ color: E.color }} />{E.label}<span className="tnum text-muted-foreground">{n}</span>
+              </button>
+            );
+          })}
+          {!sessions.length && <span className="text-muted-foreground/70">없음</span>}
+        </section>
       </div>
     </div>
   );
