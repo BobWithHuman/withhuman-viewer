@@ -3,7 +3,7 @@
 // as small marks in one line, and its sessions by engine mode. Each opens where it is handled.
 // The machine is picked here: its name opens a list to search.
 
-import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Inbox, KeyRound, Laptop, OctagonX, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Inbox, KeyRound, Laptop, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { AgentMark } from "./marks";
 import { isOn } from "./mcp/types";
 import { ENGINE, ENGINE_KEYS, STATE, agentLabel, type Machine, type View } from "./model";
+import { KillSwitch } from "./kill";
 import { riskOf, tint } from "./threats";
 
 
@@ -152,33 +153,6 @@ function Item({ children, name, corner, style, faint, tip, onClick }: {
   );
 }
 
-/** The kill switch: stops every tool call from the machine, pressed twice; or lets it go again. */
-function Kill({ m, onStop }: { m: Machine; onStop: (stopped: boolean) => void }) {
-  const [armed, setArmed] = useState(false);
-  if (m.stopped) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="sm" className="shrink-0 gap-1.5 bg-deny text-white hover:bg-deny/85" onClick={() => onStop(false)}><OctagonX />멈춤 풀기</Button>
-        </TooltipTrigger>
-        <TooltipContent>멈춤{m.stopped.by ? ` · ${m.stopped.by}` : ""}{m.stopped.denied ? ` · 막힌 호출 ${m.stopped.denied}` : ""}</TooltipContent>
-      </Tooltip>
-    );
-  }
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button size="sm" variant="outline" disabled={!!m.edrOnly} onBlur={() => setArmed(false)}
-          onClick={() => { if (armed) { onStop(true); setArmed(false); } else setArmed(true); }}
-          className={cn("shrink-0 gap-1.5 border-deny/50 text-deny hover:bg-deny/15 hover:text-deny", armed && "border-deny bg-deny text-white hover:bg-deny/90 hover:text-white")}>
-          <OctagonX />{armed ? "한 번 더" : "킬스위치"}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{m.edrOnly ? "엔진에 없는 기기" : "이 기기의 모든 도구 호출 차단"}</TooltipContent>
-    </Tooltip>
-  );
-}
-
 export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow, onGo, onSession, onStop }: {
   view: View; id: string | null; onPick: (id: string) => void;
   onDevice: (id: string) => void; onServer: (name: string) => void;
@@ -187,7 +161,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
   /** Opens a session's record. */
   onSession: (id: string) => void;
   /** Stops the machine, or lets it go again. */
-  onStop: (id: string, stopped: boolean) => void;
+  onStop: (id: string, stopped: boolean, reason: string) => void;
   /** Lists the machine's sessions, those the engine ran in one mode when a mode is named. */
   onSessions: (id: string, mode?: string) => void;
 }) {
@@ -213,7 +187,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 pb-3">
         <Picker view={view} id={m.id} onPick={onPick} />
-        <Kill key={m.id} m={m} onStop={(stopped) => onStop(m.id, stopped)} />
+        <KillSwitch key={m.id} m={m} now={view.now} onStop={(stopped, reason) => onStop(m.id, stopped, reason)} />
         <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onDevice(m.id)}><PanelRightOpen /></Button></TooltipTrigger><TooltipContent>상세 · 기기 멈춤</TooltipContent></Tooltip>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3">
