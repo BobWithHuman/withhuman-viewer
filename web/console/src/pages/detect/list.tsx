@@ -87,7 +87,10 @@ const caseColumns = (marks: Record<string, Mark>): ColumnDef<CaseGroup>[] => [
   { id: "sev", header: "심각도", size: 88, accessorFn: (g) => g.risk, cell: ({ row }) => <SevBadge s={worst(row.original)} /> },
   { id: "case", header: "사건", accessorFn: (g) => g.cause ?? g.calls[0].prompt ?? "", cell: ({ row }) => {
     const g = row.original;
-    return g.cause
+    const leaked = g.leaked.length > 0 && (
+      <span className="shrink-0 rounded bg-deny/15 px-1.5 text-[11px] leading-[19px] font-semibold text-deny" title={g.leaked.join(", ")}>유출 · {g.leaked[0]}{g.leaked.length > 1 ? ` +${g.leaked.length - 1}` : ""}</span>
+    );
+    return leaked ? <span className="flex min-w-0 items-center gap-2">{leaked}<span className="truncate">{g.cause ?? g.calls[0].prompt ?? NO_PROMPT}</span></span> : g.cause
       ? <span className="flex min-w-0 items-center gap-2" title={g.cause}><span className="shrink-0 rounded bg-catch/15 px-1.5 text-[11px] leading-[19px] font-medium text-catch">원인</span><Mono>{g.cause.length > 80 ? `${g.cause.slice(0, 80)}…` : g.cause}</Mono></span>
       : <span className={cn("block truncate", !g.calls[0].prompt && "text-muted-foreground")}>{g.calls[0].prompt ?? NO_PROMPT}</span>;
   } },

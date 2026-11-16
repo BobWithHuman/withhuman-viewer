@@ -5,7 +5,7 @@
 // as the engine keeps it, and a place it showed opens in 기록.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowUpRight, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { send } from "@/bridge";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, VerdictBadge, ago, clock, People, Person } from "@/kit";
 import { cn } from "@/lib/utils";
 import {
-  CALL_VERDICT, CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values,
+  CALL_VERDICT, CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, NO_USER, valueKey,
   type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Mention, type Source, type Status, type Trail, type Value,
 } from "./secrets/data";
 import { Flow } from "./secrets/flow";
@@ -38,8 +38,8 @@ const FOCUS: Record<Focus, (t: Trail) => boolean> = {
   sources: (t) => !!t.source,
 };
 type Open = { value: Value } | { trail: Trail } | { attempt: Attempt } | { source: Source } | null;
-type Split = "kind" | "place" | "client";
-const SPLITS: [Split, string][] = [["kind", "종류"], ["place", "보낸 곳"], ["client", "단말"]];
+type Split = "kind" | "source" | "place" | "user" | "client";
+const SPLITS: [Split, string][] = [["kind", "종류"], ["source", "출처"], ["place", "보낸 곳"], ["user", "사용자"], ["client", "단말"]];
 
 /** Asks the app to show a place a value was in on the route map of 기록. */
 const openInRecord = (session: string, seq: number) => send("secrets", { type: "open", session, seq });
@@ -105,10 +105,16 @@ export default function Page({ data }: { data: unknown | null }) {
   const ended = byStatus(flowTrails);
   const flowSources = useMemo(() => sources(flowTrails), [flowTrails]);
   const splitBars = useMemo(
-    () => bars(focused.filter((t) => passes(t, filter, [split])), (t) => (split === "kind" ? [t.kind] : split === "client" ? [t.client] : placesOf(t))),
+    () => bars(focused.filter((t) => passes(t, filter, [split])), (t) => (split === "kind" ? [t.kind] : split === "client" ? [t.client] : split === "user" ? [t.user ?? NO_USER] : split === "source" ? [t.source ?? FROM[fromOf(t)].label] : placesOf(t))),
     [focused, filter, split],
   );
   const shownValues = useMemo(() => values(shown), [shown]);
+  // Every session each value showed in, over all time, for "where else".
+  const byValue = useMemo(() => {
+    const m = new Map<string, Trail[]>();
+    for (const t of d.trails) m.set(valueKey(t), [...(m.get(valueKey(t)) ?? []), t]);
+    return m;
+  }, [d.trails]);
   const shownTries = useMemo(() => attempts(shown), [shown]);
   const shownFrom = useMemo(() => sources(shown), [shown]);
   const chips = (Object.keys(filter) as Dim[]).filter((k) => filter[k] !== undefined);
@@ -198,7 +204,7 @@ export default function Page({ data }: { data: unknown | null }) {
       <Sheet open={open !== null} onOpenChange={(on) => !on && setOpen(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[520px] data-[side=right]:sm:max-w-[520px]" aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
           {open && "value" in open && <ValueSheet v={open.value} onTrail={(t) => setOpen({ trail: t })} />}
-          {open && "trail" in open && <TrailSheet t={open.trail} />}
+          {open && "trail" in open && <TrailSheet t={open.trail} others={(byValue.get(valueKey(open.trail)) ?? []).filter((x) => x.id !== open.trail.id)} onTrail={(t) => setOpen({ trail: t })} />}
           {open && "attempt" in open && <AttemptSheet a={open.attempt} />}
           {open && "source" in open && <SourceSheet s={open.source} />}
         </SheetContent>
@@ -222,7 +228,9 @@ function SplitBars({ bars, split, picked, height, onPick }: { bars: Bar[]; split
               <span className="flex min-w-0 items-center gap-2">
                 {split === "place" && <PlaceMark name={b.key} />}
                 {split === "client" && <Laptop className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
-                <span className="truncate">{split === "place" ? b.key.replace(" (MCP)", "") : b.key}</span>
+                {split === "user" && b.key !== NO_USER && <Person name={b.key} size={18} />}
+                {split === "source" && <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
+                <span className={cn("truncate", split === "source" && "font-mono text-[12px]")}>{split === "place" ? b.key.replace(" (MCP)", "") : split === "source" ? short(b.key) : split === "user" ? b.key.replace(/@.*/, "") : b.key}</span>
               </span>
               <span className="flex h-2 overflow-hidden rounded-full bg-white/6">
                 <span className="flex h-full gap-px" style={{ width: `${(b.total / max) * 100}%` }}>
@@ -233,7 +241,7 @@ function SplitBars({ bars, split, picked, height, onPick }: { bars: Bar[]; split
             </button>
           </TooltipTrigger>
           <TooltipContent side="left" className="grid gap-1">
-            <span className="font-medium">{b.key}</span>
+            <span className="max-w-[360px] font-medium break-all">{b.key}</span>
             {STATUSES.filter((s) => b.split[s] > 0).map((s) => (
               <span key={s} className="tnum flex items-center gap-1.5"><i className="size-2 rounded-full" style={{ background: STATUS[s].color }} />{STATUS[s].label}<b className="ml-auto pl-4 font-medium">{b.split[s]}</b></span>
             ))}
@@ -411,6 +419,7 @@ function MentionRow({ m, session }: { m: Mention; session: string }) {
       <span className="tnum text-[12px] text-muted-foreground">{time(m.at)}</span>
       <span className="flex min-w-0 items-center gap-2">
         <span className="shrink-0">{m.where}</span>
+        {m.tool && <span className="max-w-32 shrink-0 truncate rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{m.tool.replace(/^mcp__/, "").replace(/__/g, " · ")}</span>}
         {m.place && <span className="inline-flex shrink-0 items-center gap-1" style={{ color: tone }}><PlaceMark name={m.place} size={15} />{m.place.replace(" (MCP)", "")}</span>}
         {m.what && <Masked className="truncate text-muted-foreground">{m.what}</Masked>}
       </span>
@@ -467,6 +476,33 @@ function ValueSheet({ v, onTrail }: { v: Value; onTrail: (t: Trail) => void }) {
           ["출처", <span className="break-all">{v.sources.length ? v.sources.map(short).join(", ") : v.froms.map((f) => FROM[f].label).join(" · ")}</span>],
           ["마지막", <span className="tnum">{clock(v.last)}</span>],
         ]} />
+        <Section title="경로" count={v.trails.length}>
+          <div className="grid gap-1.5">
+            {v.trails.map((t) => {
+              // Where it came in (the first mention), and where it left or was used last.
+              const first = t.mentions[0];
+              const end = [...t.mentions].reverse().find((m) => m.out) ?? [...t.mentions].reverse().find((m) => m.call);
+              const step = (m: Mention | undefined, tone: string) => m && (
+                <button onClick={() => openInRecord(t.session, m.seq)} className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent" title="기록에서 열기">
+                  <i className="size-2 shrink-0 rounded-full" style={{ background: tone }} />
+                  <span className="shrink-0 text-muted-foreground">{m.where}</span>
+                  {m.tool && <span className="max-w-28 shrink-0 truncate rounded bg-secondary px-1 text-[11px]">{m.tool.replace(/^mcp__/, "").replace(/__/g, " · ")}</span>}
+                  {m.place ? <span className="truncate">{m.place.replace(" (MCP)", "")}</span> : m.what && <Masked className="truncate text-muted-foreground">{m.what}</Masked>}
+                </button>
+              );
+              return (
+                <div key={t.id} className="grid gap-0.5 rounded-md bg-background/60 px-1.5 py-1.5 text-[12.5px]">
+                  <span className="flex min-w-0 items-center gap-2 px-1.5 text-[12px] text-muted-foreground"><span className="truncate">{sessionName(t)}</span><span className="ml-auto shrink-0"><Who t={t} /></span></span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_14px_minmax(0,1fr)] items-center">
+                    {step(first, "var(--info)") ?? <span />}
+                    <ArrowRight className="size-3.5 text-muted-foreground" />
+                    {end && end !== first ? step(end, end.out ? (end.held ? "var(--review)" : "var(--deny)") : "var(--write)") : <span className="px-1.5 text-muted-foreground">–</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Section>
         <Section title="드러난 세션" count={v.trails.length}>
           <div className="grid gap-1">
             {v.trails.map((t) => (
@@ -485,7 +521,7 @@ function ValueSheet({ v, onTrail }: { v: Value; onTrail: (t: Trail) => void }) {
   );
 }
 
-function TrailSheet({ t }: { t: Trail }) {
+function TrailSheet({ t, others, onTrail }: { t: Trail; others: Trail[]; onTrail: (t: Trail) => void }) {
   const Icon = CATEGORY[t.category as Category]?.icon;
   return (
     <>
@@ -512,6 +548,21 @@ function TrailSheet({ t }: { t: Trail }) {
           ["세션", <span className="line-clamp-2">{sessionName(t)}</span>],
           ["마지막", <span className="tnum">{clock(t.last)}</span>],
         ]} />
+        {others.length > 0 && (
+          <Section title="같은 값이 쓰인 다른 세션" count={others.length}>
+            <div className="grid gap-1">
+              {others.map((o) => (
+                <button key={o.id} onClick={() => onTrail(o)} className="flex w-full min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
+                  <span className="grid min-w-0 flex-1 gap-1">
+                    <span className="truncate">{sessionName(o)}</span>
+                    <span className="text-[12px]"><Who t={o} /></span>
+                  </span>
+                  <StatusBadge s={o.status} />
+                </button>
+              ))}
+            </div>
+          </Section>
+        )}
         <Section title="지나간 곳" count={t.mentions.length}>
           <Line>{t.mentions.map((m, i) => <MentionRow key={`${m.seq}-${i}`} m={m} session={t.session} />)}</Line>
         </Section>

@@ -45,6 +45,7 @@ fn mention(m: &SecretMention) -> Value {
         "call": call,
         "out": out,
         "held": out && held(m),
+        "tool": m.tool,
         "what": call.then(|| m.target.clone().or_else(|| m.tool.clone())).flatten(),
         "place": out.then(|| destination(m)),
         "verdict": verdict(m),

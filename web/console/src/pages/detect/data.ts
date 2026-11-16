@@ -24,6 +24,8 @@ export type Call = {
   user?: string | null;
   /** What the Call whose result told this one to act was on: a file, a URL, a command or a tool. */
   cause?: string | null;
+  /** The sensitive values this Call sent out though not kept from running: their kinds, and where to. */
+  leak?: { kinds: string[]; places: string[] } | null;
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
   target: string | null; reason: string | null; prompt: string | null; rule: string | null;
   mode: string | null; ran: boolean; hard: boolean;
@@ -107,6 +109,7 @@ const KIND: Record<string, string> = {
   safeguard: "에이전트 안전장치 변경",
   other: "그 밖의 이유",
   allowed_irreversible: "되돌리기 어려운 허용",
+  secret_out: "민감 정보 유출",
 };
 const SOURCE: Record<string, string> = { segment: "도구 결과", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
 export const MODE: Record<string, { label: string; cls: string }> = {
@@ -219,20 +222,22 @@ export function groups(calls: Call[], of: (c: Call) => string): Group[] {
 }
 // A Call that already ran though it should worry: allowed though hard to undo, held and let
 // run by a person, or one that sent data out and ran. These come before what the engine stopped.
-export const happened = (c: Call) => c.ran && (c.verdict === "allow" || c.hard || c.kind === "exfiltration" || c.verdict === "review");
+export const happened = (c: Call) => !!c.leak || (c.ran && (c.verdict === "allow" || c.hard || c.kind === "exfiltration" || c.verdict === "review"));
 
 // A case: the Calls worth a look that one cause made, over every session it reached; a Call
 // with no known cause makes a case of its session. Those with Calls that already ran come
 // first, then the riskiest.
-export type CaseGroup = Group & { cause: string | null; sessions: string[]; machines: string[]; ran: number };
+export type CaseGroup = Group & { cause: string | null; sessions: string[]; machines: string[]; ran: number; leaked: string[] };
 export function cases(calls: Call[]): CaseGroup[] {
   return groups(calls, (c) => (c.cause ? `c:${c.cause}` : `s:${c.session}`))
     .map((g) => ({
       ...g, cause: g.calls[0].cause ?? null,
       sessions: [...new Set(g.calls.map((c) => c.session))], machines: [...new Set(g.calls.map((c) => c.machine))],
       ran: g.calls.filter(happened).length,
+      leaked: [...new Set(g.calls.flatMap((c) => c.leak?.kinds ?? []))],
     }))
-    .sort((a, b) => Number(b.ran > 0) - Number(a.ran > 0) || b.risk - a.risk || b.total - a.total);
+    // Values already out first, then what else already ran, then the riskiest.
+    .sort((a, b) => Number(b.leaked.length > 0) - Number(a.leaked.length > 0) || Number(b.ran > 0) - Number(a.ran > 0) || b.risk - a.risk || b.total - a.total);
 }
 // A case's state: its sessions' common mark, `mixed` when they differ, none when none is marked.
 export function stateOf(g: CaseGroup, marks: Record<string, Mark>): Mark["state"] | "mixed" | null {

@@ -167,6 +167,21 @@ pub fn Main() -> Element {
         }
     });
     let mut marks = use_signal(super::triage::Store::default);
+    // The Calls that sent sensitive values out, read after the Calls, for the queue.
+    let leaks = use_resource({
+        let backend = backend.clone();
+        move || {
+            let b = backend.clone();
+            let _ = (state.reload)();
+            let _ = (state.public)();
+            async move {
+                b.secrets()
+                    .await
+                    .map(|all| super::secrets::leaks(&all))
+                    .unwrap_or_default()
+            }
+        }
+    });
     use_effect(move || {
         if let Some(store) = &*triage.read() {
             marks.set(store.clone());
@@ -208,6 +223,7 @@ pub fn Main() -> Element {
                 Some(Some(inv)) => super::secrets_web::Owners::of(inv),
                 _ => Default::default(),
             },
+            leaks: &leaks.read().clone().unwrap_or_default(),
             alerts: &match &*inventory.read() {
                 Some(Some(inv)) => super::detect_web::alerts(inv, now_ms()),
                 _ => Value::Null,

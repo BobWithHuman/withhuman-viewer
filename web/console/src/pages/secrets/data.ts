@@ -14,6 +14,8 @@ export type CallVerdict = "deny" | "approved" | "asked" | "allow";
 /** One place a value showed in its session; a Call says what it acted on and where it sent. */
 export type Mention = {
   seq: number;
+  /** The Call's tool, for a Call. */
+  tool?: string | null;
   at: number | null;
   where: string;
   call: boolean;
@@ -97,7 +99,7 @@ export const placesOf = (t: Trail) => [...new Set(t.mentions.filter((m) => m.out
 export const sessionName = (t: { title: string | null; session: string }) => t.title || t.session.slice(0, 8);
 
 /** What narrows the page: a band or a node of the flow, a bar beside it. */
-export type Filter = { from?: From; category?: string; status?: Status; kind?: string; place?: string; client?: string; source?: string };
+export type Filter = { from?: From; category?: string; status?: Status; kind?: string; place?: string; client?: string; source?: string; user?: string };
 export type Dim = keyof Filter;
 
 /** Whether a trail passes the filter, leaving out the dimensions named in `skip`. */
@@ -109,6 +111,7 @@ export function passes(t: Trail, f: Filter, skip: Dim[] = []) {
     (!on("status") || t.status === f.status) &&
     (!on("kind") || t.kind === f.kind) &&
     (!on("source") || t.source === f.source) &&
+    (!on("user") || (t.user ?? NO_USER) === f.user) &&
     (!on("client") || t.client === f.client) &&
     (!on("place") || placesOf(t).includes(f.place as string))
   );
@@ -164,6 +167,10 @@ export type Value = {
   froms: From[]; sources: string[];
   sessions: number; clients: string[]; users: string[]; last: number | null;
 };
+/** How a value with no known person is listed. */
+export const NO_USER = "사용자 모름";
+/** A value's key: the same masked text of the same kind is the same value. */
+export const valueKey = (t: Trail) => `${t.kind}\u0000${t.text}`;
 /** A machine as a row names it: its host name when known, else its ID. */
 export const machineName = (t: { host?: string | null; client: string }) => t.host || t.client;
 const WORST: Status[] = ["out", "blocked", "used", "seen"];

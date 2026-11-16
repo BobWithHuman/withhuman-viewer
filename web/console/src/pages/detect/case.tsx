@@ -139,6 +139,14 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
               {call.target ?? call.tool}
             </Box>
             {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">보내려던 곳</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
+            {call.leak && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                <span className="rounded bg-deny/15 px-1.5 leading-[20px] font-semibold text-deny">밖으로 나간 값</span>
+                {call.leak.kinds.map((k) => <span key={k} className="rounded bg-secondary px-1.5 leading-[20px]">{k}</span>)}
+                <span className="text-muted-foreground">→</span>
+                {call.leak.places.map((p) => <Mono key={p}>{p.replace(" (MCP)", "")}</Mono>)}
+              </div>
+            )}
           </Step>
 
           <Step n={3} icon={ShieldAlert} title="엔진 판정" last aside={call.rule ? <Mono>{call.rule}</Mono> : undefined}>

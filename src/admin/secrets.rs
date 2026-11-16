@@ -201,6 +201,31 @@ fn trails(mentions: &[SecretMention]) -> Vec<Trail> {
     list
 }
 
+/// A Call that sent sensitive values out and was not kept from running: the values' kinds and
+/// where they went.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct Leak {
+    pub kinds: Vec<String>,
+    pub places: Vec<String>,
+}
+
+/// Every Call that sent a value out, by session and number, as 메인 puts them in its queue.
+pub(super) fn leaks(all: &[SecretMention]) -> HashMap<(String, i64), Leak> {
+    let mut by: HashMap<(String, i64), Leak> = HashMap::new();
+    for m in all.iter().filter(|m| in_call(m) && outward(m) && !held(m)) {
+        let leak = by.entry((m.session.clone(), m.seq)).or_default();
+        let kind = kind_label(m.kind.as_deref().unwrap_or_default()).to_owned();
+        if !leak.kinds.contains(&kind) {
+            leak.kinds.push(kind);
+        }
+        let place = destination(m);
+        if !leak.places.contains(&place) {
+            leak.places.push(place);
+        }
+    }
+    by
+}
+
 /// Whether a Call holding a value was kept from running: stopped, or held and not let through.
 pub(super) fn held(m: &SecretMention) -> bool {
     m.decision.as_deref() == Some("DENY") || (m.decision.as_deref() == Some("REVIEW") && !m.ran)
