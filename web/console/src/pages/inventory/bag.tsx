@@ -3,7 +3,7 @@
 // as small marks in one line, and its sessions by engine mode. Each opens where it is handled.
 // The machine is picked here: its name opens a list to search.
 
-import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Inbox, KeyRound, Laptop, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Inbox, KeyRound, Laptop, OctagonX, PanelRightOpen, Search, ShieldCheck, ShieldOff, ShieldX, type LucideIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,15 +27,6 @@ const rank = (m: Machine) => (m.shadow ? 0 : m.stopped ? 1 : m.state === "runnin
 /** The MCP servers the panel shows before the rest are counted. */
 const MANY = 5;
 
-/** The groups the list of machines is in, in this order. */
-const GROUPS: { key: string; label: string; of: (m: Machine) => boolean }[] = [
-  { key: "shadow", label: "섀도 AI", of: (m) => m.shadow > 0 },
-  { key: "stopped", label: "멈춤", of: (m) => !!m.stopped },
-  { key: "running", label: "활동 중", of: (m) => m.state === "running" },
-  { key: "edr", label: "미보호", of: (m) => !!m.edrOnly },
-  { key: "rest", label: "쉬는 중", of: () => true },
-];
-
 const dot = (x: Machine) => <i className={cn("size-1.5 shrink-0 rounded-full", x.state === "running" ? "animate-pulse bg-allow" : x.state === "installed" ? "bg-catch" : x.edrOnly ? "bg-review" : "bg-foreground/35")} />;
 
 /** The machine picked, as a field that opens every machine to pick from, grouped by what wants a
@@ -49,7 +40,12 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
   const needle = q.trim().toLowerCase();
   const found = all.filter((m) => !needle || [m.name, m.id, m.serial].some((t) => t?.toLowerCase().includes(needle)));
   // Each machine in its first group, the groups in order: the list as it is drawn and walked.
-  const groups = GROUPS.map((g, gi) => ({ ...g, list: found.filter((m) => g.of(m) && GROUPS.findIndex((x) => x.of(m)) === gi) })).filter((g) => g.list.length);
+  // Two groups: the machines that want a look (shadow AI, calls waiting for the team, or stopped), and the rest.
+  const look = (x: Machine) => x.shadow > 0 || !!x.stopped || (view.standing[x.id]?.pending ?? 0) > 0;
+  const groups = [
+    { key: "look", label: "살펴볼 기기", list: found.filter(look) },
+    { key: "rest", label: "그 외", list: found.filter((x) => !look(x)) },
+  ].filter((g) => g.list.length);
   const flat = groups.flatMap((g) => g.list);
   const m = all.find((x) => x.id === id);
   const index = all.findIndex((x) => x.id === id);
@@ -86,7 +82,7 @@ function Picker({ view, id, onPick }: { view: View; id: string | null; onPick: (
             {groups.map((g) => (
               <div key={g.key} className="pb-1">
                 <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground">
-                  {g.key === "shadow" && <ShieldOff className="size-3 text-deny" strokeWidth={2.2} />}{g.label}<span className="tnum opacity-70">{g.list.length}</span>
+                  {g.label}<span className="tnum opacity-70">{g.list.length}</span>
                 </div>
                 {g.list.map((x) => {
                   const i = flat.indexOf(x);
@@ -156,11 +152,42 @@ function Item({ children, name, corner, style, faint, tip, onClick }: {
   );
 }
 
-export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow, onGo }: {
+/** The kill switch: stops every tool call from the machine, pressed twice; or lets it go again. */
+function Kill({ m, onStop }: { m: Machine; onStop: (stopped: boolean) => void }) {
+  const [armed, setArmed] = useState(false);
+  if (m.stopped) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="sm" className="shrink-0 gap-1.5 bg-deny text-white hover:bg-deny/85" onClick={() => onStop(false)}><OctagonX />멈춤 풀기</Button>
+        </TooltipTrigger>
+        <TooltipContent>멈춤{m.stopped.by ? ` · ${m.stopped.by}` : ""}{m.stopped.denied ? ` · 막힌 호출 ${m.stopped.denied}` : ""}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button size="sm" variant="outline" disabled={!!m.edrOnly} onBlur={() => setArmed(false)}
+          onClick={() => { if (armed) { onStop(true); setArmed(false); } else setArmed(true); }}
+          className={cn("shrink-0 gap-1.5 border-deny/50 text-deny hover:bg-deny/15 hover:text-deny", armed && "border-deny bg-deny text-white hover:bg-deny/90 hover:text-white")}>
+          <OctagonX />{armed ? "한 번 더" : "킬스위치"}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{m.edrOnly ? "엔진에 없는 기기" : "이 기기의 모든 도구 호출 차단"}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow, onGo, onSession, onStop }: {
   view: View; id: string | null; onPick: (id: string) => void;
   onDevice: (id: string) => void; onServer: (name: string) => void;
   /** Opens the machine's shadow AI runs; opens 메인 or 민감 정보. */
   onShadow: () => void; onGo: (to: "main" | "secrets") => void;
+  /** Opens a session's record. */
+  onSession: (id: string) => void;
+  /** Stops the machine, or lets it go again. */
+  onStop: (id: string, stopped: boolean) => void;
   /** Lists the machine's sessions, those the engine ran in one mode when a mode is named. */
   onSessions: (id: string, mode?: string) => void;
 }) {
@@ -179,7 +206,6 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
   const agents = [...new Set([...(m.agent && m.state !== "unregistered" ? [m.agent] : []), ...shadow.map((a) => a.agent)])]
     .map((a) => ({ a, guarded: a === m.agent && m.state !== "unregistered", runs: shadow.filter((x) => x.agent === a && !x.project).length }));
   const modes = ENGINE_KEYS.map((k) => ({ k, n: sessions.filter((r) => view.sessionCalls[r.id]?.mode === k).length })).filter((x) => x.n);
-  const e = m.engine_mode ? ENGINE[m.engine_mode] : undefined;
   const st = view.standing[m.id] ?? { calls: 0, deny: 0, review: 0, worth: 0, pending: 0, out: 0, stopped: 0 };
   const runs = shadow.filter((a) => !a.project).length;
 
@@ -187,11 +213,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 pb-3">
         <Picker view={view} id={m.id} onPick={onPick} />
-        {m.edrOnly
-          ? <span className="shrink-0 rounded bg-review/15 px-1.5 text-[11px] leading-5 font-medium text-review">미보호</span>
-          : <span className="shrink-0 rounded bg-allow/15 px-1.5 text-[11px] leading-5 font-medium text-allow">보호됨</span>}
-        {m.stopped && <span className="rounded bg-deny/15 px-1.5 text-[11px] leading-5 font-semibold text-deny">멈춤</span>}
-        {e && <Tooltip><TooltipTrigger asChild><e.icon className="size-4 shrink-0" strokeWidth={1.9} style={{ color: e.color }} /></TooltipTrigger><TooltipContent>엔진 {e.label}</TooltipContent></Tooltip>}
+        <Kill key={m.id} m={m} onStop={(stopped) => onStop(m.id, stopped)} />
         <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onDevice(m.id)}><PanelRightOpen /></Button></TooltipTrigger><TooltipContent>상세 · 기기 멈춤</TooltipContent></Tooltip>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -247,6 +269,27 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions, onShadow
             );
           })}
           {!sessions.length && <span className="text-muted-foreground/70">없음</span>}
+        </section>
+
+        {/* Its latest calls worth a look, each opening its record. */}
+        <section className="flex min-h-0 flex-1 flex-col">
+          <h3 className="mb-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">최근 탐지 <b className="tnum font-medium text-foreground/80">{st.worth}</b></h3>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {!(st.recent ?? []).length && <span className="text-[12px] text-muted-foreground/70">없음</span>}
+            {(st.recent ?? []).map((c) => {
+              const v = c.leak ? { label: "유출", cls: "bg-deny/15 text-deny" } : c.decision === "DENY" ? { label: "차단", cls: "bg-deny/15 text-deny" } : c.decision === "REVIEW" ? { label: c.ran ? "승인 후 실행" : "확인", cls: "bg-review/15 text-review" } : { label: "허용", cls: "bg-white/8 text-muted-foreground" };
+              const tool = (c.tool ?? "").replace(/^mcp__(.+?)__/, "");
+              return (
+                <button key={`${c.session}-${c.seq}`} onClick={() => onSession(c.session)}
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left transition-colors hover:bg-accent">
+                  <span className={cn("w-[74px] shrink-0 rounded px-1.5 text-center text-[11px] leading-5 font-semibold", v.cls)}>{v.label}</span>
+                  <span className="w-[86px] shrink-0 truncate font-mono text-[11.5px] text-muted-foreground" title={c.tool ?? ""}>{tool}</span>
+                  <code className="min-w-0 flex-1 truncate font-mono text-[12px]" title={c.target ?? ""}>{c.target ?? "–"}</code>
+                  <span className="tnum shrink-0 text-[11px] text-muted-foreground">{ago(c.at, view.now)}</span>
+                </button>
+              );
+            })}
+          </div>
         </section>
       </div>
     </div>

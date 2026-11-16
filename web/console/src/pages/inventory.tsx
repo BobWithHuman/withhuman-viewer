@@ -235,7 +235,8 @@ export default function Page({ data }: { data: unknown | null }) {
             <div className="h-[360px]">
               <Bag view={view} id={current?.id ?? null} onPick={setFocus} onDevice={openDevice} onServer={openServer}
                 onSessions={(id, mode) => { setFocus(id); setFilter(mode ? { kind: "engine", value: mode } : null); setTab("sessions"); }}
-                onShadow={() => setTab("shadow")} onGo={(to) => send("inventory", { type: "go", to })} />
+                onShadow={() => setTab("shadow")} onGo={(to) => send("inventory", { type: "go", to })} onSession={openSession}
+                onStop={(id, stopped) => request({ type: "stop_device", device: id, stopped, actor: d.actor, reason: "인벤토리에서 킬스위치" })} />
             </div>
           </Panel>
         </div>

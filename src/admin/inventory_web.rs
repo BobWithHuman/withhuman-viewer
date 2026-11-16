@@ -56,10 +56,13 @@ pub(super) fn last_calls(facts: &[CallFact]) -> HashMap<String, i64> {
     latest
 }
 
+/// The latest Calls worth a look a machine's status keeps.
+const RECENT_LOOKS: usize = 6;
+
 /// How each machine stands, by client ID, as its status window shows it: its Calls (and those the
 /// engine blocked and held for the user), the Calls worth a look and those of them in sessions
-/// the team has not marked yet, and the Calls that sent sensitive values out (`out`) or tried and
-/// were stopped (`stopped`).
+/// the team has not marked yet, the Calls that sent sensitive values out (`out`) or tried and
+/// were stopped (`stopped`), and its latest Calls worth a look (`recent`, the newest first).
 pub(super) fn standing(
     facts: &[CallFact],
     mentions: &[crate::model::SecretMention],
@@ -75,6 +78,7 @@ pub(super) fn standing(
         pending: u32,
         out: std::collections::BTreeSet<(String, i64)>,
         stopped: std::collections::BTreeSet<(String, i64)>,
+        recent: Vec<(i64, Value)>,
     }
     let mut by: BTreeMap<&str, Of> = BTreeMap::new();
     let mut sent: HashMap<(&str, i64), bool> = HashMap::new();
@@ -102,23 +106,33 @@ pub(super) fn standing(
             Some("REVIEW") => of.review += 1,
             _ => {}
         }
-        if super::main_page::Severity::of(f).is_some()
-            || sent.contains_key(&(f.session.as_str(), f.seq))
-        {
+        let leaked = sent.contains_key(&(f.session.as_str(), f.seq));
+        if super::main_page::Severity::of(f).is_some() || leaked {
             of.worth += 1;
+            of.recent.push((
+                f.at.unwrap_or(0),
+                json!({
+                    "session": f.session, "seq": f.seq, "at": f.at, "tool": f.tool,
+                    "target": f.target.as_deref().map(|t| t.chars().take(160).collect::<String>()),
+                    "decision": f.decision, "ran": f.ran, "leak": leaked,
+                }),
+            ));
             if !marks.contains_key(&f.session) {
                 of.pending += 1;
             }
         }
     }
     by.into_iter()
-        .map(|(client, of)| {
+        .map(|(client, mut of)| {
+            of.recent.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+            of.recent.truncate(RECENT_LOOKS);
             (
                 client.to_owned(),
                 json!({
                     "calls": of.calls, "deny": of.deny, "review": of.review,
                     "worth": of.worth, "pending": of.pending,
                     "out": of.out.len(), "stopped": of.stopped.len(),
+                    "recent": of.recent.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
                 }),
             )
         })
@@ -680,5 +694,6 @@ mod tests {
         // s1's DENY is marked; s2's REVIEW and its value sent out wait.
         assert_eq!(st["a"]["worth"], 3);
         assert_eq!(st["a"]["pending"], 2);
+        assert_eq!(st["a"]["recent"].as_array().unwrap().len(), 3);
     }
 }

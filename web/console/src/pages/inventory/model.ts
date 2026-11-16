@@ -65,7 +65,11 @@ export type Tab = "sessions" | "shadow" | "mcp";
 export type SessionCalls = { n: number; review: number; deny: number; mode: string | null };
 /** How a machine stands: its calls and those blocked and held, the calls worth a look and those
  * not yet marked, and the calls that sent sensitive values out or tried and were stopped. */
-export type Standing = { calls: number; deny: number; review: number; worth: number; pending: number; out: number; stopped: number };
+export type Standing = {
+  calls: number; deny: number; review: number; worth: number; pending: number; out: number; stopped: number;
+  /** Its latest calls worth a look, the newest first. */
+  recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; decision: string | null; ran: boolean; leak: boolean }[];
+};
 export type Data = {
   status: "ready" | "loading" | "failed" | "none"; error: string | null; now: number;
   source: { label: string; demo: boolean }; admin: { api: string; has_token: boolean };
