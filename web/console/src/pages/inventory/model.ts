@@ -51,7 +51,6 @@ export function runName(command: string | null | undefined): { prompt?: string; 
   return rest.length ? { prompt: rest.join(" ") } : null;
 }
 
-export const WHY: Record<string, string> = { project: "훅 없는 프로젝트", no_session: "훅 세션 없음", unregistered: "미등록 기기" };
 export type Run = {
   id: string; device: string | null; host: string | null;
   title: string | null; folder: string | null; opens: boolean; source: string | null;

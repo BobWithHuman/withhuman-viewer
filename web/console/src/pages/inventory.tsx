@@ -24,7 +24,7 @@ import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./inventory/mark
 import { Threats, ThreatsLegend } from "./inventory/threats";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { isOn } from "./inventory/mcp/types";
-import { END, ENGINE, WHY, derive, runName, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
+import { END, ENGINE, derive, runName, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
 import { Bag, machineOrder } from "./inventory/bag";
 import { DeviceSheet } from "./inventory/sheets";
 
@@ -99,7 +99,7 @@ export default function Page({ data }: { data: unknown | null }) {
   const allSessions = mine(view.sessions), allShadow = mine(view.shadow);
   const modeOf = (r: Run) => view.sessionCalls[r.id]?.mode ?? null;
   const sessions = allSessions.filter((r) => (!filter || modeOf(r) === filter.value) && has(r.title, r.folder, r.id));
-  const shadow = allShadow.filter((a) => has(a.project, a.agent, WHY[a.why ?? ""]));
+  const shadow = allShadow.filter((a) => has(a.project, a.agent, a.command));
   const servers = view.mcp?.servers ?? [];
   // The machine's MCP servers, with the calls of their tools made from it and the latest.
   const serverRows = useMemo(() => (current ? view.serversOn(current) : []).map((s) => {
@@ -147,9 +147,6 @@ export default function Page({ data }: { data: unknown | null }) {
         </span>
       );
     } },
-    { id: "why", header: "근거", accessorFn: (a) => a.project ?? WHY[a.why ?? ""] ?? "", cell: ({ row: { original: a } }) => (a.project
-      ? <code className={cn(mono, "truncate")} title={a.project}>{a.project}</code>
-      : <Chip className={a.why === "unregistered" ? "bg-review/15 text-review" : "bg-deny/15 text-deny"}>{WHY[a.why ?? ""] ?? "–"}</Chip>) },
     { id: "first", header: "처음 본 때", size: 140, accessorFn: (a) => a.first ?? a.last_seen ?? 0, cell: ({ row: { original: a } }) => <span className="tnum text-muted-foreground">{clock(a.first ?? a.last_seen)}</span> },
     { id: "last", header: "마지막 본 때", size: 140, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
     { id: "scans", header: "스캔", size: 80, accessorFn: (a) => a.scans ?? 1, cell: ({ row }) => <span className="tnum">{row.original.scans ?? 1}</span> },

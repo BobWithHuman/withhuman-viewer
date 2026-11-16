@@ -10,7 +10,7 @@ import { Legend, ServiceLogo, SplitBar, Warn, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./marks";
 import { isOn } from "./mcp/types";
-import { EDR_STATUS, ENGINE, ENGINE_KEYS, WHY, agentLabel, type Machine, type View } from "./model";
+import { EDR_STATUS, ENGINE, ENGINE_KEYS, agentLabel, type Machine, type View } from "./model";
 
 export function Section({ title, count, aside, children }: { title: string; count?: number; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -101,7 +101,6 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
                 <Line key={`e${i}`} className="bg-deny/[0.07]">
                   <ShieldOff className="size-4 shrink-0 text-deny" strokeWidth={1.9} />
                   <AgentMark agent={a.agent} size={16} label />
-                  <Chip className="shrink-0 bg-deny/15 text-deny">{WHY[a.why ?? ""] ?? "훅 없음"}</Chip>
                   <When>{a.first && a.first !== a.last_seen ? `${clock(a.first)} – ${clock(a.last_seen).slice(-5)}` : clock(a.last_seen)} · 스캔 {a.scans ?? 1}</When>
                 </Line>
               ))}

@@ -61,7 +61,7 @@ const GROUPS: { key: string; label: string; of: (m: Machine) => boolean }[] = [
   { key: "shadow", label: "섀도 AI", of: (m) => m.shadow > 0 },
   { key: "stopped", label: "멈춤", of: (m) => !!m.stopped },
   { key: "running", label: "활동 중", of: (m) => m.state === "running" },
-  { key: "edr", label: "훅 없음", of: (m) => !!m.edrOnly },
+  { key: "edr", label: "미보호", of: (m) => !!m.edrOnly },
   { key: "rest", label: "쉬는 중", of: () => true },
 ];
 
@@ -174,7 +174,9 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 pb-3">
         <Picker view={view} id={m.id} onPick={onPick} />
-        {m.edrOnly && <span className="rounded bg-review/15 px-1.5 text-[11px] leading-5 font-medium text-review">훅 없음</span>}
+        {m.edrOnly
+          ? <span className="shrink-0 rounded bg-review/15 px-1.5 text-[11px] leading-5 font-medium text-review">미보호</span>
+          : <span className="shrink-0 rounded bg-allow/15 px-1.5 text-[11px] leading-5 font-medium text-allow">보호됨</span>}
         {m.stopped && <span className="rounded bg-deny/15 px-1.5 text-[11px] leading-5 font-semibold text-deny">멈춤</span>}
         {e && <Tooltip><TooltipTrigger asChild><e.icon className="size-4 shrink-0" strokeWidth={1.9} style={{ color: e.color }} /></TooltipTrigger><TooltipContent>엔진 {e.label}</TooltipContent></Tooltip>}
         <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onDevice(m.id)}><PanelRightOpen /></Button></TooltipTrigger><TooltipContent>상세 · 기기 멈춤</TooltipContent></Tooltip>
@@ -183,7 +185,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
         <Shelf title="에이전트" count={agents.length}>
           {agents.map(({ a, guarded, runs }) => (
             <Slot key={a} name={agentLabel(a)} onClick={() => onDevice(m.id)}
-              sub={[guarded && "보호됨", runs > 0 && `섀도 ${runs}`].filter(Boolean).join(" · ") || "훅 없음"}
+              sub={[guarded && "보호됨", runs > 0 && `섀도 ${runs}`].filter(Boolean).join(" · ") || "미보호"}
               style={runs ? { borderColor: "color-mix(in oklab, var(--deny) 55%, transparent)" } : undefined}
               corner={guarded
                 ? <ShieldCheck className={cn("size-4 rounded-full bg-card p-px", runs ? "text-review" : "text-allow")} strokeWidth={2.2} />
@@ -196,7 +198,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
         <Shelf title="프로젝트" count={projects.length + hookless.length}>
           {[
             ...(projects.length ? [<Slot key="p" name="보호" sub={`${projects.length}개`} onClick={() => onDevice(m.id)} tip={<>보호된 프로젝트 {projects.length}</>}><FolderGit2 className="size-6 text-allow" strokeWidth={1.6} /></Slot>] : []),
-            ...(hookless.length ? [<Slot key="s" name="훅 없음" sub={`${hookless.length}개`} style={{ borderColor: "color-mix(in oklab, var(--deny) 55%, transparent)" }} onClick={() => onDevice(m.id)} tip={<>훅 없이 돈 프로젝트 {hookless.length}</>}><FolderGit2 className="size-6 text-deny" strokeWidth={1.6} /></Slot>] : []),
+            ...(hookless.length ? [<Slot key="s" name="미보호" sub={`${hookless.length}개`} style={{ borderColor: "color-mix(in oklab, var(--deny) 55%, transparent)" }} onClick={() => onDevice(m.id)} tip={<>미보호 프로젝트 {hookless.length}</>}><FolderGit2 className="size-6 text-deny" strokeWidth={1.6} /></Slot>] : []),
           ]}
         </Shelf>
         <Shelf title="MCP 서버" count={servers.length} wide>
