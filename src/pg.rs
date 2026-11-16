@@ -170,6 +170,8 @@ SELECT m.session_id AS session, n.seq, n.kind AS node, m.slot,
        {tool} AS tool,
        coalesce({command}, {url}, {file_path}) AS target,
        CASE WHEN n.kind = 'Call' THEN {recipient} END AS recipient,
+       -- What a person typed, for a value they put in a prompt: the words around it.
+       CASE WHEN n.kind = 'Request' THEN left({prompt}, 2000) END AS said,
        (n.kind = 'Call' AND {ran}) AS ran,
        -- For a tool result, the Call it answered: its tool and target name where the value
        -- came from even when the result itself does not say.
@@ -192,6 +194,7 @@ ORDER BY at DESC NULLS LAST LIMIT 20000
         url = field("n.payload_json", "url"),
         file_path = field("n.payload_json", "file_path"),
         recipient = recipient("n.payload_json"),
+        prompt = field("n.payload_json", "prompt"),
         ran = ran("n"),
         by_tool = field("c.payload_json", "tool_name"),
         by_command = field("c.payload_json", "command"),
@@ -473,6 +476,7 @@ impl Postgres<'_> {
         for row in &mut rows {
             unescape(row, "target", 300);
             unescape(row, "recipient", 120);
+            unescape(row, "said", 2000);
             unescape(row, "by_tool", 200);
             unescape(row, "by_target", 300);
             unescape(row, "tool", 200);

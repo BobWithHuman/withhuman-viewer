@@ -280,6 +280,9 @@ function Places({ names }: { names: string[] }) {
   );
 }
 
+/** What a person typed a value in, else the session's name. */
+const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionName(t);
+
 /** A value over every session it showed in: how it ended at its worst, where it was sent, the
  * Call that carried it, where it came from, and how far it spread. */
 const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
@@ -298,9 +301,9 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
   { id: "carrier", header: "실어 나른 호출", accessorFn: (v) => v.carrier ?? "", cell: ({ row: { original: v } }) => (v.carrier ? <Masked className="block truncate text-muted-foreground" >{v.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
   typed
     // Every value here was typed by a person: the prompt it was typed in tells more than where from.
-    ? { id: "typed", header: "넣은 프롬프트", size: 250, accessorFn: (v) => sessionName(v.trails[0]), cell: ({ row: { original: v } }) => (
-      <span className="flex min-w-0 items-center gap-1.5" title={v.trails.map(sessionName).join("\n")}>
-        <span className="truncate">{sessionName(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
+    ? { id: "typed", header: "넣은 프롬프트", size: 250, accessorFn: (v) => typedIn(v.trails[0]), cell: ({ row: { original: v } }) => (
+      <span className="flex min-w-0 items-center gap-1.5" title={v.trails.map(typedIn).join("\n")}>
+        <span className="truncate">{typedIn(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
       </span>
     ) }
     : { id: "from", header: "출처", size: 210, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => (
@@ -431,6 +434,17 @@ function MentionRow({ m, session }: { m: Mention; session: string }) {
   );
 }
 
+/** What a person typed, with the value marked where it is (both masked alike). */
+function Said({ text, value }: { text: string; value: string }) {
+  const at = value ? text.indexOf(value) : -1;
+  if (at < 0) return <span className="text-[13px] leading-relaxed break-words whitespace-pre-wrap">{text}</span>;
+  return (
+    <span className="text-[13px] leading-relaxed break-words whitespace-pre-wrap">
+      {text.slice(0, at)}<mark className="rounded bg-deny/25 px-0.5 font-mono text-[12px] text-foreground">{value}</mark>{text.slice(at + value.length)}
+    </span>
+  );
+}
+
 /** A list of places down a line, as the value went through them. */
 function Line({ children }: { children: ReactNode }) {
   return <div className="relative before:absolute before:top-3 before:bottom-3 before:left-[6.5px] before:w-px before:bg-border">{children}</div>;
@@ -538,6 +552,14 @@ function TrailSheet({ t, others, onTrail }: { t: Trail; others: Trail[]; onTrail
             </div>
           ))}
         </div>
+        {t.mentions.filter((m) => m.said).slice(0, 3).map((m, k) => (
+          <Section key={`${m.seq}-${k}`} title={k ? "다시 넣은 프롬프트" : "넣은 프롬프트"}>
+            <button onClick={() => openInRecord(t.session, m.seq)} className="group grid gap-1.5 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/60">
+              <Said text={m.said!} value={t.text} />
+              <span className="tnum flex items-center gap-1 text-[11.5px] text-muted-foreground">{time(m.at)}<ArrowUpRight className="size-3 opacity-0 transition-opacity group-hover:opacity-100" /></span>
+            </button>
+          </Section>
+        ))}
         <Facts rows={[
           ["유형", categoryLabel(t.category)],
           ["들어온 곳", FROM[fromOf(t)].label],

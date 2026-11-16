@@ -16,6 +16,8 @@ export type Mention = {
   seq: number;
   /** The Call's tool, for a Call. */
   tool?: string | null;
+  /** What a person typed, for a request: the value is masked in it as in `text`. */
+  said?: string | null;
   at: number | null;
   where: string;
   call: boolean;
