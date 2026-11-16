@@ -1,10 +1,12 @@
 // What one person holds, laid out like a game's inventory: a slot for each machine, agent, MCP
 // server, kind of session and key. A slot's corner tells how many or how it stands; a slot
-// pressed opens what it holds. The person is the one picked in the picture beside it.
+// pressed opens what it holds. The person is picked here: the name opens a list to search.
 
-import { History, KeyRound, Laptop, ShieldCheck, ShieldOff, UserRound } from "lucide-react";
-import type { ReactNode } from "react";
+import { Check, ChevronsUpDown, History, KeyRound, Laptop, OctagonX, Search, ShieldCheck, ShieldOff, UserRound } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Empty, Person, ServiceLogo, ago, shortUser } from "@/kit";
 import { cn } from "@/lib/utils";
@@ -48,13 +50,70 @@ function Shelf({ title, count, row, children }: { title: string; count: number; 
   );
 }
 
-export function Bag({ view, who, onDevice, onServer, onPerson, onSessions }: {
-  view: View; who: string | null;
+/** The person's name as a button that opens everyone to pick from, with a box to search them by
+ * name, team or machine. Those with shadow AI come first. */
+function Picker({ view, who, onWho }: { view: View; who: string | null; onWho: (email: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const everyone = useMemo(() => {
+    const emails = new Set([...view.machines.map((m) => m.user), ...view.shadow.map((a) => a.user), ...view.people.map((p) => p.email)].filter((e): e is string => !!e));
+    return [...emails].map((email) => {
+      const machines = view.machines.filter((m) => m.user === email);
+      const ids = new Set(machines.map((m) => m.id));
+      return { email, machines, team: machines[0]?.team ?? null, shadow: view.shadow.filter((a) => a.user === email || (a.device && ids.has(a.device))).length };
+    }).sort((a, b) => Number(b.shadow > 0) - Number(a.shadow > 0) || b.machines.length - a.machines.length || a.email.localeCompare(b.email));
+  }, [view]);
+  const needle = q.trim().toLowerCase();
+  const found = everyone.filter((p) => !needle || [p.email, p.team, ...p.machines.map((m) => m.name)].some((t) => t?.toLowerCase().includes(needle)));
+  const mine = everyone.find((p) => p.email === who);
+  return (
+    <Popover open={open} onOpenChange={(on) => { setOpen(on); if (!on) setQ(""); }}>
+      <PopoverTrigger asChild>
+        <button className="flex min-w-0 flex-1 items-center gap-3 rounded-lg py-1 pr-2 pl-1 text-left transition-colors hover:bg-accent aria-expanded:bg-accent">
+          {who ? <Person name={who} size={36} /> : <span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-muted-foreground"><UserRound className="size-4" /></span>}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[14px] font-semibold">{who ? shortUser(who) : "사용자 선택"}</span>
+            {who && <span className="block truncate text-[11.5px] text-muted-foreground">{[mine?.team, who.includes("@") ? who.replace(/^.*@/, "@") : null].filter(Boolean).join(" · ")}</span>}
+          </span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[320px] gap-0 p-0">
+        <label className="relative block border-b p-2">
+          <Search className="pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·팀·기기"
+            onKeyDown={(e) => { if (e.key === "Enter" && found[0]) { onWho(found[0].email); setOpen(false); } }}
+            className="h-8 pl-7 text-[12.5px] md:text-[12.5px]" />
+        </label>
+        <div className="scroll max-h-[300px] overflow-y-auto p-1">
+          {!found.length && <Empty />}
+          {found.map((p) => (
+            <button key={p.email} onClick={() => { onWho(p.email); setOpen(false); }}
+              className={cn("flex h-10 w-full items-center gap-2.5 rounded-md px-2 text-left text-[12.5px] transition-colors hover:bg-accent", p.email === who && "bg-accent")}>
+              <Person name={p.email} size={24} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{shortUser(p.email)}</span>
+                <span className="block truncate text-[11px] text-muted-foreground">{[p.team, p.machines.map((m) => m.name).join(", ")].filter(Boolean).join(" · ") || "기기 없음"}</span>
+              </span>
+              {p.shadow > 0 && <span className="tnum inline-flex shrink-0 items-center gap-1 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-medium text-deny"><ShieldOff className="size-3" strokeWidth={2.2} />{p.shadow}</span>}
+              {p.email === who && <Check className="size-3.5 shrink-0 text-primary" />}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export function Bag({ view, who, onWho, onIssue, onStop, onDevice, onServer, onPerson, onSessions }: {
+  view: View; who: string | null; onWho: (email: string) => void;
+  /** Issues the person a key, or stops them: every key of theirs revoked. */
+  onIssue: (email: string) => void; onStop: (email: string, keys: number) => void;
   onDevice: (id: string) => void; onServer: (name: string) => void; onPerson: (email: string) => void;
   /** Lists the person's sessions, those let run one way when a mode is named. */
   onSessions: (email: string, mode?: string) => void;
 }) {
-  if (!who) return <Empty>사용자 선택</Empty>;
+  if (!who) return <div className="flex h-full flex-col"><div className="flex shrink-0 pb-3"><Picker view={view} who={null} onWho={onWho} /></div><Empty>사용자 선택</Empty></div>;
   const machines = view.machines.filter((m) => m.user === who);
   const mine = new Set(machines.map((m) => m.id));
   const shadow = view.shadow.filter((a) => a.user === who || (a.device && mine.has(a.device)));
@@ -74,14 +133,12 @@ export function Bag({ view, who, onDevice, onServer, onPerson, onSessions }: {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-3 pb-3">
-        <Person name={who} size={36} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-semibold">{shortUser(who)}</div>
-          <div className="truncate text-[11.5px] text-muted-foreground">{[machines[0]?.team, who.includes("@") ? who.replace(/^.*@/, "@") : null].filter(Boolean).join(" · ")}</div>
-        </div>
+      <div className="flex shrink-0 items-center gap-2 pb-3">
+        <Picker view={view} who={who} onWho={onWho} />
         {person?.stopped && <span className="rounded bg-deny/15 px-1.5 text-[11px] leading-5 font-semibold text-deny">멈춤</span>}
-        {person && <Button size="sm" variant="secondary" onClick={() => onPerson(who)}><UserRound />상세</Button>}
+        <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="키 발급" onClick={() => onIssue(who)}><KeyRound /></Button></TooltipTrigger><TooltipContent>키 발급</TooltipContent></Tooltip>
+        {live.length > 0 && <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="멈춤" className="text-deny hover:text-deny" onClick={() => onStop(who, live.length)}><OctagonX /></Button></TooltipTrigger><TooltipContent>멈춤 · 키 {live.length}개 회수</TooltipContent></Tooltip>}
+        {person && <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="secondary" aria-label="상세" onClick={() => onPerson(who)}><UserRound /></Button></TooltipTrigger><TooltipContent>상세 · 키 기록</TooltipContent></Tooltip>}
       </div>
       <div className="scroll -mr-2 grid min-h-0 flex-1 grid-cols-2 content-start gap-x-4 gap-y-2.5 overflow-y-auto pr-2">
         <Shelf title="기기" count={machines.length} row={3}>

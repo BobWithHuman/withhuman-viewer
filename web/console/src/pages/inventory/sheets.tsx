@@ -3,17 +3,21 @@
 // let run, its latest sessions, and its person's kill switch. A person: their machines, their keys, each revocable, and the
 // record of keys issued, revoked and refused.
 
-import { ArrowUpRight, Ban, KeyRound, Laptop, OctagonX, ShieldCheck, ShieldOff, ShieldX } from "lucide-react";
+import { ArrowUpRight, BadgeCheck, Ban, KeyRound, Laptop, OctagonX, ShieldCheck, ShieldOff, ShieldX } from "lucide-react";
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Legend, Person, ServiceLogo, SplitBar, Warn, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import type { Ask } from "./dialogs";
 import { AgentMark, Chip, Dash, EngineBadge, PermBadge, StateBadge } from "./marks";
 import { isOn } from "./mcp/types";
-import { EVENT, PERM, PERM_KEYS, agentLabel, type Machine, type PersonRow, type View } from "./model";
+import { EDR_STATUS, EVENT, PERM, PERM_KEYS, agentLabel, type Machine, type PersonRow, type View } from "./model";
+
+/** The owner picker's choice for no one. */
+const NO_OWNER = "-";
 
 export function Section({ title, count, aside, children }: { title: string; count?: number; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -48,8 +52,10 @@ export const Line = ({ onClick, children, className }: { onClick?: () => void; c
 );
 export const When = ({ children }: { children: ReactNode }) => <span className="tnum ml-auto shrink-0 text-[12px] text-muted-foreground">{children}</span>;
 
-export function DeviceSheet({ m, view, onPerson, onSession, onServer, onAsk }: {
+export function DeviceSheet({ m, view, onPerson, onSession, onServer, onAsk, onOwner }: {
   m: Machine; view: View; onPerson: (email: string) => void; onSession: (id: string) => void; onServer: (name: string) => void; onAsk: (ask: Ask) => void;
+  /** Names the machine's owner, or takes the name off. */
+  onOwner: (email: string | null) => void;
 }) {
   const servers = view.serversOn(m);
   const projects = view.projects.filter((p) => p.device === m.id);
@@ -78,9 +84,23 @@ export function DeviceSheet({ m, view, onPerson, onSession, onServer, onAsk }: {
       </SheetHeader>
       <div className="scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
         <Facts rows={[
-          ["사용자", user && (person
+          ["담당자", (
+            <Select value={m.owner ?? NO_OWNER} onValueChange={(v) => onOwner(v === NO_OWNER ? null : v)}>
+              <SelectTrigger size="sm" className="h-7 w-full max-w-[260px] text-[12.5px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_OWNER} className="text-[12.5px] text-muted-foreground">지정 안 함</SelectItem>
+                {[...new Set([...view.people.map((p) => p.email), ...(m.owner ? [m.owner] : [])])].sort().map((email) => <SelectItem key={email} value={email} className="text-[12.5px]">{email}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )],
+          ["키 사용자", user && (person
             ? <button className="max-w-full rounded hover:underline" onClick={() => onPerson(user)}><Person name={user} size={18} label /></button>
             : <Person name={user} size={18} label />)],
+          ...(m.owner && user && m.owner !== user ? [["", <Warn>담당자와 키 사용자가 다름</Warn>] as [string, ReactNode]] : []),
+          ["EDR", m.edr
+            ? <span className="inline-flex items-center gap-1.5"><BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />{EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"}<span className="font-mono text-[11.5px] text-muted-foreground">에이전트 {m.edr.id}</span></span>
+            : view.edrKnown ? <Warn>EDR에 없음</Warn> : null],
+          ["시리얼", m.serial && <span className="font-mono text-[12px]">{m.serial}</span>],
           ["팀", m.team],
           ["OS · 계정", [m.os, m.os_user].filter(Boolean).join(" · ")],
           ["에이전트", m.agent && <AgentMark agent={m.agent} size={16} label />],

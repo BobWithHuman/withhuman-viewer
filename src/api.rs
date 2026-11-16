@@ -258,6 +258,35 @@ impl Backend {
         Ok((text("key_id"), text("key")))
     }
 
+    /// Names the person a machine belongs to, or takes the name off (`email` none). The engine's
+    /// admin API keeps it (`POST /v1/admin/clients/{id}/owner`).
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn assign_owner(
+        &self,
+        client: &str,
+        email: Option<&str>,
+        actor: &str,
+    ) -> Result<(), String> {
+        if self.current().demo {
+            let found = self
+                .demo
+                .lock()
+                .expect("demo lock")
+                .assign_owner(now_ms(), client, email);
+            return if found {
+                Ok(())
+            } else {
+                Err("그런 기기가 없습니다.".into())
+            };
+        }
+        self.admin(
+            &["v1", "admin", "clients", client, "owner"],
+            json!({"owner": email, "actor": actor}),
+        )
+        .await
+        .map(|_| ())
+    }
+
     /// Revokes one key, or every key of a person (the person's kill switch): how many were revoked.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn revoke(
