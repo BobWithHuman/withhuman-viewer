@@ -5,7 +5,7 @@
 // as the engine keeps it, and a place it showed opens in 기록.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, ArrowUpRight, Bot, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Bot, FileText, Globe, Hash, Laptop, Mail, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { send } from "@/bridge";
 import { Badge } from "@/components/ui/badge";
@@ -54,11 +54,10 @@ function StatusBadge({ s }: { s: Status }) {
   return <Badge variant="secondary" className={cn("gap-1 border-0 font-semibold", STATUS[s].cls)}><i className="size-1.5 rounded-full bg-current" />{STATUS[s].label}</Badge>;
 }
 
-/** A destination's mark: the service's logo for an MCP server, a globe for a host. */
-function PlaceMark({ name, size = 18 }: { name: string; size?: number }) {
-  // An MCP destination ends in its server, after whom the Call named: "bob@x.com · slack (MCP)".
-  if (name.endsWith("(MCP)")) return <ServiceLogo name={name.split(" · ").pop()!.replace(" (MCP)", "")} size={size} />;
-  return <span className="grid shrink-0 place-items-center rounded-full bg-secondary text-muted-foreground" style={{ width: size, height: size }}><Globe style={{ width: size * 0.62, height: size * 0.62 }} strokeWidth={1.9} /></span>;
+/** A target's mark, by how it is written: a mail address, a channel, a host, or an account or ID. */
+function TargetIcon({ target, size = 16 }: { target: string; size?: number }) {
+  const Icon = target.includes("@") ? Mail : target.startsWith("#") ? Hash : HOSTLIKE.test(target) ? Globe : UserRound;
+  return <span className="grid shrink-0 place-items-center rounded-full bg-secondary text-muted-foreground" style={{ width: size, height: size }}><Icon style={{ width: size * 0.62, height: size * 0.62 }} strokeWidth={1.9} /></span>;
 }
 
 function When({ at, now }: { at: number | null; now: number }) {
@@ -230,10 +229,10 @@ function SplitBars({ bars, split, picked, height, onPick }: { bars: Bar[]; split
               className={cn("grid h-8 w-full grid-cols-[minmax(0,11fr)_minmax(0,9fr)_24px] items-center gap-3 rounded-md px-2 text-left text-[12.5px] transition-colors hover:bg-accent",
                 picked === b.key && "bg-accent ring-1 ring-ring ring-inset", picked !== undefined && picked !== b.key && "opacity-45")}>
               <span className="flex min-w-0 items-center gap-2">
-                {split === "place" && <PlaceMark name={b.key} />}
+
                 {split === "client" && <Laptop className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
                 {split === "source" && <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
-                <span className={cn("truncate", split === "source" && "font-mono text-[12px]")}>{split === "place" ? b.key.replace(" (MCP)", "") : split === "source" ? short(b.key) : b.key}</span>
+                {split === "place" ? <Dest place={b.key} /> : <span className={cn("truncate", split === "source" && "font-mono text-[12px]")}>{split === "source" ? short(b.key) : b.key}</span>}
               </span>
               <span className="flex h-2 overflow-hidden rounded-full bg-white/6">
                 <span className="flex h-full gap-px" style={{ width: `${(b.total / max) * 100}%` }}>
@@ -264,24 +263,48 @@ function Spread({ sessions, clients }: { sessions: number; clients: number }) {
   return <span className={cn("tnum whitespace-nowrap", sessions > 1 ? "font-medium" : "text-muted-foreground")}>세션 {sessions} · 단말 {clients}</span>;
 }
 
-function Places({ names }: { names: string[] }) {
+/** Where a value was sent: whom, by its mark, with the MCP server that carried it; or, when the
+ * Call named no one, 대상 모름 with the server or tool that sent it. */
+function Dest({ place }: { place: string }) {
+  const d = targetOf(place);
+  const via = d.server && <span className="inline-flex shrink-0" title={`${d.server} (MCP)`}><ServiceLogo name={d.server} size={14} /></span>;
+  if (d.target) {
+    return <span className="inline-flex min-w-0 items-center gap-1.5" title={d.server ? `${d.target} · ${d.server} (MCP)` : d.target}><TargetIcon target={d.target} /><span className="truncate">{d.target}</span>{via}</span>;
+  }
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      {names.slice(0, 3).map((p) => <span key={p} className="inline-flex min-w-0 items-center gap-1.5" title={p}><PlaceMark name={p} size={16} /><span className="truncate">{p.replace(" (MCP)", "")}</span></span>)}
-      {names.length > 3 && <span className="tnum shrink-0 text-muted-foreground">+{names.length - 3}</span>}
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground" title={place}>
+      <span className="shrink-0">대상 모름</span>
+      {via}{(d.server ?? d.tool) && <Masked className="truncate text-[11.5px]">{d.server ?? d.tool}</Masked>}
     </span>
   );
 }
 
-/** Whom or where a value was sent to, apart from the MCP server that carried it: "bob@x.com ·
- * slack (MCP)" is bob@x.com by slack; "slack (MCP)" is unknown by slack; a host is itself. */
-const targetOf = (place: string) => {
-  if (!place.endsWith("(MCP)")) return { target: place, server: null as string | null };
-  const parts = place.replace(" (MCP)", "").split(" · ");
-  return parts.length > 1 ? { target: parts[0], server: parts[1] } : { target: null, server: parts[0] };
+/** The first of where values were sent, the rest counted. */
+function Places({ names, empty }: { names: string[]; empty?: ReactNode }) {
+  const list = dests(names);
+  if (!list.length) return <>{empty ?? null}</>;
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <Dest place={list[0]} />
+      {list.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground" title={list.slice(1).join("\n")}>+{list.length - 1}</span>}
+    </span>
+  );
+}
+
+const HOSTLIKE = /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/\S*)?$/i;
+/** Whom or where a value was sent to, apart from what carried it: "bob@x.com · slack (MCP)" is
+ * bob@x.com by slack; "slack (MCP)" is no one named, by slack; a host is itself; anything else
+ * is the tool that sent it, naming no one. */
+const targetOf = (place: string): { target: string | null; server: string | null; tool: string | null } => {
+  if (place.endsWith("(MCP)")) {
+    const parts = place.replace(" (MCP)", "").split(" · ");
+    return parts.length > 1 ? { target: parts[0], server: parts[1], tool: null } : { target: null, server: parts[0], tool: null };
+  }
+  if (HOSTLIKE.test(place)) return { target: place, server: null, tool: null };
+  return { target: null, server: null, tool: place === "알 수 없음" ? null : place };
 };
-/** The targets values went to, each once; those whose target is unknown are named by their server. */
-const targets = (places: string[]) => [...new Set(places.map((p) => targetOf(p).target ?? `${targetOf(p).server} (MCP)`))];
+/** Where values were sent, each once, those naming whom first. */
+const dests = (places: string[]) => [...new Set(places)].sort((a, b) => Number(!targetOf(a).target) - Number(!targetOf(b).target));
 
 /** A document or tool a value came out of, as a cell names it: an MCP tool by its server's logo
  * and its own name, a path by its file name. */
@@ -296,10 +319,9 @@ const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionNam
 
 /** How a value ended, with whom it was sent to when it left or was about to. */
 function Result({ status, places }: { status: Status; places: string[] }) {
-  const to = targets(places);
   return (
     <span className="flex min-w-0 items-center gap-2"><StatusBadge s={status} />
-      {status !== "seen" && to.length > 0 && <><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</>}
+      {status !== "seen" && <Places names={places} />}
     </span>
   );
 }
@@ -322,13 +344,12 @@ const originOf = (t: Trail) => (fromOf(t) === "user" ? "user" : t.source ?? "age
  * each end, the rest counted, and an arrow in how the sends ended. */
 function Route({ trails, places, ran }: { trails: Trail[]; places: string[]; ran: boolean }) {
   const from = [...new Set(trails.map(originOf))].sort((a, b) => Number(a === "agent") - Number(b === "agent"));
-  const to = targets(places);
   const more = (n: number) => n > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{n - 1}</span>;
   return (
     <span className="flex min-w-0 items-center gap-2">
       <span className="flex min-w-0 max-w-[48%] shrink-0 items-center gap-1.5"><OriginName origin={from[0]} />{more(from.length)}</span>
       <ArrowRight className="size-3.5 shrink-0" style={{ color: ran ? "var(--deny)" : "var(--review)" }} strokeWidth={2.2} />
-      <span className="flex min-w-0 items-center gap-1.5">{to.length ? <Places names={to.slice(0, 1)} /> : <span className="text-muted-foreground">대상 모름</span>}{more(to.length)}</span>
+      <span className="flex min-w-0 items-center"><Places names={places} empty={<span className="text-muted-foreground">대상 모름</span>} /></span>
     </span>
   );
 }
@@ -455,10 +476,7 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
       </span>
     );
   } },
-  { id: "to", header: "전송 대상", size: 200, accessorFn: (s) => targets(s.trails.flatMap(placesOf)).join(" "), cell: ({ row: { original: s } }) => {
-    const to = targets(s.trails.flatMap(placesOf));
-    return to.length ? <span className="flex min-w-0 items-center gap-1.5"><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</span> : <span className="text-muted-foreground">–</span>;
-  } },
+  { id: "to", header: "전송 대상", size: 200, accessorFn: (s) => s.trails.flatMap(placesOf).join(" "), cell: ({ row: { original: s } }) => <Places names={s.trails.flatMap(placesOf)} empty={<span className="text-muted-foreground">–</span>} /> },
   { id: "spread", header: "영향 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (s) => s.last ?? 0, cell: ({ row: { original: s } }) => <When at={s.last} now={now} /> },
 ];
@@ -508,10 +526,10 @@ function Path({ trails, status }: { trails: Trail[]; status: Status }) {
   const first = trails[0], from = fromOf(first), Icon = FROM[from].icon;
   const typed = trails.some((t) => fromOf(t) === "user");
   // The Calls that sent it, the first that got out leading.
-  const sends = trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place)).sort((a, b) => Number(a.held) - Number(b.held));
+  const sends = trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place)).sort((a, b) => Number(a.held) - Number(b.held) || Number(!targetOf(a.place!).target) - Number(!targetOf(b.place!).target));
   const lead = sends[0];
   const where = lead ? targetOf(lead.place!) : null;
-  const others = new Set(sends.map((m) => targetOf(m.place!).target ?? targetOf(m.place!).server)).size - 1;
+  const others = new Set(sends.map((m) => m.place)).size - 1;
   // The tool that sent it: an MCP tool by its server's logo and its name; else the tool, or the command's first word.
   const tool = lead && toolName(lead.tool ?? lead.what?.trim().split(/\s+/)[0]).split(" · ").pop();
   const tone = status === "out" ? "var(--deny)" : status === "blocked" ? "var(--review)" : "var(--border)";
@@ -537,7 +555,7 @@ function Path({ trails, status }: { trails: Trail[]; status: Status }) {
         {where ? (
           <>
             <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium">
-              {where.target ? <><PlaceMark name={where.server ? where.target : lead!.place!} size={16} /><span className="truncate">{where.target}</span></> : <span className="text-muted-foreground">대상 모름</span>}
+              {where.target ? <><TargetIcon target={where.target} /><span className="truncate">{where.target}</span></> : <span className="text-muted-foreground">대상 모름</span>}
               {others > 0 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{others}</span>}
             </span>
             {tool && <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">{where.server && <ServiceLogo name={where.server} size={14} />}<Masked className="truncate">{tool}</Masked></span>}
@@ -650,7 +668,7 @@ function SourceSheet({ s, now }: { s: Source; now: number }) {
               <div key={t.id} className="flex min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-[12.5px]">
                 <Masked className="min-w-0 truncate">{t.text}</Masked>
                 <span className="shrink-0 text-muted-foreground">{t.kind}</span>
-                <span className="ml-auto flex shrink-0 items-center gap-2">{t.status !== "seen" && placesOf(t).length > 0 && <Places names={placesOf(t).slice(0, 1)} />}<StatusBadge s={t.status} /></span>
+                <span className="ml-auto flex shrink-0 items-center gap-2">{t.status !== "seen" && <Places names={placesOf(t)} />}<StatusBadge s={t.status} /></span>
               </div>
             ))}
           </div>

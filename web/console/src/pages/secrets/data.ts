@@ -274,7 +274,8 @@ const FILES: [string, string][] = [
   ["cat ~/.aws/credentials", "Bash"],
 ];
 const SENDS: [string, (masked: string) => string][] = [
-  ["slack (MCP)", () => "mcp__slack__post_message"],
+  ["#dev-alerts · slack (MCP)", () => "mcp__slack__post_message"],
+  ["ops@vendor.example · gmail (MCP)", () => "mcp__gmail__send_email"],
   ["github (MCP)", () => "mcp__github__create_issue"],
   ["notion (MCP)", () => "mcp__notion__create_page"],
   ["sentry (MCP)", () => "mcp__sentry__create_comment"],
