@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, HashSet};
 use serde_json::{Value, json};
 
 use super::main_page::{Severity, decision_key, machine_of_fact, prompt_line};
-use super::secrets_web::Owners;
 use crate::api::Backend;
 use crate::layout::Model;
 use crate::metro::Metro;
@@ -18,13 +17,7 @@ use crate::model::CallFact;
 const LISTED: usize = 30;
 
 /// The case of Call `seq` of `session`, or why it could not be read.
-pub async fn case(
-    backend: &Backend,
-    session: &str,
-    seq: i64,
-    facts: &[CallFact],
-    owners: &Owners,
-) -> Value {
+pub async fn case(backend: &Backend, session: &str, seq: i64, facts: &[CallFact]) -> Value {
     let mut out = json!({ "session": session, "seq": seq });
     let graph = match backend.graph(session).await {
         Ok(graph) => graph,
@@ -33,17 +26,11 @@ pub async fn case(
             return out;
         }
     };
-    laid_out(&graph, session, seq, facts, owners)
+    laid_out(&graph, session, seq, facts)
 }
 
 /// The case from the session's graph once read.
-fn laid_out(
-    graph: &crate::model::GraphData,
-    session: &str,
-    seq: i64,
-    facts: &[CallFact],
-    owners: &Owners,
-) -> Value {
+fn laid_out(graph: &crate::model::GraphData, session: &str, seq: i64, facts: &[CallFact]) -> Value {
     let mut out = json!({ "session": session, "seq": seq });
     let metro = Metro::build_with(&Model::build(graph), &HashSet::new());
     let station = |seq: i64| {
@@ -113,27 +100,6 @@ fn laid_out(
             })
             .collect();
     }
-    // Whose session it is, and that person's other Calls worth a look on any machine.
-    let whose = |f: &CallFact| owners.user(&f.session, f.client.as_deref().unwrap_or_default());
-    let this = facts.iter().find(|f| f.session == session && f.seq == seq);
-    if let Some(user) = this.and_then(whose) {
-        out["user"] = json!(user);
-        let mut other: Vec<&CallFact> = facts
-            .iter()
-            .filter(|f| f.session != session && Severity::of(f).is_some() && whose(f) == Some(user))
-            .collect();
-        other.sort_by_key(|f| std::cmp::Reverse(f.at));
-        out["user_recent"] = other
-            .into_iter()
-            .take(LISTED)
-            .map(|f| {
-                json!({
-                    "session": f.session, "seq": f.seq, "at": f.at, "tool": f.tool, "target": f.target,
-                    "verdict": decision_key(f).to_lowercase(), "machine": machine_of_fact(f),
-                })
-            })
-            .collect();
-    }
     // The machine's other Calls worth a look, the newest first.
     let machine = facts
         .iter()
@@ -178,7 +144,7 @@ mod tests {
             .find(|f| f.link.as_deref() == Some("segment") && f.decision.as_deref() == Some("DENY"))
             .expect("the demo has a Call a tool result made");
         let graph = serde_json::from_value(demo.graph(&told.session).unwrap()).unwrap();
-        let case = laid_out(&graph, &told.session, told.seq, &facts, &Owners::default());
+        let case = laid_out(&graph, &told.session, told.seq, &facts);
         assert!(
             case["request"]["text"]
                 .as_str()

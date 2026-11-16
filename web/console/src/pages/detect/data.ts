@@ -20,8 +20,6 @@ export const VERDICTS: Verdict[] = ["deny", "review", "allow"];
 
 export type Call = {
   session: string; seq: number; at: number | null; machine: string; verdict: Verdict; sev: Sev;
-  /** Whose session it is, when the inventory tells. */
-  user?: string | null;
   /** What the Call whose result told this one to act was on: a file, a URL, a command or a tool. */
   cause?: string | null;
   /** The sensitive values this Call sent out though not kept from running: their kinds, and where to. */
@@ -71,9 +69,6 @@ export type Case = {
   elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; flagged: number }[];
   elsewhere_total?: number;
   machine_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string }[];
-  /** Whose session it is, and that person's other Calls worth a look. */
-  user?: string | null;
-  user_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string; machine: string }[];
 };
 
 // The kinds of action, as the engine's questions divide them.

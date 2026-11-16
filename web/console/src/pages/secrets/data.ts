@@ -40,8 +40,7 @@ export type Trail = {
   source: string | null;
   sourceTool: string | null;
   client: string;
-  /** Whose the session is and the machine's name, when the inventory tells. */
-  user?: string | null;
+  /** The machine's name, when the inventory tells. */
   host?: string | null;
   calls: number;
   outRan: number;
@@ -100,7 +99,7 @@ export const placesOf = (t: Trail) => [...new Set(t.mentions.filter((m) => m.out
 export const sessionName = (t: { title: string | null; session: string }) => t.title || t.session.slice(0, 8);
 
 /** What narrows the page: a band or a node of the flow, a bar beside it. */
-export type Filter = { from?: From; category?: string; status?: Status; kind?: string; place?: string; client?: string; source?: string; user?: string };
+export type Filter = { from?: From; category?: string; status?: Status; kind?: string; place?: string; client?: string; source?: string };
 export type Dim = keyof Filter;
 
 /** Whether a trail passes the filter, leaving out the dimensions named in `skip`. */
@@ -112,7 +111,6 @@ export function passes(t: Trail, f: Filter, skip: Dim[] = []) {
     (!on("status") || t.status === f.status) &&
     (!on("kind") || t.kind === f.kind) &&
     (!on("source") || t.source === f.source) &&
-    (!on("user") || (t.user ?? NO_USER) === f.user) &&
     (!on("client") || t.client === f.client) &&
     (!on("place") || placesOf(t).includes(f.place as string))
   );
@@ -166,10 +164,8 @@ export type Value = {
   places: string[]; carrier: string | null;
   /** Who wrote it first, and the documents or tool results it came out of. */
   froms: From[]; sources: string[];
-  sessions: number; clients: string[]; users: string[]; last: number | null;
+  sessions: number; clients: string[]; last: number | null;
 };
-/** How a value with no known person is listed. */
-export const NO_USER = "사용자 모름";
 /** A value's key: the same masked text of the same kind is the same value. */
 export const valueKey = (t: Trail) => `${t.kind}\u0000${t.text}`;
 /** A machine as a row names it: its host name when known, else its ID. */
@@ -183,14 +179,13 @@ export function values(trails: Trail[]): Value[] {
   for (const t of trails) {
     const key = `${t.kind}\u0000${t.text}`;
     let v = by.get(key);
-    if (!v) by.set(key, (v = { key, text: t.text, kind: t.kind, category: t.category, trails: [], status: "seen", places: [], carrier: null, froms: [], sources: [], sessions: 0, clients: [], users: [], last: null }));
+    if (!v) by.set(key, (v = { key, text: t.text, kind: t.kind, category: t.category, trails: [], status: "seen", places: [], carrier: null, froms: [], sources: [], sessions: 0, clients: [], last: null }));
     v.trails.push(t);
     if (WORST.indexOf(t.status) < WORST.indexOf(v.status)) v.status = t.status;
     for (const p of placesOf(t)) if (!v.places.includes(p)) v.places.push(p);
     if (!v.froms.includes(fromOf(t))) v.froms.push(fromOf(t));
     if (t.source && !v.sources.includes(t.source)) v.sources.push(t.source);
     if (!v.clients.includes(t.client)) v.clients.push(t.client);
-    if (t.user && !v.users.includes(t.user)) v.users.push(t.user);
     v.last = Math.max(v.last ?? 0, t.last ?? 0) || null;
   }
   for (const v of by.values()) {

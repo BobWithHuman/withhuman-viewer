@@ -219,10 +219,6 @@ pub fn Main() -> Element {
             sessions: &sessions,
             refreshed: refreshed(),
             triage: &marks.read(),
-            owners: &match &*inventory.read() {
-                Some(Some(inv)) => super::secrets_web::Owners::of(inv),
-                _ => Default::default(),
-            },
             leaks: &leaks.read().clone().unwrap_or_default(),
             alerts: &match &*inventory.read() {
                 Some(Some(inv)) => super::detect_web::alerts(inv, now_ms()),
@@ -262,11 +258,7 @@ pub fn Main() -> Element {
                                 Some(Ok(list)) => list.clone(),
                                 _ => Vec::new(),
                             };
-                            let owners = match &*inventory.peek() {
-                                Some(Some(inv)) => super::secrets_web::Owners::of(inv),
-                                _ => Default::default(),
-                            };
-                            let read = super::case::case(&backend, &session, seq, &facts, &owners).await;
+                            let read = super::case::case(&backend, &session, seq, &facts).await;
                             // Only when that case is still the one open.
                             if case.peek().as_ref().is_some_and(|c| c["session"] == read["session"] && c["seq"] == read["seq"]) {
                                 case.set(Some(read));
@@ -308,16 +300,16 @@ pub fn Main() -> Element {
                             });
                         }
                     }
-                    // The kill switch from a case: every key of the person revoked.
-                    (Some("stop"), call) => {
-                        if let Some(email) = m.get("email").and_then(Value::as_str).map(str::to_owned) {
+                    // A case's machine stopped: every tool call from it refused.
+                    (Some("stop_device"), call) => {
+                        if let Some(device) = m.get("device").and_then(Value::as_str).map(str::to_owned) {
                             let backend = backend.clone();
                             let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
                             let why = call.map_or_else(|| "보안 현황에서 멈춤".to_owned(), |(s, n)| format!("사건 {s} #{n}"));
                             spawn(async move {
-                                saved.set(Some(match backend.revoke(None, Some(&email), &by, &why).await {
-                                    Ok(n) => format!("멈춤 · {email} · 키 {n}개 회수"),
-                                    Err(e) => format!("멈춤 실패 · {e}"),
+                                saved.set(Some(match backend.stop_device(&device, true, &by, &why).await {
+                                    Ok(()) => format!("단말 멈춤 · {device}"),
+                                    Err(e) => format!("단말 멈춤 실패 · {e}"),
                                 }));
                             });
                         }

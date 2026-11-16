@@ -15,10 +15,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, ago, clock, People, Person } from "@/kit";
+import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, ago, clock } from "@/kit";
 import { cn } from "@/lib/utils";
 import {
-  CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, NO_USER, valueKey,
+  CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, valueKey,
   type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Source, type Status, type Trail, type Value,
 } from "./secrets/data";
 import { Flow } from "./secrets/flow";
@@ -38,8 +38,8 @@ const FOCUS: Record<Focus, (t: Trail) => boolean> = {
   sources: (t) => !!t.source,
 };
 type Open = { value: Value } | { attempt: Attempt } | { source: Source } | null;
-type Split = "kind" | "source" | "place" | "user" | "client";
-const SPLITS: [Split, string][] = [["kind", "종류"], ["source", "출처"], ["place", "전송 대상"], ["user", "사용자"], ["client", "단말"]];
+type Split = "kind" | "source" | "place" | "client";
+const SPLITS: [Split, string][] = [["kind", "종류"], ["source", "출처"], ["place", "전송 대상"], ["client", "단말"]];
 
 /** Asks the app to show a place a value was in on the route map of 기록. */
 const openInRecord = (session: string, seq: number) => send("secrets", { type: "open", session, seq });
@@ -98,14 +98,14 @@ export default function Page({ data }: { data: unknown | null }) {
   // picked in one stays in view beside what was not.
   const q = query.trim().toLowerCase();
   const shown = useMemo(
-    () => focused.filter((t) => passes(t, filter) && (!q || [t.text, t.kind, t.title, t.client, t.host, t.user, t.source, t.session].some((s) => s?.toLowerCase().includes(q)))),
+    () => focused.filter((t) => passes(t, filter) && (!q || [t.text, t.kind, t.title, t.client, t.host, t.source, t.session].some((s) => s?.toLowerCase().includes(q)))),
     [focused, filter, q],
   );
   const flowTrails = useMemo(() => focused.filter((t) => passes(t, filter, ["from", "source", "category", "status"])), [focused, filter]);
   const ended = byStatus(flowTrails);
   const flowSources = useMemo(() => sources(flowTrails), [flowTrails]);
   const splitBars = useMemo(
-    () => bars(focused.filter((t) => passes(t, filter, [split])), (t) => (split === "kind" ? [t.kind] : split === "client" ? [t.client] : split === "user" ? [t.user ?? NO_USER] : split === "source" ? [t.source ?? FROM[fromOf(t)].label] : placesOf(t))),
+    () => bars(focused.filter((t) => passes(t, filter, [split])), (t) => (split === "kind" ? [t.kind] : split === "client" ? [t.client] : split === "source" ? [t.source ?? FROM[fromOf(t)].label] : placesOf(t))),
     [focused, filter, split],
   );
   const shownValues = useMemo(() => values(shown), [shown]);
@@ -191,10 +191,10 @@ export default function Page({ data }: { data: unknown | null }) {
             {chips.length > 1 && <Button variant="ghost" size="xs" onClick={() => setFilter({})}>지우기</Button>}
             <label className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·사용자·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
             </label>
           </>}>
-          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt", shownValues.some((v) => v.users.length > 0))} rows={shownValues} onRow={(v) => setOpen({ value: v })}
+          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt")} rows={shownValues} onRow={(v) => setOpen({ value: v })}
             picked={(v) => !!open && "value" in open && open.value.key === v.key} />}
           {tab === "sessions" && <DataTable dense columns={attemptColumns(d.now)} rows={shownTries} onRow={(a) => setOpen({ attempt: a })} picked={(a) => !!open && "attempt" in open && open.attempt.session === a.session} />}
           {tab === "sources" && <DataTable dense columns={sourceColumns(d.now)} rows={shownFrom} onRow={(s) => setOpen({ source: s })} picked={(s) => !!open && "source" in open && open.source.name === s.name} />}
@@ -227,9 +227,8 @@ function SplitBars({ bars, split, picked, height, onPick }: { bars: Bar[]; split
               <span className="flex min-w-0 items-center gap-2">
                 {split === "place" && <PlaceMark name={b.key} />}
                 {split === "client" && <Laptop className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
-                {split === "user" && b.key !== NO_USER && <Person name={b.key} size={18} />}
                 {split === "source" && <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
-                <span className={cn("truncate", split === "source" && "font-mono text-[12px]")}>{split === "place" ? b.key.replace(" (MCP)", "") : split === "source" ? short(b.key) : split === "user" ? b.key.replace(/@.*/, "") : b.key}</span>
+                <span className={cn("truncate", split === "source" && "font-mono text-[12px]")}>{split === "place" ? b.key.replace(" (MCP)", "") : split === "source" ? short(b.key) : b.key}</span>
               </span>
               <span className="flex h-2 overflow-hidden rounded-full bg-white/6">
                 <span className="flex h-full gap-px" style={{ width: `${(b.total / max) * 100}%` }}>
@@ -285,7 +284,7 @@ const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionNam
 
 /** A value over every session it showed in: how it ended at its worst, where it was sent, the
  * Call that carried it, where it came from, and how far it spread. */
-const valueColumns = (now: number, typed: boolean, people: boolean): ColumnDef<Value>[] => [
+const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
   { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => (
     // Where a value that left, or was about to, was sent: the result names it.
     <span className="flex min-w-0 items-center gap-2"><StatusBadge s={v.status} />{(() => {
@@ -320,9 +319,6 @@ const valueColumns = (now: number, typed: boolean, people: boolean): ColumnDef<V
         </span>
       );
     } },
-  ...(people ? [{ id: "users", header: "사용자", size: 120, accessorFn: (v) => v.users.join(" "), cell: ({ row: { original: v } }) => (
-    v.users.length === 1 ? <Person name={v.users[0]} size={20} label /> : v.users.length ? <People names={v.users} max={4} /> : <span className="text-muted-foreground/60">–</span>
-  ) } as ColumnDef<Value>] : []),
   { id: "spread", header: "영향 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (v) => v.last ?? 0, cell: ({ row: { original: v } }) => <When at={v.last} now={now} /> },
   // A value that went out opens in 기록 at the Call that sent it, without the detail between.
@@ -464,24 +460,23 @@ function Path({ trails, places, status }: { trails: Trail[]; places: string[]; s
   );
 }
 
-/** The people a value showed with: each with their machines, how many sessions, how it ended
- * at worst, and when last; pressed, the latest session opens in 기록 where it mattered most. */
-function People2({ trails, now }: { trails: Trail[]; now: number }) {
+/** The machines a value showed on: each with how many sessions, how it ended at worst, and when
+ * last; pressed, its worst session opens in 기록 where it mattered most. */
+function Machines({ trails, now }: { trails: Trail[]; now: number }) {
   const by = new Map<string, Trail[]>();
-  for (const t of trails) by.set(t.user ?? NO_USER, [...(by.get(t.user ?? NO_USER) ?? []), t]);
-  const rows = [...by.entries()].map(([user, list]) => {
+  for (const t of trails) by.set(machineName(t), [...(by.get(machineName(t)) ?? []), t]);
+  const rows = [...by.entries()].map(([machine, list]) => {
     const worst = list.reduce((a, t) => (RANK[t.status] > RANK[a.status] ? t : a), list[0]);
     const latest = list.reduce((a, t) => ((t.last ?? 0) > (a.last ?? 0) ? t : a), list[0]);
-    return { user, list, worst, latest, machines: [...new Set(list.map((t) => machineName(t)))] };
+    return { machine, list, worst, latest };
   }).sort((a, b) => RANK[b.worst.status] - RANK[a.worst.status] || (b.latest.last ?? 0) - (a.latest.last ?? 0));
   return (
     <div className="grid gap-1">
-      {rows.map(({ user, list, worst, latest, machines }) => {
+      {rows.map(({ machine, list, worst, latest }) => {
         const m = worst.mentions.find((x) => x.out && !x.held) ?? worst.mentions.find((x) => x.out) ?? worst.mentions[0];
         return (
-          <button key={user} onClick={() => m && openInRecord(worst.session, m.seq)} className="group flex min-w-0 items-center gap-3 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
-            {user === NO_USER ? <span className="w-28 shrink-0 text-muted-foreground">사용자 모름</span> : <span className="w-28 shrink-0"><Person name={user} size={20} label /></span>}
-            <span className="min-w-0 flex-1"><Client name={machines.join(", ")} /></span>
+          <button key={machine} onClick={() => m && openInRecord(worst.session, m.seq)} className="group flex min-w-0 items-center gap-3 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
+            <span className="min-w-0 flex-1"><Client name={machine} /></span>
             <span className="tnum shrink-0 text-[12px] text-muted-foreground">세션 {list.length}</span>
             <StatusBadge s={worst.status} />
             <span className="w-14 shrink-0 text-right"><When at={latest.last} now={now} /></span>
@@ -507,8 +502,8 @@ function ValueSheet({ v, all, now }: { v: Value; all: Trail[]; now: number }) {
         <Section title="들어온 곳" count={origins.length > 1 ? origins.length : undefined}>
           {origins.slice(0, 3).map((t) => <Origin key={t.id} t={t} />)}
         </Section>
-        <Section title="사용자" count={new Set(all.map((t) => t.user ?? NO_USER)).size}>
-          <People2 trails={all} now={now} />
+        <Section title="단말" count={new Set(all.map(machineName)).size}>
+          <Machines trails={all} now={now} />
         </Section>
       </div>
     </>
@@ -534,8 +529,8 @@ function AttemptSheet({ a, now }: { a: Attempt; now: number }) {
             {a.trails.map((t) => <span key={t.id} className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px]"><Masked>{t.text}</Masked><span className="text-muted-foreground">{t.kind}</span></span>)}
           </div>
         </Section>
-        <Section title="사용자">
-          <People2 trails={a.trails.slice(0, 1)} now={now} />
+        <Section title="단말">
+          <Machines trails={a.trails.slice(0, 1)} now={now} />
         </Section>
       </div>
     </>
@@ -569,8 +564,8 @@ function SourceSheet({ s, now }: { s: Source; now: number }) {
             ))}
           </div>
         </Section>
-        <Section title="읽은 사용자" count={new Set(readers.map((t) => t.user ?? NO_USER)).size}>
-          <People2 trails={readers} now={now} />
+        <Section title="읽은 단말" count={new Set(readers.map(machineName)).size}>
+          <Machines trails={readers} now={now} />
         </Section>
       </div>
     </>

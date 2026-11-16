@@ -292,16 +292,16 @@ pub fn Secrets() -> Element {
             async move { (b.secrets().await, now_ms()) }
         }
     });
-    // Whose each session and machine is, from the inventory; unknown where the engine keeps none.
+    // The machines' names, from the inventory; their IDs where the engine keeps none.
     let inventory = use_resource(move || {
         let b = backend.clone();
         let _ = (state.reload)();
         let _ = (state.public)();
         async move { b.inventory().await.ok().flatten() }
     });
-    let owners = match &*inventory.read() {
-        Some(Some(inv)) => super::secrets_web::Owners::of(inv),
-        _ => super::secrets_web::Owners::default(),
+    let hosts = match &*inventory.read() {
+        Some(Some(inv)) => super::secrets_web::Hosts::of(inv),
+        _ => super::secrets_web::Hosts::default(),
     };
     let p = (state.public)();
     let titles: HashMap<String, String> = match &*state.sessions.read() {
@@ -320,7 +320,7 @@ pub fn Secrets() -> Element {
     let data = super::secrets_web::page(
         &trails(&all),
         &titles,
-        &owners,
+        &hosts,
         &super::secrets_web::Head {
             now: now_ms(),
             loaded,

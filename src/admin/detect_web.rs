@@ -36,9 +36,7 @@ pub(super) struct Read<'a> {
     pub refreshed: Option<i64>,
     /// What the team marked each session as, and the sources it distrusts.
     pub triage: &'a super::triage::Store,
-    /// Whose the sessions and machines are, and the machines to tell the team about: those
-    /// newly registered and those not heard from, as [`alerts`] lists them.
-    pub owners: &'a super::secrets_web::Owners,
+    /// The machines to tell the team about, as [`alerts`] lists them.
     pub alerts: &'a Value,
     /// The Calls that sent sensitive values out, by session and number.
     pub leaks: &'a HashMap<(String, i64), super::secrets::Leak>,
@@ -140,15 +138,9 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
 }
 
 /// A Call worth a look, as the page lists and counts it.
-fn call(
-    f: &CallFact,
-    severity: Severity,
-    owners: &super::secrets_web::Owners,
-    leak: Option<&super::secrets::Leak>,
-) -> Value {
+fn call(f: &CallFact, severity: Severity, leak: Option<&super::secrets::Leak>) -> Value {
     json!({
         "leak": leak.map(|l| json!({ "kinds": l.kinds, "places": l.places })),
-        "user": owners.user(&f.session, f.client.as_deref().unwrap_or_default()),
         "session": f.session,
         "seq": f.seq,
         "at": f.at,
@@ -259,7 +251,7 @@ pub(super) fn data(read: &Read) -> String {
         }
         let leak = read.leaks.get(&(f.session.clone(), f.seq));
         if let Some(severity) = Severity::of(f).or(leak.map(|_| Severity::Critical)) {
-            calls.push(call(f, severity, read.owners, leak));
+            calls.push(call(f, severity, leak));
         }
     }
     let cover: Vec<Value> = slots
@@ -327,7 +319,6 @@ mod tests {
             sessions: &[],
             refreshed: Some(9),
             triage: &crate::admin::triage::Store::default(),
-            owners: &crate::admin::secrets_web::Owners::default(),
             alerts: &Value::Null,
             leaks: &HashMap::new(),
             case: None,

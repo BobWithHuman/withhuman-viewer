@@ -23,7 +23,7 @@ export type Ask = (message:
   | { do: "open" | "case"; session: string; seq: number }
   | { do: "triage"; sessions: string[]; state: string | null }
   | { do: "source"; source: string; on: boolean; session: string; seq: number }
-  | { do: "stop"; email: string; session: string; seq: number }
+  | { do: "stop_device"; device: string; session: string; seq: number }
   | { do: "inventory" }
   | { do: "export"; name: string; text: string }
   | { do: "settings" }) => void;
@@ -134,7 +134,6 @@ const WHY: Record<Told["why"], { label: string; cls: string }> = {
 const DEVICES: ColumnDef<Told>[] = [
   { id: "why", header: "알림", size: 110, accessorFn: (a) => a.why, cell: ({ row }) => <span className={cn("rounded px-1.5 text-[11.5px] leading-[20px] font-semibold", WHY[row.original.why].cls)}>{WHY[row.original.why].label}</span> },
   { id: "host", header: "기기", accessorFn: (a) => a.host ?? a.id, cell: ({ row }) => <span className="flex min-w-0 items-baseline gap-2"><Mono>{row.original.host ?? row.original.id}</Mono>{row.original.host && <span className="truncate font-mono text-[11px] text-muted-foreground">{row.original.id}</span>}</span> },
-  { id: "user", header: "담당자", size: 220, accessorFn: (a) => a.user ?? "", cell: ({ row }) => (row.original.user ? <span className="truncate">{row.original.user}</span> : <span className="text-muted-foreground">모름</span>) },
   { id: "edr", header: "EDR", size: 120, accessorFn: (a) => a.edr ?? "", cell: ({ row }) => <span className="text-muted-foreground">{row.original.edr === "active" ? "연결됨" : row.original.edr === "disconnected" ? "끊김" : row.original.edr ?? "–"}</span> },
   { id: "at", header: "시각", size: 104, accessorFn: (a) => a.at ?? 0, cell: ({ row }) => <When at={row.original.at} /> },
 ];
