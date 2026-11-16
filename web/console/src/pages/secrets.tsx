@@ -15,11 +15,11 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, VerdictBadge, ago, clock, People, Person } from "@/kit";
+import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, ago, clock, People, Person } from "@/kit";
 import { cn } from "@/lib/utils";
 import {
-  CALL_VERDICT, CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, NO_USER, valueKey,
-  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Mention, type Source, type Status, type Trail, type Value,
+  CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, NO_USER, valueKey,
+  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Source, type Status, type Trail, type Value,
 } from "./secrets/data";
 import { Flow } from "./secrets/flow";
 import { SourceBars, parts } from "./secrets/sources";
@@ -204,7 +204,7 @@ export default function Page({ data }: { data: unknown | null }) {
       <Sheet open={open !== null} onOpenChange={(on) => !on && setOpen(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[520px] data-[side=right]:sm:max-w-[520px]" aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
           {open && "value" in open && <ValueSheet v={open.value} all={byValue.get(valueKey(open.value.trails[0])) ?? open.value.trails} now={d.now} />}
-          {open && "attempt" in open && <AttemptSheet a={open.attempt} />}
+          {open && "attempt" in open && <AttemptSheet a={open.attempt} now={d.now} />}
           {open && "source" in open && <SourceSheet s={open.source} now={d.now} />}
         </SheetContent>
       </Sheet>
@@ -258,16 +258,6 @@ const Client = ({ name }: { name: string }) => <span className="inline-flex min-
 /** How far something spread, marked when it is in more than one session. */
 function Spread({ sessions, clients }: { sessions: number; clients: number }) {
   return <span className={cn("tnum whitespace-nowrap", sessions > 1 ? "font-medium" : "text-muted-foreground")}>세션 {sessions} · 단말 {clients}</span>;
-}
-
-/** Whose machine something happened on: the person when the inventory knows, and the machine. */
-function Who({ t }: { t: { user?: string | null; host?: string | null; client: string } }) {
-  return (
-    <span className="flex min-w-0 items-center gap-2">
-      {t.user ? <Person name={t.user} size={20} label /> : <span className="text-muted-foreground">사용자 모름</span>}
-      <Client name={machineName(t)} />
-    </span>
-  );
 }
 
 function Places({ names }: { names: string[] }) {
@@ -392,17 +382,6 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
 ];
 
 // ---------------------------------------------------------------- the sheet
-/** A sheet's first line: how it ended and where to, and who or how far — what the rest backs up. */
-function Lead({ status, places, children }: { status: Status; places: string[]; children?: ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px]">
-      <StatusBadge s={status} />
-      {places.length > 0 && <span className="inline-flex min-w-0 items-center gap-1.5"><ArrowRight className="size-3.5 text-muted-foreground" /><Places names={places} /></span>}
-      {children && <span className="ml-auto flex items-center gap-3 text-muted-foreground">{children}</span>}
-    </div>
-  );
-}
-
 function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
   return (
     <section className="grid gap-2">
@@ -426,106 +405,119 @@ function Said({ text, value }: { text: string; value: string }) {
 const toolName = (tool: string | null | undefined) => (tool ?? "").replace(/^mcp__/, "").replace(/__/g, " · ");
 const Tool = ({ name }: { name?: string | null }) => (name ? <span className="max-w-36 shrink-0 truncate rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{toolName(name)}</span> : null);
 
-/** Where a value came in: what the person typed with it marked, or the document or tool it came out of. */
-function CameIn({ t }: { t: Trail }) {
+/** Where a value came in, said plainly: by what way, and the document, tool or prompt itself. */
+function Origin({ t }: { t: Trail }) {
   const said = t.mentions.find((m) => m.said);
-  if (said) return (
-    <button onClick={() => openInRecord(t.session, said.seq)} className="grid gap-1 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/60">
-      <span className="text-[11.5px] text-muted-foreground">사용자 입력</span>
-      <Said text={said.said!} value={t.text} />
-    </button>
-  );
-  const first = t.mentions[0];
+  const from = fromOf(t), Icon = FROM[from].icon;
   return (
-    <button onClick={() => first && openInRecord(t.session, first.seq)} className="grid gap-1 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/60">
-      <span className="flex items-center gap-2 text-[11.5px] text-muted-foreground">{FROM[fromOf(t)].label}<Tool name={t.sourceTool} /></span>
-      {t.source ? <Masked className="text-[12.5px] break-all">{t.source}</Masked> : <span className="text-[12.5px] text-muted-foreground">어디서 왔는지 모름</span>}
+    <button onClick={() => { const m = said ?? t.mentions[0]; if (m) openInRecord(t.session, m.seq); }}
+      className="group grid min-w-0 gap-1.5 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/60">
+      <span className="flex items-center gap-1.5 text-[12px] font-medium"><Icon className="size-3.5 text-muted-foreground" strokeWidth={1.9} />{FROM[from].label}<Tool name={said ? null : t.sourceTool} /><ArrowUpRight className="ml-auto size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" /></span>
+      {said ? <Said text={said.said!} value={t.text} />
+        : t.source ? <span className="grid gap-0.5"><Masked className="text-[13px] font-medium text-foreground">{short(t.source)}</Masked>{short(t.source) !== t.source && <Masked className="text-[11.5px] break-all text-muted-foreground">{t.source}</Masked>}</span>
+          : <span className="text-[12.5px] text-muted-foreground">어디서 왔는지 모름</span>}
     </button>
   );
 }
 
-/** A Call that sent a value out, or was about to: its verdict, tool and what it ran, and where to; pressed, it opens in 기록. */
-function OutCall({ m, session }: { m: Mention; session: string }) {
+/** How a value went: where it came in, the tools that carried it, where it ended up. */
+function Path({ trails, places, status }: { trails: Trail[]; places: string[]; status: Status }) {
+  // The tool of each Call that sent it, or, where the tool is not told, the command's first word.
+  const tools = [...new Set(trails.flatMap((t) => t.mentions.filter((m) => m.out).map((m) => m.tool ?? m.what?.trim().split(/\s+/)[0])).filter((x): x is string => !!x))];
+  const first = trails[0], from = fromOf(first), Icon = FROM[from].icon;
+  const box = "flex min-w-0 flex-col gap-1 rounded-lg border bg-background px-3 py-2";
   return (
-    <button onClick={() => openInRecord(session, m.seq)} className="group grid gap-1.5 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/60">
-      <span className="flex min-w-0 items-center gap-2 text-[12.5px]">
-        {m.verdict && <VerdictBadge v={CALL_VERDICT[m.verdict].v}>{CALL_VERDICT[m.verdict].label}</VerdictBadge>}
-        <Tool name={m.tool} />
-        {m.place && <span className="inline-flex min-w-0 items-center gap-1.5"><PlaceMark name={m.place} size={15} /><span className="truncate">{m.place.replace(" (MCP)", "")}</span></span>}
-        <span className="tnum ml-auto shrink-0 text-[11.5px] text-muted-foreground">{clock(m.at)}</span>
-        <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-      </span>
-      {m.what && <Masked className="line-clamp-3 text-muted-foreground break-all">{m.what}</Masked>}
-    </button>
+    <div className="grid grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)_16px_minmax(0,1fr)] items-stretch gap-1.5">
+      <div className={box}>
+        <span className="text-[11px] text-muted-foreground">들어온 곳</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-[12.5px]"><Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">{first.source ? short(first.source) : FROM[from].label}</span></span>
+      </div>
+      <ArrowRight className="size-4 self-center text-muted-foreground" />
+      <div className={box}>
+        <span className="text-[11px] text-muted-foreground">보낸 도구</span>
+        {tools.length ? <span className="flex min-w-0 flex-wrap gap-1">{tools.slice(0, 2).map((x) => <Tool key={x} name={x} />)}{tools.length > 2 && <span className="tnum text-[11.5px] text-muted-foreground">+{tools.length - 2}</span>}</span> : <span className="text-[12.5px] text-muted-foreground">–</span>}
+      </div>
+      <ArrowRight className="size-4 self-center text-muted-foreground" />
+      <div className={cn(box, status === "out" && "border-deny/50 bg-deny/8", status === "blocked" && "border-review/50 bg-review/8")}>
+        <span className="text-[11px] text-muted-foreground">간 곳</span>
+        {places.length ? <span className="flex min-w-0 items-center gap-1.5"><Places names={places.slice(0, 1)} />{places.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{places.length - 1}</span>}</span> : <span className="text-[12.5px] text-muted-foreground">밖으로 안 나감</span>}
+      </div>
+    </div>
   );
 }
 
-/** A session a value showed in: whose, which machine, when, how it ended there; pressed, it opens in 기록 where it mattered most. */
-function SessionRow({ t, now }: { t: Trail; now: number }) {
-  const m = t.mentions.find((x) => x.out && !x.held) ?? t.mentions.find((x) => x.out) ?? t.mentions[0];
+/** The people a value showed with: each with their machines, how many sessions, how it ended
+ * at worst, and when last; pressed, the latest session opens in 기록 where it mattered most. */
+function People2({ trails, now }: { trails: Trail[]; now: number }) {
+  const by = new Map<string, Trail[]>();
+  for (const t of trails) by.set(t.user ?? NO_USER, [...(by.get(t.user ?? NO_USER) ?? []), t]);
+  const rows = [...by.entries()].map(([user, list]) => {
+    const worst = list.reduce((a, t) => (RANK[t.status] > RANK[a.status] ? t : a), list[0]);
+    const latest = list.reduce((a, t) => ((t.last ?? 0) > (a.last ?? 0) ? t : a), list[0]);
+    return { user, list, worst, latest, machines: [...new Set(list.map((t) => machineName(t)))] };
+  }).sort((a, b) => RANK[b.worst.status] - RANK[a.worst.status] || (b.latest.last ?? 0) - (a.latest.last ?? 0));
   return (
-    <button onClick={() => m && openInRecord(t.session, m.seq)} className="group flex w-full min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
-      <span className="grid min-w-0 flex-1 gap-1">
-        <span className="truncate">{sessionName(t)}</span>
-        <span className="text-[12px]"><Who t={t} /></span>
-      </span>
-      <StatusBadge s={t.status} />
-      <span className="w-14 shrink-0 text-right"><When at={t.last} now={now} /></span>
-    </button>
+    <div className="grid gap-1">
+      {rows.map(({ user, list, worst, latest, machines }) => {
+        const m = worst.mentions.find((x) => x.out && !x.held) ?? worst.mentions.find((x) => x.out) ?? worst.mentions[0];
+        return (
+          <button key={user} onClick={() => m && openInRecord(worst.session, m.seq)} className="group flex min-w-0 items-center gap-3 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
+            {user === NO_USER ? <span className="w-28 shrink-0 text-muted-foreground">사용자 모름</span> : <span className="w-28 shrink-0"><Person name={user} size={20} label /></span>}
+            <span className="min-w-0 flex-1"><Client name={machines.join(", ")} /></span>
+            <span className="tnum shrink-0 text-[12px] text-muted-foreground">세션 {list.length}</span>
+            <StatusBadge s={worst.status} />
+            <span className="w-14 shrink-0 text-right"><When at={latest.last} now={now} /></span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-/** A value: did it get out and where to, where it came in, the Calls that sent it, and every session it showed in. */
+/** A value: how it went, from where to where; where it came in, plainly; and who it was. */
 function ValueSheet({ v, all, now }: { v: Value; all: Trail[]; now: number }) {
   const Icon = CATEGORY[v.category as Category]?.icon;
-  const sent = v.trails.flatMap((t) => t.mentions.filter((m) => m.out).map((m) => ({ m, t }))).sort((a, b) => Number(a.m.held) - Number(b.m.held) || (b.m.at ?? 0) - (a.m.at ?? 0));
-  const cameIn = v.trails.filter((t, i, all) => all.findIndex((x) => (x.source ?? x.mentions.find((m) => m.said)?.said) === (t.source ?? t.mentions.find((m) => m.said)?.said)) === i);
+  const origins = all.filter((t, i, list) => list.findIndex((x) => (x.source ?? x.mentions.find((m) => m.said)?.said ?? fromOf(x)) === (t.source ?? t.mentions.find((m) => m.said)?.said ?? fromOf(t))) === i);
   return (
     <>
-      <SheetHeader className="gap-3 border-b pr-12">
-        <SheetTitle className="flex items-center gap-2 text-[15px]">{Icon && <Icon className="size-4 text-muted-foreground" strokeWidth={1.9} />}<Masked className="truncate text-[14px]">{v.text}</Masked><span className="shrink-0 text-[12.5px] font-normal text-muted-foreground">{v.kind}</span></SheetTitle>
-        <Lead status={v.status} places={v.status === "seen" ? [] : v.places}><Spread sessions={v.sessions} clients={v.clients.length} /></Lead>
+      <SheetHeader className="gap-2 border-b pr-12">
+        <SheetTitle className="flex items-center gap-2 text-[15px]">{Icon && <Icon className="size-4 text-muted-foreground" strokeWidth={1.9} />}<Masked className="truncate text-[14px]">{v.text}</Masked><span className="shrink-0 text-[12.5px] font-normal text-muted-foreground">{v.kind}</span><span className="ml-1"><StatusBadge s={v.status} /></span></SheetTitle>
+        <SheetDescription className="sr-only">{v.kind}</SheetDescription>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <Section title="들어온 곳" count={cameIn.length > 1 ? cameIn.length : undefined}>
-          {cameIn.slice(0, 3).map((t) => <CameIn key={t.id} t={t} />)}
+        <Path trails={all} places={v.status === "seen" ? [] : v.places} status={v.status} />
+        <Section title="들어온 곳" count={origins.length > 1 ? origins.length : undefined}>
+          {origins.slice(0, 3).map((t) => <Origin key={t.id} t={t} />)}
         </Section>
-        {sent.length > 0 && (
-          <Section title="보낸 호출" count={sent.length}>
-            {sent.slice(0, 6).map(({ m, t }) => <OutCall key={`${t.session}-${m.seq}`} m={m} session={t.session} />)}
-          </Section>
-        )}
-        {/* Every session the value showed in, over all time, not only the period's. */}
-        <Section title="드러난 세션" count={all.length}>
-          <div className="grid gap-1">{[...all].sort((a, b) => RANK[b.status] - RANK[a.status] || (b.last ?? 0) - (a.last ?? 0)).map((t) => <SessionRow key={t.id} t={t} now={now} />)}</div>
+        <Section title="사용자" count={new Set(all.map((t) => t.user ?? NO_USER)).size}>
+          <People2 trails={all} now={now} />
         </Section>
       </div>
     </>
   );
 }
 
-/** A session that tried to send values out: did they get out and where to, what the person asked, the Calls that sent them, and which values. */
-function AttemptSheet({ a }: { a: Attempt }) {
+/** A session that tried to send values out: how they went, what the person asked, and which values. */
+function AttemptSheet({ a, now }: { a: Attempt; now: number }) {
   const said = a.trails.flatMap((t) => t.mentions).find((m) => m.said)?.said ?? a.title;
-  const calls = [...new Map(a.trails.flatMap((t) => t.mentions.filter((m) => m.out)).map((m) => [m.seq, m] as const)).values()].sort((x, y) => Number(x.held) - Number(y.held) || (y.at ?? 0) - (x.at ?? 0));
-  const first = a.trails[0];
   return (
     <>
-      <SheetHeader className="gap-3 border-b pr-12">
-        <SheetTitle className="text-[15px]">유출 시도</SheetTitle>
-        <Lead status={a.ran > 0 ? "out" : "blocked"} places={a.places}>{first && <Who t={first} />}</Lead>
+      <SheetHeader className="gap-2 border-b pr-12">
+        <SheetTitle className="flex items-center gap-2 text-[15px]">유출 시도<span className="ml-1"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /></span></SheetTitle>
+        <SheetDescription className="sr-only">유출 시도</SheetDescription>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
+        <Path trails={a.trails} places={a.places} status={a.ran > 0 ? "out" : "blocked"} />
         <Section title="사용자 요청">
           <div className="rounded-lg border bg-background px-3 py-2.5 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{said ?? <span className="text-muted-foreground">프롬프트 없음</span>}</div>
-        </Section>
-        <Section title="보낸 호출" count={calls.length}>
-          {calls.map((m) => <OutCall key={m.seq} m={m} session={a.session} />)}
         </Section>
         <Section title="실려 간 값" count={a.trails.length}>
           <div className="flex flex-wrap gap-1.5">
             {a.trails.map((t) => <span key={t.id} className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px]"><Masked>{t.text}</Masked><span className="text-muted-foreground">{t.kind}</span></span>)}
           </div>
+        </Section>
+        <Section title="사용자">
+          <People2 trails={a.trails.slice(0, 1)} now={now} />
         </Section>
       </div>
     </>
@@ -559,8 +551,8 @@ function SourceSheet({ s, now }: { s: Source; now: number }) {
             ))}
           </div>
         </Section>
-        <Section title="읽은 세션" count={readers.length}>
-          <div className="grid gap-1">{readers.map((t) => <SessionRow key={t.session} t={t} now={now} />)}</div>
+        <Section title="읽은 사용자" count={new Set(readers.map((t) => t.user ?? NO_USER)).size}>
+          <People2 trails={readers} now={now} />
         </Section>
       </div>
     </>
