@@ -107,23 +107,33 @@ ORDER BY s.created_at DESC
 
 /// Every Call cut down to what the security team's charts count, as `graph::CALL_FACTS`.
 static CALL_FACTS: LazyLock<String> = LazyLock::new(|| {
+    // Why it was decided so, the prompt before it and when its result came back are read only
+    // for a Call worth a look (stopped, held, or hard to undo): no page shows them for the
+    // others, and they are most of what would cross the network.
     format!(
         r#"
 SELECT c.session_id AS session, c.seq, c.client_id AS client, c.cwd,
-       left(c.decision_reason, 300) AS reason,
-       (SELECT {prompt} FROM nodes r WHERE r.session_id = c.session_id AND r.kind = 'Request'
-        AND r."order" < c."order" ORDER BY r."order" DESC LIMIT 1) AS prompt,
+       CASE WHEN f.flagged THEN left(c.decision_reason, 300) END AS reason,
+       CASE WHEN f.flagged THEN
+         (SELECT {prompt} FROM nodes r WHERE r.session_id = c.session_id AND r.kind = 'Request'
+          AND r."order" < c."order" ORDER BY r."order" DESC LIMIT 1) END AS prompt,
        coalesce({command}, {file_path}, {url}, {pattern}) AS target,
        {ran} AS ran,
-       (SELECT min(r.observed_at) FROM nodes r WHERE r.session_id = c.session_id
-        AND r.tool_use_id = c.tool_use_id AND r.kind IN ('Segment', 'Error')) AS ran_at,
+       CASE WHEN f.flagged THEN
+         (SELECT min(r.observed_at) FROM nodes r WHERE r.session_id = c.session_id
+          AND r.tool_use_id = c.tool_use_id AND r.kind IN ('Segment', 'Error')) END AS ran_at,
        coalesce(c.decided_at, c.observed_at) AS at,
        c.decision, c.decision_mode AS mode, c.decision_rule AS rule,
        {tool} AS tool,
        substring(c.trace_json from '"link":"([^"]*)"') AS link,
        substring(c.trace_json from '"worst":"([^"]*)"') AS worst,
-       coalesce(c.trace_json ~ $1, false) AS irreversible
-FROM nodes c WHERE c.kind = 'Call'
+       f.irreversible
+FROM nodes c
+CROSS JOIN LATERAL (
+  SELECT i.irreversible, (c.decision IN ('DENY', 'REVIEW') OR i.irreversible) AS flagged
+  FROM (SELECT coalesce(c.trace_json ~ $1, false) AS irreversible) i
+) f
+WHERE c.kind = 'Call' AND ($2::bigint IS NULL OR coalesce(c.decided_at, c.observed_at) >= $2)
 ORDER BY at DESC NULLS LAST LIMIT 50000
 "#,
         prompt = field("r.payload_json", "prompt"),
@@ -414,8 +424,9 @@ impl Postgres<'_> {
     }
 
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn call_facts(&self) -> Result<Value, ApiError> {
-        let mut rows = self.rows(&CALL_FACTS, &[&IRREVERSIBLE]).await?;
+    /// Every Call's facts, or only those decided or seen since `since` (ms).
+    pub async fn call_facts(&self, since: Option<i64>) -> Result<Value, ApiError> {
+        let mut rows = self.rows(&CALL_FACTS, &[&IRREVERSIBLE, &since]).await?;
         for row in &mut rows {
             unescape(row, "prompt", 200);
             unescape(row, "target", 300);
@@ -886,7 +897,7 @@ mod tests {
         };
         let (df, pf) = (
             facts(demo.call_facts()),
-            facts(rt.block_on(pg.call_facts()).unwrap()),
+            facts(rt.block_on(pg.call_facts(None)).unwrap()),
         );
         same(
             "call facts count".into(),
