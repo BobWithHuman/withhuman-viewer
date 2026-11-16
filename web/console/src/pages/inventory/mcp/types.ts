@@ -27,7 +27,6 @@ export type Mcp = {
 
 export const DAYS = 30;
 export const VERDICTS: Verdict[] = ["allow", "review", "deny"];
-export const NATURES: Nature[] = ["read", "write", "delete", "send"];
 /** Where a tool stands on the board: the strongest verdict its calls got, or never called. */
 type Column = Verdict | "none";
 export const COLUMNS: Column[] = ["allow", "review", "deny", "none"];
@@ -40,7 +39,6 @@ export const COLUMN: Record<Column, { label: string; color: string }> = {
 export const column = (t: Tool): Column => (t.deny > 0 ? "deny" : t.review > 0 ? "review" : t.calls > 0 ? "allow" : "none");
 export const VERDICT_OF: Record<Call["decision"], Verdict> = { ALLOW: "allow", REVIEW: "review", DENY: "deny" };
 
-export const toolKey = (server: string, tool: string) => `${server}\u0000${tool}`;
 /** A tool's or a server's calls as the parts of one bar. */
 export const split = (of: Pick<Tool, Verdict>[]) =>
   VERDICTS.map((v) => ({ key: v, label: COLUMN[v].label, color: COLUMN[v].color, value: of.reduce((a, t) => a + t[v], 0) }));

@@ -1,5 +1,4 @@
-// What a picked row tells, in the sheet on the right. A machine: what it did over the last two
-// weeks, what it said at install, its projects and whether each is protected, the MCP servers set
+// What a picked row tells, in the sheet on the right. A machine: what it said at install, its projects and whether each is protected, the MCP servers set
 // up on it, how its sessions were let run, and the switch that stops it.
 
 import { BadgeCheck, Laptop, OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
@@ -10,7 +9,6 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 import { Legend, ServiceLogo, SplitBar, Warn, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark, Chip, Dash, EngineBadge, PermBadge, StateBadge } from "./marks";
-import { DeviceActivity } from "./activity";
 import { isOn } from "./mcp/types";
 import { EDR_STATUS, PERM, PERM_KEYS, WHY, agentLabel, type Machine, type View } from "./model";
 
@@ -47,8 +45,8 @@ export const Line = ({ onClick, children, className }: { onClick?: () => void; c
 );
 export const When = ({ children }: { children: ReactNode }) => <span className="tnum ml-auto shrink-0 text-[12px] text-muted-foreground">{children}</span>;
 
-export function DeviceSheet({ m, view, onSession, onServer, onStop }: {
-  m: Machine; view: View; onSession: (id: string) => void; onServer: (name: string) => void;
+export function DeviceSheet({ m, view, onServer, onStop }: {
+  m: Machine; view: View; onServer: (name: string) => void;
   /** Stops the machine, or lets it go again. */
   onStop: (stopped: boolean) => void;
 }) {
@@ -84,8 +82,6 @@ export function DeviceSheet({ m, view, onSession, onServer, onStop }: {
         </div>
       </SheetHeader>
       <div className="scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
-        <DeviceActivity key={m.id} m={m} view={view} onSession={onSession} />
-
         <Facts rows={[
           ["EDR", m.edr
             ? <span className="inline-flex items-center gap-1.5"><BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />{EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"}<span className="font-mono text-[11.5px] text-muted-foreground">에이전트 {m.edr.id}</span></span>

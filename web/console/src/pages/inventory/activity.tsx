@@ -1,4 +1,4 @@
-// What a machine is doing and has done, in its sheet: its calls by day, and the tools, sessions
+// What a machine is doing and has done: its calls by day, and the tools, sessions
 // and latest calls behind them. A day, a tool or a session pressed narrows the others to it; a
 // session or a call opens its record.
 
@@ -43,7 +43,7 @@ function Column({ title, count, children }: { title: string; count: number; chil
   return (
     <section className="flex min-w-0 flex-col">
       <h3 className="mb-1 flex shrink-0 items-center gap-1.5 text-[12px] font-medium text-muted-foreground">{title}<span className="tnum rounded-full bg-secondary px-1.5 text-[11px]">{count}</span></h3>
-      <div className="scroll -mx-1 max-h-[208px] overflow-y-auto px-1">{count ? children : <Empty />}</div>
+      <div className="scroll -mx-1 max-h-[260px] overflow-y-auto px-1">{count ? children : <Empty />}</div>
     </section>
   );
 }
@@ -65,7 +65,7 @@ const Held = ({ c }: { c: Counts }) => (
   </span>
 );
 
-export function DeviceActivity({ m, view, onSession }: { m: Machine; view: View; onSession: (id: string) => void }) {
+export function DeviceActivity({ m, view, onSession, wide }: { m: Machine; view: View; onSession: (id: string) => void; wide?: boolean }) {
   const a = view.activity[m.id];
   const days = view.days;
   const [day, setDay] = useState<number | null>(null);
@@ -131,7 +131,7 @@ export function DeviceActivity({ m, view, onSession }: { m: Machine; view: View;
 
       {/* What was behind them. */}
       {a && (
-        <>
+        <div className={wide ? "grid grid-cols-3 gap-5" : "flex flex-col gap-4"}>
           <Column title="도구" count={tools.length}>
             {tools.map((t) => (
               <button key={t.name} onClick={() => setTool(tool === t.i ? null : t.i)} aria-pressed={tool === t.i}
@@ -181,7 +181,7 @@ export function DeviceActivity({ m, view, onSession }: { m: Machine; view: View;
               );
             })}
           </Column>
-        </>
+        </div>
       )}
     </div>
   );

@@ -1,20 +1,12 @@
-// Small parts the MCP board, its band and its sheets share: how many machines called a tool, the
-// calls of a tool that were held or blocked, and the last 30 days as a chart or a sparkline.
+// Small parts the MCP sheets and a machine's activity share: the calls of a tool that were held or
+// blocked, and the last 30 days as a chart.
 
 import { Bar, BarChart, XAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
-import { Laptop } from "lucide-react";
 import { num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { DAY } from "../model";
 import type { Tool } from "./types";
-
-/** How many machines called a tool, as a laptop and a number. */
-export function Reach({ clients, className }: { clients: string[]; className?: string }) {
-  const n = new Set(clients).size;
-  if (!n) return null;
-  return <span className={cn("tnum inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground", className)}><Laptop className="size-3" strokeWidth={1.9} />{n}</span>;
-}
 
 /** How many of a tool's calls the engine held, and how many it blocked, in their colours. */
 export function Held({ t, className }: { t: Pick<Tool, "review" | "deny">; className?: string }) {
@@ -52,14 +44,3 @@ export function DaysChart({ rows, series, now, className }: { rows: Record<strin
   );
 }
 
-/** A server's last 30 days as a sparkline. */
-export function Spark({ days, className }: { days: number[]; className?: string }) {
-  const most = Math.max(1, ...days);
-  return (
-    <span className={cn("flex h-5 items-end gap-px", className)} aria-hidden>
-      {days.map((d, i) => (
-        <i key={i} className={cn("min-w-0 flex-1 rounded-[1px]", d ? "bg-foreground/70" : "bg-foreground/20")} style={{ height: d ? `${Math.max(12, (d / most) * 100)}%` : 1.5 }} />
-      ))}
-    </span>
-  );
-}

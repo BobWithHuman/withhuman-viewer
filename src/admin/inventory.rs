@@ -132,7 +132,7 @@ fn first_tab() -> &'static str {
         Ok("sessions") => "sessions",
         Ok("shadow") => "shadow",
         Ok("mcp") => "mcp",
-        _ => "devices",
+        _ => "activity",
     }
 }
 

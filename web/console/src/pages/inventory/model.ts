@@ -48,7 +48,7 @@ export type Activity = {
   recent: Call[];
 };
 export type Call = { session: string; seq: number; at: number | null; tool: string | null; target: string | null; decision: string | null; ran: boolean };
-export type Tab = "devices" | "sessions" | "shadow" | "mcp";
+export type Tab = "activity" | "sessions" | "shadow" | "mcp";
 export type Data = {
   status: "ready" | "loading" | "failed" | "none"; error: string | null; now: number;
   source: { label: string; demo: boolean }; admin: { api: string; has_token: boolean };

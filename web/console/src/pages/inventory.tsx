@@ -1,38 +1,36 @@
-// 인벤토리: the machines and sessions the engine protects, by machine alone. The page opens on the
-// picture of which machine has what (the agents and MCP servers on each), and beside it what the
-// machine picked holds, slot by slot. Under it the machines, sessions and shadow AI as lists, and
-// the MCP servers set up on the machines as a board of their tools by what the engine did with
-// the calls; a machine, a server or a tool opens in a sheet, where a machine is stopped. The app
-// does that (`src/admin/inventory.rs`) and answers in `data.reply`.
+// 인벤토리: the machines the engine protects and what is on them. On the left the picture of every
+// machine by the agents and MCP servers on it; a machine pressed there, or picked in the panel
+// beside it, is the one the panel and the lists under them show: what it did (its calls by day,
+// tools, sessions and latest calls), its sessions, the shadow AI seen on it and its MCP servers,
+// each row in brief and opening in full. A machine's sheet is where it is stopped; the app does
+// that (`src/admin/inventory.rs`) and answers in `data.reply`.
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowUpRight, Check, Laptop, PackageOpen, PlugZap, Search, ShieldOff, TriangleAlert, X } from "lucide-react";
+import { ArrowUpRight, Check, Laptop, PackageOpen, PlugZap, Search, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { send } from "@/bridge";
-import { DataTable, Empty, NATURE, NatureIcon, PageHeader, Panel, ago, clock, type Nature } from "@/kit";
+import { DataTable, Empty, PageHeader, Panel, ServiceLogo, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
 import { Asks, type Ask } from "./inventory/dialogs";
-import { AgentMark, Chip, Dash, EngineBadge, PermBadge, StateBadge } from "./inventory/marks";
+import { AgentMark, Chip, Dash, PermBadge, StateBadge } from "./inventory/marks";
 import { Fleet, FleetLegend } from "./inventory/fleet";
-import { Band } from "./inventory/mcp/band";
-import { Board } from "./inventory/mcp/board";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
-import { NATURES, toolKey, type Server, type Tool } from "./inventory/mcp/types";
-import { END, PERM, SOURCE, WHY, derive, type Data, type Machine, type Run, type Shadow, type Tab } from "./inventory/model";
+import { isOn } from "./inventory/mcp/types";
+import { END, PERM, WHY, derive, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
 import { Bag, machineOrder } from "./inventory/bag";
 import { DeviceSheet } from "./inventory/sheets";
+import { DeviceActivity } from "./inventory/activity";
 
-const TABS: [Tab, string][] = [["devices", "기기"], ["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
+const TABS: [Tab, string][] = [["activity", "활동"], ["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
 /** A tab the app named, when this page has it. */
 const known = (t?: string | null) => TABS.find(([k]) => k === t)?.[0];
 /** The way agents are let run that the lists are narrowed to. */
@@ -49,13 +47,10 @@ export default function Page({ data }: { data: unknown | null }) {
   const d = (data as Data | null) ?? local;
 
   const [windowMin, setWindowMin] = useState(10);
-  const [tab, setTab] = useState<Tab>(known(d.tab) ?? "devices");
-  const [nature, setNature] = useState<Nature | null>(null);
-  const [all, setAll] = useState(false);
+  const [tab, setTab] = useState<Tab>(known(d.tab) ?? "activity");
   const [filter, setFilter] = useState<Filter | null>(null);
-  // The machine whose holdings are shown beside the picture: the first in it until one is picked
-  // from the panel's own list, which then narrows the lists to it.
-  const [scope, setScope] = useState<string | null>(null);
+  // The machine the panel and the lists show: the first in the picture until one is picked.
+  const [focus, setFocus] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Open | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -91,10 +86,6 @@ export default function Page({ data }: { data: unknown | null }) {
     const t = known(d.tab);
     if (t) setTab(t);
   }, [d.tab]);
-  // The board is as tall as its servers, so its tab comes up to the top of the page.
-  useEffect(() => {
-    if (tab === "mcp") lists.current?.scrollIntoView({ block: "start" });
-  }, [tab, d.status]);
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4000);
@@ -105,47 +96,35 @@ export default function Page({ data }: { data: unknown | null }) {
   const closeAsk = () => { setAsk(null); setError(null); setPending(null); };
 
   const has = (...parts: (string | null | undefined)[]) => !q.trim() || parts.some((p) => p?.toLowerCase().includes(q.trim().toLowerCase()));
-  // The lists show only the machine picked in the panel's own list, until that is let go.
-  const ofScope = (device?: string | null) => !scope || device === scope;
-  const everyone = view.machines.filter((m) => all || m.state !== "unregistered" || m.running);
-  const base = everyone.filter((m) => ofScope(m.id));
-  const machines = base.filter((m) =>
-    (!filter || m.permission_mode === filter.value)
-    && has(m.name, m.id, m.serial, m.agent));
-  const sessions = view.sessions.filter((r) =>
-    ofScope(r.device) && (!filter || r.permission_mode === filter.value)
-    && has(r.host, r.device, r.title, r.folder, r.id, r.model));
-  const shadow = view.shadow.filter((a) => ofScope(a.device) && has(a.host, a.device, a.project, a.agent));
+  const everyone = view.machines.filter((m) => m.state !== "unregistered" || m.running);
+  const current = view.machines.find((m) => m.id === focus) ?? machineOrder(view)[0];
+  const mine = <T extends { device: string | null }>(list: T[]) => (current ? list.filter((x) => x.device === current.id) : []);
+  const allSessions = mine(view.sessions), allShadow = mine(view.shadow);
+  const sessions = allSessions.filter((r) => (!filter || r.permission_mode === filter.value) && has(r.title, r.folder, r.id, r.model));
+  const shadow = allShadow.filter((a) => has(a.project, a.agent, WHY[a.why ?? ""]));
   const servers = view.mcp?.servers ?? [];
-  // The servers the lists show: those on the picked machine.
-  const scoped = scope ? view.machines.find((m) => m.id === scope) : undefined;
-  const listed = scoped ? view.serversOn(scoped) : servers;
-  const lit = (s: Server, t: Tool) => (!nature || t.nature === nature) && has(s.name, t.name);
-  const sifted = nature !== null || q.trim() !== "";
-
-  const deviceCols = useMemo<ColumnDef<Machine>[]>(() => [
-    { id: "name", header: "기기", accessorFn: (m) => m.name, cell: ({ row: { original: m } }) => (
-      <span className="flex min-w-0 items-center gap-2">
-        <Laptop className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-        <span className="truncate font-medium" title={m.id}>{m.name}</span>
-        {m.shadow > 0 && <Badge variant="secondary" className="shrink-0 gap-1 border-0 bg-deny/15 font-semibold text-deny"><ShieldOff />섀도 {m.shadow}</Badge>}
-      </span>
-    ) },
-    { id: "agent", header: "에이전트", size: 144, accessorFn: (m) => m.agent ?? "", cell: ({ row }) => <AgentMark agent={row.original.agent} label /> },
-    { id: "perm", header: "권한 모드", size: 136, accessorFn: (m) => m.permission_mode ?? "", cell: ({ row }) => <PermBadge mode={row.original.permission_mode} /> },
-    { id: "engine", header: "엔진 모드", size: 112, accessorFn: (m) => m.engine_mode ?? "", cell: ({ row }) => <EngineBadge mode={row.original.engine_mode} /> },
-    { id: "state", header: "상태", size: 112, accessorFn: (m) => ["running", "idle", "installed", "unregistered"].indexOf(m.state), cell: ({ row }) => <StateBadge state={row.original.state} /> },
-    { id: "projects", header: "프로젝트", size: 96, accessorFn: (m) => m.projects, cell: ({ row }) => <span className="tnum">{row.original.projects}</span> },
-    { id: "sessions", header: "세션", size: 72, accessorFn: (m) => m.sessions, cell: ({ row }) => <span className="tnum">{row.original.sessions}</span> },
-    { id: "last", header: "마지막 신호", size: 108, accessorFn: (m) => m.last ?? 0, cell: ({ row }) => when(row.original.last, view.now) },
-  ], [view.now]);
+  // The machine's MCP servers, with the calls of their tools made from it and the latest.
+  const serverRows = useMemo(() => (current ? view.serversOn(current) : []).map((s) => {
+    const calls = s.tools.reduce((a, t) => a + t.users.reduce((b, u) => b + (isOn(u.client, current!) ? u.n : 0), 0), 0);
+    const last = Math.max(0, ...s.tools.flatMap((t) => t.recent.filter((r) => isOn(r.client, current!)).map((r) => r.at)));
+    return { s, calls, last: last || null };
+  }).sort((a, b) => b.calls - a.calls), [view, current]);
+  const shownServers = serverRows.filter((x) => has(x.s.name, ...x.s.tools.map((t) => t.name)));
+  // Each session's calls over the last two weeks, from the machine's activity.
+  const callsOf = useMemo(() => {
+    const a = current ? view.activity[current.id] : undefined;
+    const by = new Map<string, [number, number, number]>();
+    for (const c of a?.cells ?? []) {
+      const id = a!.sessions[c[2]], n = by.get(id) ?? [0, 0, 0];
+      n[0] += c[3] + c[4] + c[5]; n[1] += c[4]; n[2] += c[5];
+      by.set(id, n);
+    }
+    return by;
+  }, [view, current]);
 
   const sessionCols = useMemo<ColumnDef<Run>[]>(() => [
     { id: "state", header: "상태", size: 96, accessorFn: (r) => Number(view.going(r)), cell: ({ row }) => (
       view.going(row.original) ? <StateBadge state="running" /> : <span className="text-muted-foreground">{row.original.ended_at ? "끝남" : "신호 끊김"}</span>
-    ) },
-    { id: "device", header: "기기", size: 152, accessorFn: (r) => r.host ?? r.device ?? "", cell: ({ row: { original: r } }) => (
-      r.device ? <span className="truncate" title={r.device}>{r.host ?? r.device}</span> : <Badge variant="secondary" className="border-0 bg-catch/15 font-semibold text-catch">ID 없음</Badge>
     ) },
     { id: "what", header: "작업", accessorFn: (r) => r.title ?? r.id, cell: ({ row: { original: r } }) => (
       <span className="flex min-w-0 items-center gap-1.5" title={r.title ?? r.id}>
@@ -154,23 +133,39 @@ export default function Page({ data }: { data: unknown | null }) {
         {r.opens && <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />}
       </span>
     ) },
-    { id: "start", header: "시작", size: 176, accessorFn: (r) => r.created_at ?? 0, cell: ({ row: { original: r } }) => (
-      <span className="tnum truncate text-muted-foreground">{[clock(r.created_at), r.source && SOURCE[r.source]].filter(Boolean).join(" · ") || "–"}</span>
-    ) },
+    { id: "calls", header: "호출", size: 160, accessorFn: (r) => callsOf.get(r.id)?.[0] ?? 0, cell: ({ row: { original: r } }) => {
+      const n = callsOf.get(r.id);
+      return n ? (
+        <span className="tnum flex items-center gap-2"><b className="font-medium">{num(n[0])}</b>
+          {n[1] > 0 && <span className="text-[12px] text-review">확인 {n[1]}</span>}
+          {n[2] > 0 && <span className="text-[12px] text-deny">차단 {n[2]}</span>}
+        </span>
+      ) : <Dash />;
+    } },
+    { id: "start", header: "시작", size: 120, accessorFn: (r) => r.created_at ?? 0, cell: ({ row: { original: r } }) => <span className="tnum truncate text-muted-foreground">{clock(r.created_at)}</span> },
     { id: "perm", header: "권한 모드", size: 136, accessorFn: (r) => r.permission_mode ?? "", cell: ({ row }) => <PermBadge mode={row.original.permission_mode} /> },
     { id: "model", header: "모델", size: 136, accessorFn: (r) => r.model ?? "", cell: ({ row }) => <span className={cn(mono, "truncate text-muted-foreground")}>{row.original.model ?? "–"}</span> },
     { id: "end", header: "끝", size: 168, accessorFn: (r) => r.ended_at ?? 0, cell: ({ row: { original: r } }) => (
       r.ended_at ? <span className="tnum truncate text-muted-foreground">{clock(r.ended_at)} · {END[r.end_reason ?? ""] ?? "끝남"}</span> : <Dash />
     ) },
-  ], [view]);
+  ], [view, callsOf]);
 
   const shadowCols = useMemo<ColumnDef<Shadow>[]>(() => [
     { id: "agent", header: "에이전트", size: 152, accessorFn: (a) => a.agent, cell: ({ row }) => <AgentMark agent={row.original.agent} label /> },
-    { id: "device", header: "기기", size: 184, accessorFn: (a) => a.host ?? a.device ?? "", cell: ({ row: { original: a } }) => <span className="truncate font-medium" title={a.device ?? ""}>{a.host ?? a.device ?? "–"}</span> },
     { id: "why", header: "근거", accessorFn: (a) => a.project ?? WHY[a.why ?? ""] ?? "", cell: ({ row: { original: a } }) => (a.project
       ? <code className={cn(mono, "truncate")} title={a.project}>{a.project}</code>
       : <Chip className={a.why === "unregistered" ? "bg-review/15 text-review" : "bg-deny/15 text-deny"}>{WHY[a.why ?? ""] ?? "–"}</Chip>) },
-    { id: "last", header: "마지막으로 보임", size: 128, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
+    { id: "last", header: "마지막으로 보임", size: 160, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
+  ], [view.now]);
+
+  type ServerRow = (typeof serverRows)[number];
+  const serverCols = useMemo<ColumnDef<ServerRow>[]>(() => [
+    { id: "name", header: "서버", accessorFn: (x) => x.s.name, cell: ({ row: { original: x } }) => (
+      <span className="flex min-w-0 items-center gap-2"><ServiceLogo name={x.s.name} size={18} /><span className="truncate font-mono text-[12.5px]">{x.s.name}</span><Chip className="shrink-0">{x.s.transport === "local" ? "로컬" : "원격"}</Chip></span>
+    ) },
+    { id: "tools", header: "도구", size: 96, accessorFn: (x) => x.s.tools.length, cell: ({ row }) => <span className="tnum">{row.original.s.tools.length}</span> },
+    { id: "calls", header: "호출", size: 112, accessorFn: (x) => x.calls, cell: ({ row }) => <span className={cn("tnum", !row.original.calls && "text-muted-foreground")}>{num(row.original.calls)}</span> },
+    { id: "last", header: "마지막 호출", size: 140, accessorFn: (x) => x.last ?? 0, cell: ({ row }) => when(row.original.last, view.now) },
   ], [view.now]);
 
   const header = (
@@ -220,7 +215,6 @@ export default function Page({ data }: { data: unknown | null }) {
     );
   }
 
-  const picked = open?.kind === "device" ? open.id : null;
   const machine = open?.kind === "device" ? view.machines.find((m) => m.id === open.id) : undefined;
   const server = open?.kind === "server" || open?.kind === "tool" ? servers.find((s) => s.name === (open.kind === "server" ? open.name : open.server)) : undefined;
   const tool = open?.kind === "tool" ? server?.tools.find((t) => t.name === open.tool) : undefined;
@@ -228,12 +222,11 @@ export default function Page({ data }: { data: unknown | null }) {
   const openTool = (s: string, t: string) => setOpen({ kind: "tool", server: s, tool: t });
   const openDevice = (id: string) => setOpen({ kind: "device", id });
   const chip = filter && PERM[filter.value].label;
-  const shown = scope ?? machineOrder(view)[0]?.id ?? null;
   const counts: Record<Tab, number> = {
-    devices: base.length,
-    sessions: view.sessions.filter((r) => ofScope(r.device)).length, shadow: view.shadow.filter((a) => ofScope(a.device)).length, mcp: listed.length,
+    activity: (current && view.activity[current.id]?.cells.reduce((n, c) => n + c[3] + c[4] + c[5], 0)) || 0,
+    sessions: allSessions.length, shadow: allShadow.length, mcp: serverRows.length,
   };
-  const shownCount = { devices: machines.length, sessions: sessions.length, shadow: shadow.length, mcp: listed.filter((s) => s.tools.some((t) => lit(s, t))).length }[tab];
+  const shownCount = sessions.length;
 
   return (
     <div className="flex h-full flex-col">
@@ -242,34 +235,29 @@ export default function Page({ data }: { data: unknown | null }) {
         <div className="grid shrink-0 grid-cols-12 gap-4">
           <Panel className="col-span-8 min-w-0" title="기기별 에이전트와 MCP" aside={<FleetLegend />}>
             <div className="h-[360px]">
-              <Fleet view={view} machines={everyone} servers={servers} picked={picked} onDevice={openDevice} onServer={openServer} />
+              <Fleet view={view} machines={everyone} servers={servers} picked={current?.id ?? null} onDevice={setFocus} onServer={openServer} />
             </div>
           </Panel>
           <Panel className="col-span-4 min-w-0" title="인벤토리">
             <div className="h-[360px]">
-              <Bag view={view} id={shown} onPick={setScope} onDevice={openDevice} onServer={openServer}
-                onSessions={(id, mode) => { setScope(id); setFilter(mode ? { kind: "perm", value: mode } : null); setTab("sessions"); }} />
+              <Bag view={view} id={current?.id ?? null} onPick={setFocus} onDevice={openDevice} onServer={openServer}
+                onSessions={(id, mode) => { setFocus(id); setFilter(mode ? { kind: "perm", value: mode } : null); setTab("sessions"); }} />
             </div>
           </Panel>
         </div>
 
-        <Card ref={lists} className={cn("flex min-h-[300px] flex-col gap-0 py-0 shadow-none", tab === "mcp" ? "shrink-0 overflow-clip" : "flex-1 overflow-hidden")}>
-          <div className={cn("flex h-12 shrink-0 items-center gap-3 border-b px-4", tab === "mcp" && "sticky top-0 z-20 bg-card")}>
+        <Card ref={lists} className="flex min-h-[340px] flex-1 flex-col gap-0 overflow-hidden py-0 shadow-none">
+          <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+            {current && <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-semibold"><Laptop className="size-4 text-muted-foreground" strokeWidth={1.8} />{current.name}</span>}
             <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
               <TabsList>
                 {TABS.map(([key, label]) => (
                   <TabsTrigger key={key} value={key} className="gap-1.5">
-                    {label}<span className={cn("tnum rounded-full bg-secondary px-1.5 text-[11px] font-normal text-muted-foreground", key === "shadow" && counts.shadow > 0 && "bg-deny/15 text-deny")}>{counts[key]}</span>
+                    {label}<span className={cn("tnum rounded-full bg-secondary px-1.5 text-[11px] font-normal text-muted-foreground", key === "shadow" && counts.shadow > 0 && "bg-deny/15 text-deny")}>{num(counts[key])}</span>
                   </TabsTrigger>
                 ))}
               </TabsList>
             </Tabs>
-            {scoped && (
-              <Badge variant="secondary" className="h-6 gap-1.5 border-0 bg-primary/15 pr-1 font-medium text-primary">
-                <Laptop className="size-3.5" strokeWidth={1.9} />{scoped.name}
-                <button aria-label="기기 지우기" onClick={() => setScope(null)} className="grid size-4 place-items-center rounded-full hover:bg-primary/20"><X className="size-3" /></button>
-              </Badge>
-            )}
             {chip && (
               <Badge variant="secondary" className="h-6 gap-1 border-0 bg-primary/15 pr-1 font-medium text-primary">
                 {chip}<span className="tnum opacity-70">{shownCount}</span>
@@ -279,47 +267,24 @@ export default function Page({ data }: { data: unknown | null }) {
             {tab === "shadow" && !view.shadowKnown && <Chip>미수집</Chip>}
             {tab === "mcp" && !view.mcp && <Chip>미수집</Chip>}
             <div className="ml-auto flex items-center gap-3">
-              {tab === "mcp" && servers.length > 0 && (
-                <div className="flex items-center gap-1.5">
-                  {NATURES.map((n) => (
-                    <button key={n} aria-pressed={nature === n} onClick={() => setNature(nature === n ? null : n)}
-                      className={cn("inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[12.5px] transition-colors", nature === n ? "border-primary bg-primary/15 text-foreground" : "text-muted-foreground hover:border-white/25 hover:text-foreground")}>
-                      <NatureIcon n={n} className="size-3.5" />{NATURE[n].label}
-                      <span className="tnum text-[11.5px] opacity-70">{listed.reduce((a, s) => a + s.tools.filter((t) => t.nature === n).length, 0)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {tab === "devices" && view.unregistered > 0 && (
-                <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-muted-foreground select-none hover:text-foreground">
-                  <Checkbox checked={all} onCheckedChange={(v) => setAll(v === true)} />등록 안 된 ID <span className="tnum">{view.unregistered}</span>
-                </label>
-              )}
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색" className="h-7 w-48 pl-8 text-[12.5px]" />
+                <Input disabled={tab === "activity"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색" className="h-7 w-48 pl-8 text-[12.5px]" />
               </div>
             </div>
           </div>
           <div className="min-h-0 flex-1 text-[13px] [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-auto [&_[data-slot=table-container]]:[scrollbar-color:#4a4a50_transparent] [&_[data-slot=table-container]]:[scrollbar-width:thin] [&_td:first-child]:pl-4 [&_th:first-child]:pl-4">
-            {tab === "devices" && <DataTable key="devices" columns={deviceCols} rows={machines} onRow={(m) => setOpen({ kind: "device", id: m.id })} picked={(m) => m.id === picked} />}
-            {tab === "sessions" && <DataTable key="sessions" columns={sessionCols} rows={sessions.slice(0, 300)} onRow={(r) => { if (r.opens) openSession(r.id); else if (r.device) setOpen({ kind: "device", id: r.device }); }} />}
-            {tab === "shadow" && <DataTable key="shadow" columns={shadowCols} rows={shadow} onRow={(a) => { if (a.device) setOpen({ kind: "device", id: a.device }); }} />}
-            {tab === "mcp" && (view.mcp && servers.length > 0 ? (
-              <>
-                <Band mcp={view.mcp} now={view.now} nature={nature} onNature={(n) => setNature(nature === n ? null : n)} />
-                <Board servers={listed} lit={lit} filtered={sifted} now={view.now}
-                  picked={open?.kind === "tool" ? toolKey(open.server, open.tool) : null} pickedServer={open?.kind === "server" ? open.name : null}
-                  onTool={openTool} onServer={openServer} />
-              </>
-            ) : <Empty />)}
+            {tab === "activity" && current && <div className="scroll h-full overflow-y-auto p-4"><DeviceActivity key={current.id} m={current} view={view} onSession={openSession} wide /></div>}
+            {tab === "sessions" && <DataTable key="sessions" columns={sessionCols} rows={sessions.slice(0, 300)} onRow={(r) => { if (r.opens) openSession(r.id); }} />}
+            {tab === "shadow" && <DataTable key="shadow" columns={shadowCols} rows={shadow} onRow={() => current && openDevice(current.id)} />}
+            {tab === "mcp" && (view.mcp ? <DataTable key="mcp" columns={serverCols} rows={shownServers} onRow={(x) => openServer(x.s.name)} picked={(x) => open?.kind === "server" && open.name === x.s.name} /> : <Empty />)}
           </div>
         </Card>
       </div>
 
       <Sheet open={!!(machine || server)} onOpenChange={(o) => { if (!o && !ask) setOpen(null); }}>
         <SheetContent aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()} className="w-[480px] gap-0 data-[side=right]:sm:max-w-[480px]">
-          {machine && <DeviceSheet m={machine} view={view} onSession={openSession} onServer={openServer}
+          {machine && <DeviceSheet m={machine} view={view} onServer={openServer}
             onStop={(stopped) => request({ type: "stop_device", device: machine.id, stopped, actor: d.actor, reason: "인벤토리에서 멈춤" })} />}
           {server && (tool
             ? <ToolSheet server={server} tool={tool} view={view} onServer={openServer} onDevice={openDevice} />
