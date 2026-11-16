@@ -22,7 +22,6 @@ import { ACTION, type Alert, type Blocked, type Call, type Case, type CaseGroup,
 export type Ask = (message:
   | { do: "open" | "case"; session: string; seq: number }
   | { do: "triage"; sessions: string[]; state: string | null }
-  | { do: "copy"; text: string }
   | { do: "source"; source: string; on: boolean; session: string; seq: number }
   | { do: "stop"; email: string; session: string; seq: number }
   | { do: "inventory" }

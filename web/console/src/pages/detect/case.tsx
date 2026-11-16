@@ -5,7 +5,7 @@
 // machine's latest. The team marks it an attack or fine, saves its evidence as a file, or opens
 // it in 기록.
 
-import { ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageCircleQuestion, MessageSquareText, OctagonX, ShieldAlert, SquareTerminal } from "lucide-react";
+import { ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageSquareText, OctagonX, ShieldAlert, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -57,11 +57,6 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
   const others = group.calls.filter((c) => c !== call && c.session === call.session);
   // The other sessions the same cause reached, each with its Calls worth a look.
   const reached = group.sessions.filter((s) => s !== call.session).map((s) => group.calls.filter((c) => c.session === s));
-  // What to send the person to ask whether they meant it; copied, and the case marked as being looked at.
-  const question = () => {
-    ask({ do: "copy", text: [`확인 요청: ${DIM.kind.name(DIM.kind.of(call))}`, `요청: ${call.prompt ?? "-"}`, `실행하려던 것: ${call.target ?? call.tool ?? "-"}`, `단말: ${call.machine} · 세션 ${call.session}`, "직접 요청하신 작업이 맞나요?"].join("\n") });
-    ask({ do: "triage", sessions: [call.session], state: "reviewing" });
-  };
   const user = read?.user ?? call.user ?? null;
   const host = hostOf(call.target);
   // What the agent read is a source the team can distrust from here on.
@@ -85,7 +80,6 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
           <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={mark?.state ?? ""} onValueChange={(v) => ask({ do: "triage", sessions: group.sessions, state: v || null })}>
             {MARKS.map((m) => <ToggleGroupItem key={m} value={m} className={cn("px-2.5 text-[12.5px]", m === "attack" && "data-[state=on]:bg-deny/20 data-[state=on]:text-deny", m === "benign" && "data-[state=on]:bg-allow/20 data-[state=on]:text-allow", m === "reviewing" && "data-[state=on]:bg-review/20 data-[state=on]:text-review")}>{MARK[m].label}</ToggleGroupItem>)}
           </ToggleGroup>
-          <Button variant="outline" size="sm" onClick={question}><MessageCircleQuestion />확인 요청</Button>
           {user && (
             <Button variant="outline" size="sm" className={cn(armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
               onClick={() => { if (armed) { ask({ do: "stop", email: user, session: call.session, seq: call.seq }); setArmed(false); } else setArmed(true); }}>
