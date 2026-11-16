@@ -128,9 +128,7 @@ export default function Page({ data }: { data: unknown | null }) {
         </span>
       ) : <Dash />;
     } },
-    { id: "start", header: "시작", size: 120, accessorFn: (r) => r.created_at ?? 0, cell: ({ row: { original: r } }) => <span className="tnum truncate text-muted-foreground">{clock(r.created_at)}</span> },
     { id: "perm", header: "권한 모드", size: 136, accessorFn: (r) => r.permission_mode ?? "", cell: ({ row }) => <PermBadge mode={row.original.permission_mode} /> },
-    { id: "model", header: "모델", size: 136, accessorFn: (r) => r.model ?? "", cell: ({ row }) => <span className={cn(mono, "truncate text-muted-foreground")}>{row.original.model ?? "–"}</span> },
     { id: "end", header: "끝", size: 168, accessorFn: (r) => r.ended_at ?? 0, cell: ({ row: { original: r } }) => (
       r.ended_at ? <span className="tnum truncate text-muted-foreground">{clock(r.ended_at)} · {END[r.end_reason ?? ""] ?? "끝남"}</span> : <Dash />
     ) },
