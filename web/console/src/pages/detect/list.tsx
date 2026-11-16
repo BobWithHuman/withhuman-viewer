@@ -5,7 +5,7 @@
 
 import { type ColumnDef } from "@tanstack/react-table";
 import { Download, Search, Zap } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -146,7 +146,9 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, al
 }) {
   const [view, setView] = useState<View>("sessions");
   const [query, setQuery] = useState("");
-  const [call, setCall] = useState<Call | null>(null);
+  // The Call open, by its session and number: the page's data is sent again (when the case
+  // arrives, a mark changes), and the Calls in it are new objects each time.
+  const [picked, setPicked] = useState<{ session: string; seq: number } | null>(null);
   // Whether the sessions already marked are listed too.
   const [every, setEvery] = useState(false);
 
@@ -162,8 +164,13 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, al
   const allCases = useMemo(() => cases(newest), [newest]);
   const sessions = useMemo(() => (every ? allCases : allCases.filter((g) => g.sessions.some((s) => isOpen(marks[s])))), [allCases, every, marks]);
   const columns = useMemo(() => caseColumns(marks), [marks]);
-  const group = call ? allCases.find((g) => g.calls.includes(call)) : undefined;
-  const open = (c: Call) => { setCall(c); ask({ do: "case", session: c.session, seq: c.seq }); };
+  const same = (c: Call) => !!picked && c.session === picked.session && c.seq === picked.seq;
+  // The Call open as last seen, kept while a search or a period hides it from the list.
+  const last = useRef<Call | null>(null);
+  const call = picked ? newest.find(same) ?? (last.current && same(last.current) ? last.current : null) : null;
+  last.current = call;
+  const group = call ? allCases.find((g) => g.calls.some(same)) ?? cases([call])[0] : undefined;
+  const open = (c: Call) => { setPicked({ session: c.session, seq: c.seq }); ask({ do: "case", session: c.session, seq: c.seq }); };
   // What is listed now, as a file: the sessions with their Calls, or the Calls alone.
   const exported = () => ask({
     do: "export", name: `withhuman-${view}-${new Date().toISOString().slice(0, 10)}.json`,
@@ -200,14 +207,14 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, al
       </>}
     >
       <div className="min-h-0 flex-1 border-t [&_[data-slot=table-container]]:scroll [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-y-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-        {!loading && view === "calls" && <DataTable columns={CALLS} rows={newest.slice(0, ROWS)} onRow={open} picked={(c) => c === call} dense />}
+        {!loading && view === "calls" && <DataTable columns={CALLS} rows={newest.slice(0, ROWS)} onRow={open} picked={same} dense />}
         {loading && <div className="flex flex-col gap-2 p-4">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-8 rounded-md" />)}</div>}
-        {!loading && view === "sessions" && <DataTable columns={columns} rows={sessions.slice(0, ROWS)} onRow={(g) => open(first(g))} picked={(g) => !!call && g.calls.includes(call)} dense />}
+        {!loading && view === "sessions" && <DataTable columns={columns} rows={sessions.slice(0, ROWS)} onRow={(g) => open(first(g))} picked={(g) => g.calls.some(same)} dense />}
         {!loading && view === "devices" && <DataTable columns={DEVICES} rows={alerts} onRow={() => ask({ do: "inventory" })} dense />}
-        {!loading && view === "approved" && <DataTable columns={APPROVED} rows={approved.slice(0, ROWS)} onRow={open} picked={(c) => c === call} dense />}
+        {!loading && view === "approved" && <DataTable columns={APPROVED} rows={approved.slice(0, ROWS)} onRow={open} picked={same} dense />}
       </div>
 
-      <Sheet open={!!call} onOpenChange={(on) => !on && setCall(null)}>
+      <Sheet open={!!picked} onOpenChange={(on) => !on && setPicked(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[min(1040px,92vw)] data-[side=right]:sm:max-w-[min(1040px,92vw)]" onOpenAutoFocus={(e) => e.preventDefault()}>
           {call && group && <CaseView call={call} group={group} data={caseData} marks={marks} blocked={blocked} ask={ask} onCall={open} />}
         </SheetContent>
