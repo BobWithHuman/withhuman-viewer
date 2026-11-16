@@ -1,142 +1,138 @@
-// The MCP tools that are a threat. A row is a server, the most dangerous first; the columns are
-// what its tools can do, from moving money or accounts to deleting, writing, and what the registry
-// cannot tell, with reading only counted. A tool is a chip edged in the strongest verdict its calls
-// got. Hovering tells its calls and machines; pressing opens it, and a server's name opens the
-// server. A column's head narrows the rows to the servers with such tools, and the machine picked
-// beside narrows them to the tools it called.
+// The MCP tools that are a threat, across every machine, by how often the engine stopped them.
+// On the left every tool called as a dot: across, the share of its calls the engine blocked or held
+// for the user; up, how many calls; its size, how many machines; its colour, what it can do. The
+// dots up and to the right are the tools most used and most stopped. On the right the tools in the
+// order of their risk. A dot and its row light together; either opens the tool; a kind of tool
+// pressed narrows both to it, and the machine picked beside rings the tools it called.
 
 import { Laptop } from "lucide-react";
-import { useState, type ReactNode } from "react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useMemo, useState } from "react";
+import { CartesianGrid, Cell, Scatter, ScatterChart, Tooltip as ChartTip, XAxis, YAxis, ZAxis } from "recharts";
+import { ChartContainer } from "@/components/ui/chart";
 import { Empty, NATURE, NatureIcon, ServiceLogo, num, type Nature } from "@/kit";
 import { cn } from "@/lib/utils";
 import { isOn, type Server, type Tool } from "./mcp/types";
 import type { Machine } from "./model";
 
-/** The columns, the most dangerous first; reading is counted at the end. */
-const RISK: Nature[] = ["money", "send", "delete", "write", "unknown"];
-const rank = (n: Nature) => (RISK.includes(n) ? RISK.indexOf(n) : RISK.length);
-const verdictOf = (t: Tool) => (t.deny > 0 ? "deny" : t.review > 0 ? "review" : t.calls > 0 ? "allow" : "none");
-const EDGE: Record<string, string> = { deny: "var(--deny)", review: "var(--review)", allow: "color-mix(in oklab, var(--foreground) 30%, transparent)", none: "transparent" };
-const callsBy = (t: Tool, m: Machine) => t.users.reduce((a, u) => a + (isOn(u.client, m) ? u.n : 0), 0);
+/** What a tool can do, the most dangerous first. */
+const KINDS: Nature[] = ["money", "send", "delete", "write", "unknown", "read"];
 
-/** How a server ranks: by its most dangerous tool that was called, then its blocked and held calls. */
-function score(s: Server) {
-  const called = s.tools.filter((t) => t.calls > 0);
-  const worst = Math.min(...called.map((t) => rank(t.nature)), RISK.length);
-  const deny = s.tools.reduce((a, t) => a + t.deny, 0), review = s.tools.reduce((a, t) => a + t.review, 0);
-  return { worst, deny, review, risky: called.filter((t) => rank(t.nature) < 3).reduce((a, t) => a + t.calls, 0) };
-}
+/** A tool's risk, 0 to 100: its calls the engine blocked, and half those it held for the user,
+ * over its calls and five more, so a tool called once and stopped once does not top the list. */
+export const riskOf = (t: Pick<Tool, "calls" | "deny" | "review">) => Math.round((100 * (t.deny + t.review / 2)) / (t.calls + 5));
+const LEVEL = (r: number) => (r >= 25 ? { label: "높음", cls: "bg-deny/15 text-deny" } : r >= 10 ? { label: "중간", cls: "bg-review/15 text-review" } : { label: "낮음", cls: "bg-white/8 text-muted-foreground" });
 
-export function ThreatsLegend() {
-  const item = (mark: ReactNode, label: string) => <span className="inline-flex items-center gap-1.5">{mark}{label}</span>;
-  return (
-    <div className="flex items-center gap-3.5 text-[12px] text-muted-foreground">
-      {item(<i className="h-3 w-1 rounded-full bg-deny" />, "차단")}
-      {item(<i className="h-3 w-1 rounded-full bg-review" />, "사용자 확인")}
-      {item(<i className="h-3 w-1 rounded-full bg-foreground/30" />, "허용")}
-      {item(<i className="size-2.5 rounded-sm border border-dashed border-foreground/40" />, "호출 없음")}
-    </div>
-  );
-}
+type Row = { key: string; server: string; t: Tool; risk: number; stopped: number; machines: number; mine: number };
 
-export function Threats({ servers, focus, onServer, onTool }: {
-  servers: Server[]; focus: Machine | null;
-  onServer: (name: string) => void; onTool: (server: string, tool: string) => void;
+export function Threats({ servers, focus, onTool }: {
+  servers: Server[]; focus: Machine | null; onTool: (server: string, tool: string) => void;
 }) {
-  const [only, setOnly] = useState<Nature | null>(null);
+  const [kind, setKind] = useState<Nature | null>(null);
   const [mine, setMine] = useState(false);
-  if (!servers.length) return <Empty>MCP 호출 없음</Empty>;
+  const [hover, setHover] = useState<string | null>(null);
 
-  // Only what some tool can do has a column.
-  const columns = RISK.filter((n) => servers.some((s) => s.tools.some((t) => t.nature === n)));
-  const shown = (t: Tool) => !mine || !focus || callsBy(t, focus) > 0;
-  const rows = servers
-    .map((s) => ({ s, sc: score(s), tools: s.tools.filter(shown) }))
-    .filter((r) => r.tools.length && (!only || r.tools.some((t) => t.nature === only)))
-    .sort((a, b) => a.sc.worst - b.sc.worst || b.sc.deny - a.sc.deny || b.sc.review - a.sc.review || b.sc.risky - a.sc.risky || a.s.name.localeCompare(b.s.name));
-  const count = (n: Nature) => servers.reduce((a, s) => a + s.tools.filter((t) => t.nature === n && shown(t)).length, 0);
-  const grid = { gridTemplateColumns: `minmax(140px,170px) ${columns.map(() => "minmax(0,1fr)").join(" ")} 52px` };
+  const all = useMemo<Row[]>(() => servers.flatMap((s) => s.tools.filter((t) => t.calls > 0).map((t) => ({
+    key: `${s.name}\u0000${t.name}`, server: s.name, t, risk: riskOf(t),
+    stopped: Math.round((100 * (t.deny + t.review)) / t.calls),
+    machines: new Set(t.users.map((u) => u.client)).size,
+    mine: focus ? t.users.reduce((a, u) => a + (isOn(u.client, focus) ? u.n : 0), 0) : 0,
+  }))), [servers, focus]);
+  if (!all.length) return <Empty>MCP 호출 없음</Empty>;
+
+  const rows = all.filter((r) => (!kind || r.t.nature === kind) && (!mine || r.mine > 0));
+  const ranked = [...rows].sort((a, b) => b.risk - a.risk || b.t.deny - a.t.deny || b.t.calls - a.t.calls);
+  const kinds = KINDS.filter((n) => all.some((r) => r.t.nature === n));
+  const dots = rows.map((r) => ({ ...r, x: r.stopped, y: r.t.calls, z: r.machines }));
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="scroll min-h-0 flex-1 overflow-y-auto">
-        <div className="grid text-[12.5px]" style={grid}>
-          {/* What the tools can do, each head narrowing the rows to it. */}
-          <div className="sticky top-0 z-10 flex h-9 min-w-0 items-center gap-2 border-b bg-card pl-1 text-[11.5px] text-muted-foreground">
-            <span className="shrink-0">서버 {rows.length}</span>
-            {focus && (
-              <button aria-pressed={mine} onClick={() => setMine(!mine)} title={focus.name}
-                className={cn("inline-flex h-6 min-w-0 items-center gap-1 rounded-full border px-2 transition-colors", mine ? "border-primary bg-primary/15 text-foreground" : "hover:border-white/25 hover:text-foreground")}>
-                <Laptop className="size-3 shrink-0" strokeWidth={1.9} /><span className="truncate">{focus.name}</span>
-              </button>
-            )}
-          </div>
-          {columns.map((n) => (
-            <button key={n} aria-pressed={only === n} onClick={() => setOnly(only === n ? null : n)}
-              className={cn("sticky top-0 z-10 flex h-9 min-w-0 items-center gap-1.5 border-b border-l bg-card px-2 text-[12px] font-medium transition-colors hover:bg-accent", only === n && "bg-accent", only && only !== n && "opacity-50")}
-              style={{ color: NATURE[n].color }}>
-              <NatureIcon n={n} className="size-3.5 shrink-0" /><span className="truncate">{NATURE[n].label}</span>
-              <span className="tnum ml-auto text-[11px] font-normal text-muted-foreground">{count(n)}</span>
-            </button>
-          ))}
-          <div className="sticky top-0 z-10 flex h-9 items-center justify-center gap-1 border-b border-l bg-card text-[11.5px] text-muted-foreground"><NatureIcon n="read" className="size-3.5" />읽기</div>
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {/* What the tools can do, each narrowing both sides to it; and the machine picked. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 text-[12px]">
+        {kinds.map((n) => (
+          <button key={n} aria-pressed={kind === n} onClick={() => setKind(kind === n ? null : n)}
+            className={cn("inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 transition-colors", kind === n ? "border-primary bg-primary/15 text-foreground" : "text-muted-foreground hover:border-white/25 hover:text-foreground", kind && kind !== n && "opacity-50")}>
+            <i className="size-2 rounded-full" style={{ background: NATURE[n].color }} />{NATURE[n].label}
+            <span className="tnum text-[11px] opacity-70">{all.filter((r) => r.t.nature === n).length}</span>
+          </button>
+        ))}
+        {focus && (
+          <button aria-pressed={mine} onClick={() => setMine(!mine)}
+            className={cn("ml-auto inline-flex h-7 max-w-[200px] items-center gap-1.5 rounded-full border px-2.5 transition-colors", mine ? "border-primary bg-primary/15 text-foreground" : "text-muted-foreground hover:border-white/25 hover:text-foreground")}>
+            <Laptop className="size-3.5 shrink-0" strokeWidth={1.9} /><span className="truncate">{focus.name}</span>
+          </button>
+        )}
+      </div>
 
-          {rows.map(({ s, tools }) => {
-            const machines = new Set(s.installs.map((i) => i.client)).size;
-            const calls = s.tools.reduce((a, t) => a + t.calls, 0);
-            const reads = tools.filter((t) => t.nature === "read");
-            return [
-              <button key={`${s.name}-name`} onClick={() => onServer(s.name)} className="flex min-h-11 items-center gap-2 border-b border-white/5 py-1.5 pr-2 pl-1 text-left transition-colors hover:bg-accent">
-                <ServiceLogo name={s.name} size={20} />
-                <span className="min-w-0">
-                  <span className="block truncate font-mono text-[12.5px] font-medium">{s.name}</span>
-                  <span className="tnum flex items-center gap-1 text-[11px] text-muted-foreground"><Laptop className="size-3" strokeWidth={1.9} />{machines}<span className="opacity-40">·</span>호출 {num(calls)}</span>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
+        {/* Every tool called: the share stopped across, the calls up. */}
+        <div className="relative min-h-0 rounded-lg bg-white/[0.03]">
+          <span className="pointer-events-none absolute top-1.5 right-3 text-[11px] text-deny/80">위험</span>
+          <span className="pointer-events-none absolute top-1.5 left-11 text-[10.5px] text-muted-foreground">호출</span>
+          <span className="pointer-events-none absolute right-3 bottom-7 text-[10.5px] text-muted-foreground">막은 비율</span>
+          <ChartContainer config={{}} className="aspect-auto h-full w-full">
+            <ScatterChart margin={{ top: 22, right: 16, bottom: 4, left: 0 }}>
+              <CartesianGrid stroke="rgb(255 255 255 / 0.06)" />
+              <XAxis type="number" dataKey="x" domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} unit="%" tickLine={false} axisLine={false} tick={{ fontSize: 10.5 }} height={22} />
+              <YAxis type="number" dataKey="y" scale="log" domain={[1, (max: number) => Math.max(10, max * 1.6)]} allowDataOverflow tickLine={false} axisLine={false} tick={{ fontSize: 10.5 }} width={38}
+                tickFormatter={(v: number) => num(v)} />
+              <ZAxis type="number" dataKey="z" range={[36, 320]} />
+              <ChartTip cursor={false} content={({ payload }) => {
+                const r = payload?.[0]?.payload as (Row & { x: number }) | undefined;
+                return r ? <Detail r={r} focus={focus} /> : null;
+              }} />
+              <Scatter data={dots} isAnimationActive={false} className="cursor-pointer"
+                onClick={(d) => { const r = d as unknown as Row; onTool(r.server, r.t.name); }}
+                onMouseEnter={(d) => setHover((d as unknown as Row).key)} onMouseLeave={() => setHover(null)}>
+                {dots.map((d) => (
+                  <Cell key={d.key} fill={NATURE[d.t.nature].color} fillOpacity={hover && hover !== d.key ? 0.25 : 0.8}
+                    stroke={d.mine > 0 ? "var(--primary)" : hover === d.key ? "var(--foreground)" : "none"} strokeWidth={2} />
+                ))}
+              </Scatter>
+            </ScatterChart>
+          </ChartContainer>
+        </div>
+
+        {/* The tools in the order of their risk. */}
+        <div className="scroll -mr-1 min-h-0 overflow-y-auto pr-1">
+          {!ranked.length && <Empty />}
+          {ranked.map((r, i) => {
+            const level = LEVEL(r.risk);
+            return (
+              <button key={r.key} onClick={() => onTool(r.server, r.t.name)} onMouseEnter={() => setHover(r.key)} onMouseLeave={() => setHover(null)}
+                className={cn("flex h-10 w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-accent", hover === r.key && "bg-accent", r.mine > 0 && "ring-1 ring-primary ring-inset")}>
+                <span className="tnum w-5 shrink-0 text-right text-[11px] text-muted-foreground">{i + 1}</span>
+                <ServiceLogo name={r.server} size={18} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <NatureIcon n={r.t.nature} className="size-3 shrink-0" />
+                    <span className="truncate font-mono text-[12px]">{r.t.name}</span>
+                  </span>
+                  {/* The calls blocked, held and let through, as one bar. */}
+                  <span className="mt-1 flex h-1.5 overflow-hidden rounded-full bg-white/8">
+                    <i className="h-full bg-deny" style={{ width: `${(100 * r.t.deny) / r.t.calls}%` }} />
+                    <i className="h-full bg-review" style={{ width: `${(100 * r.t.review) / r.t.calls}%` }} />
+                  </span>
                 </span>
-              </button>,
-              ...columns.map((n) => (
-                <div key={`${s.name}-${n}`} className={cn("flex min-h-11 flex-wrap content-center gap-1 border-b border-l border-white/5 p-1.5", only && only !== n && "opacity-40")}>
-                  {tools.filter((t) => t.nature === n).sort((a, b) => b.calls - a.calls).map((t) => (
-                    <Chip key={t.name} t={t} focus={focus} onClick={() => onTool(s.name, t.name)} />
-                  ))}
-                </div>
-              )),
-              <div key={`${s.name}-read`} className="tnum flex min-h-11 items-center justify-center border-b border-l border-white/5 text-[12px] text-muted-foreground">
-                {reads.length ? reads.length : <i className="size-1 rounded-full bg-foreground/12" />}
-              </div>,
-            ];
+                <span className="tnum w-10 shrink-0 text-right text-[11.5px] text-muted-foreground">{num(r.t.calls)}</span>
+                <span className={cn("tnum inline-flex w-[58px] shrink-0 items-center justify-center gap-1 rounded px-1 text-[11px] leading-5 font-semibold", level.cls)}>{level.label} {r.risk}</span>
+              </button>
+            );
           })}
         </div>
-        {!rows.length && <Empty />}
       </div>
     </div>
   );
 }
 
-/** A tool: its name and calls, edged in the strongest verdict its calls got. */
-function Chip({ t, focus, onClick }: { t: Tool; focus: Machine | null; onClick: () => void }) {
-  const v = verdictOf(t), mine = focus ? callsBy(t, focus) : 0;
-  const machines = new Set(t.users.map((u) => u.client)).size;
+/** A tool as a dot tells it: what it can do, its calls and how many the engine stopped. */
+function Detail({ r, focus }: { r: Row; focus: Machine | null }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button onClick={onClick}
-          className={cn("relative inline-flex h-6 max-w-full items-center gap-1.5 overflow-hidden rounded-md border pr-1.5 pl-2.5 transition-colors hover:border-white/30",
-            v === "none" ? "border-dashed border-white/15 text-muted-foreground" : "border-transparent bg-secondary",
-            mine > 0 && "ring-1 ring-primary")}>
-          <i className="absolute inset-y-0 left-0 w-1" style={{ background: EDGE[v] }} />
-          <span className="truncate font-mono text-[11.5px]">{t.name}</span>
-          {t.calls > 0 && <span className="tnum shrink-0 text-[11px] text-muted-foreground">{num(t.calls)}</span>}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-[300px]">
-        <div className="flex flex-col gap-1 py-0.5">
-          <span className="font-mono font-medium">{t.name}</span>
-          {t.description && <span className="opacity-80">{t.description}</span>}
-          <span className="tnum">{NATURE[t.nature].label} · 호출 {num(t.calls)}{t.review ? ` · 확인 ${t.review}` : ""}{t.deny ? ` · 차단 ${t.deny}` : ""} · 기기 {machines}</span>
-          {focus && mine > 0 && <span className="tnum">{focus.name} · {num(mine)}</span>}
-        </div>
-      </TooltipContent>
-    </Tooltip>
+    <div className="grid min-w-[200px] gap-1 rounded-lg border bg-popover px-3 py-2 text-[12px] shadow-xl">
+      <span className="flex items-center gap-1.5 font-medium"><ServiceLogo name={r.server} size={14} /><span className="font-mono">{r.t.name}</span></span>
+      <span className="flex items-center gap-1.5 text-muted-foreground"><NatureIcon n={r.t.nature} className="size-3" />{NATURE[r.t.nature].label} · 기기 {r.machines}</span>
+      <span className="tnum">호출 {num(r.t.calls)} · 막은 비율 {r.stopped}%</span>
+      <span className="tnum text-muted-foreground">차단 {r.t.deny} · 사용자 확인 {r.t.review} · 위험도 {r.risk}</span>
+      {focus && r.mine > 0 && <span className="tnum">{focus.name} · {num(r.mine)}</span>}
+    </div>
   );
 }
