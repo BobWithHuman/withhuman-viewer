@@ -44,7 +44,7 @@ export type Reply = {
   req: number; ok: boolean; error?: string; done?: "issued" | "revoked" | "stopped" | "admin" | "owner" | "device_stopped" | "device_released";
   email?: string; key_id?: string; key?: string; count?: number;
 };
-export type Tab = "devices" | "people" | "sessions" | "shadow" | "mcp";
+export type Tab = "devices" | "sessions" | "shadow" | "mcp";
 export type Data = {
   status: "ready" | "loading" | "failed" | "none"; error: string | null; now: number;
   source: { label: string; demo: boolean }; admin: { api: string; has_token: boolean };

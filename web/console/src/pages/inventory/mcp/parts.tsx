@@ -1,29 +1,19 @@
-// Small parts the MCP board, its band and its sheets share: people as a stack of faces, the
+// Small parts the MCP board, its band and its sheets share: how many machines called a tool, the
 // calls of a tool that were held or blocked, and the last 30 days as a chart or a sparkline.
 
 import { Bar, BarChart, XAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Person, num, shortUser } from "@/kit";
+import { Laptop } from "lucide-react";
+import { num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { DAY } from "../model";
 import type { Tool } from "./types";
 
-/** People as overlapping faces, the busiest first, and how many more there are unless `bare`; the ring takes the colour of what they sit on. */
-export function Faces({ users, max = 3, size = 18, ring = "ring-card", bare }: { users: string[]; max?: number; size?: number; ring?: string; bare?: boolean }) {
-  const names = [...new Set(users)];
-  if (!names.length) return null;
-  return (
-    <span className="flex shrink-0 items-center">
-      {names.slice(0, max).map((n) => <span key={n} className={cn("-ml-1 rounded-full ring-[1.5px] first:ml-0", ring)}><Person name={n} size={size} /></span>)}
-      {!bare && names.length > max && (
-        <Tooltip>
-          <TooltipTrigger asChild><span className="tnum ml-1 text-[11px] text-muted-foreground">+{names.length - max}</span></TooltipTrigger>
-          <TooltipContent>{names.slice(max).map(shortUser).join(", ")}</TooltipContent>
-        </Tooltip>
-      )}
-    </span>
-  );
+/** How many machines called a tool, as a laptop and a number. */
+export function Reach({ clients, className }: { clients: string[]; className?: string }) {
+  const n = new Set(clients).size;
+  if (!n) return null;
+  return <span className={cn("tnum inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted-foreground", className)}><Laptop className="size-3" strokeWidth={1.9} />{n}</span>;
 }
 
 /** How many of a tool's calls the engine held, and how many it blocked, in their colours. */

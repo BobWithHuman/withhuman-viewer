@@ -1,13 +1,12 @@
-// 인벤토리: the machines, people and sessions the engine protects. The page opens on the picture
-// of who has what (each person's machines by the agents and MCP servers on them), and beside it
-// what the person picked holds, slot by slot. Under it the machines, people,
-// sessions and shadow AI as lists, and the MCP servers set up on the machines as a board of
-// their tools by what the engine did with the calls; a machine, a person, a server or a tool
-// opens in a sheet, where keys are issued and revoked and a person is stopped. The app does
-// those (`src/admin/inventory.rs`) and answers in `data.reply`.
+// 인벤토리: the machines and sessions the engine protects, by machine alone. The page opens on the
+// picture of which machine has what (the agents and MCP servers on each), and beside it what the
+// machine picked holds, slot by slot. Under it the machines, sessions and shadow AI as lists, and
+// the MCP servers set up on the machines as a board of their tools by what the engine did with
+// the calls; a machine, a server or a tool opens in a sheet, where a machine is stopped. The app
+// does that (`src/admin/inventory.rs`) and answers in `data.reply`.
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowUpRight, Check, KeyRound, Laptop, PackageOpen, PlugZap, Search, ShieldOff, TriangleAlert, X } from "lucide-react";
+import { ArrowUpRight, Check, Laptop, PackageOpen, PlugZap, Search, ShieldOff, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { send } from "@/bridge";
-import { DataTable, Empty, NATURE, NatureIcon, PageHeader, Panel, Person, Warn, ago, clock, shortUser, type Nature } from "@/kit";
+import { DataTable, Empty, NATURE, NatureIcon, PageHeader, Panel, ago, clock, type Nature } from "@/kit";
 import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
 import { Asks, type Ask } from "./inventory/dialogs";
@@ -29,18 +28,19 @@ import { Band } from "./inventory/mcp/band";
 import { Board } from "./inventory/mcp/board";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { NATURES, toolKey, type Server, type Tool } from "./inventory/mcp/types";
-import { END, PERM, SOURCE, derive, type Data, type Machine, type PersonRow, type Run, type Shadow, type Tab } from "./inventory/model";
-import { Bag } from "./inventory/bag";
-import { DeviceSheet, PersonSheet } from "./inventory/sheets";
+import { END, PERM, SOURCE, derive, type Data, type Machine, type Run, type Shadow, type Tab } from "./inventory/model";
+import { Bag, machineOrder } from "./inventory/bag";
+import { DeviceSheet } from "./inventory/sheets";
 
-const TABS: [Tab, string][] = [["devices", "기기"], ["people", "사용자"], ["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
+const TABS: [Tab, string][] = [["devices", "기기"], ["sessions", "세션"], ["shadow", "섀도 AI"], ["mcp", "MCP"]];
+/** A tab the app named, when this page has it. */
+const known = (t?: string | null) => TABS.find(([k]) => k === t)?.[0];
 /** The way agents are let run that the lists are narrowed to. */
 type Filter = { kind: "perm"; value: string };
-type Open = { kind: "device"; id: string } | { kind: "person"; email: string } | { kind: "server"; name: string } | { kind: "tool"; server: string; tool: string };
+type Open = { kind: "device"; id: string } | { kind: "server"; name: string } | { kind: "tool"; server: string; tool: string };
 
 const mono = "font-mono text-[12px]";
 const when = (ms: number | null, now: number) => (ms ? <span className="tnum text-muted-foreground">{ago(ms, now)}</span> : <Dash />);
-const who = (email: string | null) => (email ? <Person name={email} size={20} label /> : <Dash />);
 
 export default function Page({ data }: { data: unknown | null }) {
   // Opened on its own, the page shows the demo and answers its own requests.
@@ -49,13 +49,13 @@ export default function Page({ data }: { data: unknown | null }) {
   const d = (data as Data | null) ?? local;
 
   const [windowMin, setWindowMin] = useState(10);
-  const [tab, setTab] = useState<Tab>(d.tab ?? "devices");
+  const [tab, setTab] = useState<Tab>(known(d.tab) ?? "devices");
   const [nature, setNature] = useState<Nature | null>(null);
   const [all, setAll] = useState(false);
   const [filter, setFilter] = useState<Filter | null>(null);
-  // The person whose holdings are shown beside the picture: the first in it until one is picked
-  // from the panel's own list.
-  const [holder, setHolder] = useState<string | null>(null);
+  // The machine whose holdings are shown beside the picture: the first in it until one is picked
+  // from the panel's own list, which then narrows the lists to it.
+  const [scope, setScope] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Open | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -81,16 +81,15 @@ export default function Page({ data }: { data: unknown | null }) {
     setPending(null);
     if (!standalone) send("inventory", { type: "ack" });
     if (!r.ok) setError(r.error ?? "실패");
-    else if (r.done === "issued") setAsk({ kind: "issued", email: r.email ?? "", key_id: r.key_id ?? "", key: r.key ?? "" });
     else {
       setAsk(null);
-      setToast(r.done === "revoked" ? `키 회수됨 · ${shortUser(r.email ?? "")} · ${r.key_id}`
-        : r.done === "stopped" ? `멈춤 · ${shortUser(r.email ?? "")} · 키 ${r.count ?? 0}개 회수` : r.done === "owner" ? "담당자 저장됨" : r.done === "device_stopped" ? "기기 멈춤" : r.done === "device_released" ? "기기 멈춤 풀림" : "관리 API 저장됨");
+      setToast(r.done === "device_stopped" ? "기기 멈춤" : r.done === "device_released" ? "기기 멈춤 풀림" : "관리 API 저장됨");
     }
   }, [d.reply, pending, standalone]);
   // The app names the tab to open on; it changes the tab again only when it names another.
   useEffect(() => {
-    if (d.tab) setTab(d.tab);
+    const t = known(d.tab);
+    if (t) setTab(t);
   }, [d.tab]);
   // The board is as tall as its servers, so its tab comes up to the top of the page.
   useEffect(() => {
@@ -106,22 +105,21 @@ export default function Page({ data }: { data: unknown | null }) {
   const closeAsk = () => { setAsk(null); setError(null); setPending(null); };
 
   const has = (...parts: (string | null | undefined)[]) => !q.trim() || parts.some((p) => p?.toLowerCase().includes(q.trim().toLowerCase()));
-  // The lists show only the person picked in the panel's own list, until that is let go.
-  const mine = holder ? new Set(view.machines.filter((m) => m.user === holder).map((m) => m.id)) : null;
-  const ofHolder = (user: string | null, device?: string | null) => !holder || user === holder || (!!device && mine!.has(device));
+  // The lists show only the machine picked in the panel's own list, until that is let go.
+  const ofScope = (device?: string | null) => !scope || device === scope;
   const everyone = view.machines.filter((m) => all || m.state !== "unregistered" || m.running);
-  const base = everyone.filter((m) => ofHolder(m.user));
+  const base = everyone.filter((m) => ofScope(m.id));
   const machines = base.filter((m) =>
     (!filter || m.permission_mode === filter.value)
-    && has(m.name, m.id, m.user, m.team, m.agent));
-  const people = view.people.filter((p) => (!holder || p.email === holder) && has(p.email));
+    && has(m.name, m.id, m.serial, m.agent));
   const sessions = view.sessions.filter((r) =>
-    ofHolder(r.user, r.device) && (!filter || r.permission_mode === filter.value)
-    && has(r.host, r.device, r.user, r.title, r.folder, r.id, r.model));
-  const shadow = view.shadow.filter((a) => ofHolder(a.user, a.device) && has(a.host, a.device, a.user, a.project, a.agent));
+    ofScope(r.device) && (!filter || r.permission_mode === filter.value)
+    && has(r.host, r.device, r.title, r.folder, r.id, r.model));
+  const shadow = view.shadow.filter((a) => ofScope(a.device) && has(a.host, a.device, a.project, a.agent));
   const servers = view.mcp?.servers ?? [];
-  // The servers the lists show: those on the picked person's machines.
-  const listed = mine ? servers.filter((sv) => view.machines.some((m) => mine.has(m.id) && view.serversOn(m).includes(sv))) : servers;
+  // The servers the lists show: those on the picked machine.
+  const scoped = scope ? view.machines.find((m) => m.id === scope) : undefined;
+  const listed = scoped ? view.serversOn(scoped) : servers;
   const lit = (s: Server, t: Tool) => (!nature || t.nature === nature) && has(s.name, t.name);
   const sifted = nature !== null || q.trim() !== "";
 
@@ -133,8 +131,6 @@ export default function Page({ data }: { data: unknown | null }) {
         {m.shadow > 0 && <Badge variant="secondary" className="shrink-0 gap-1 border-0 bg-deny/15 font-semibold text-deny"><ShieldOff />섀도 {m.shadow}</Badge>}
       </span>
     ) },
-    { id: "user", header: "사용자", size: 160, accessorFn: (m) => m.user ?? "", cell: ({ row }) => who(row.original.user) },
-    { id: "team", header: "팀", size: 96, accessorFn: (m) => m.team ?? "", cell: ({ row }) => (row.original.team ? <span className="truncate text-muted-foreground">{row.original.team}</span> : <Dash />) },
     { id: "agent", header: "에이전트", size: 144, accessorFn: (m) => m.agent ?? "", cell: ({ row }) => <AgentMark agent={row.original.agent} label /> },
     { id: "perm", header: "권한 모드", size: 136, accessorFn: (m) => m.permission_mode ?? "", cell: ({ row }) => <PermBadge mode={row.original.permission_mode} /> },
     { id: "engine", header: "엔진 모드", size: 112, accessorFn: (m) => m.engine_mode ?? "", cell: ({ row }) => <EngineBadge mode={row.original.engine_mode} /> },
@@ -144,28 +140,6 @@ export default function Page({ data }: { data: unknown | null }) {
     { id: "last", header: "마지막 신호", size: 108, accessorFn: (m) => m.last ?? 0, cell: ({ row }) => when(row.original.last, view.now) },
   ], [view.now]);
 
-  const peopleCols = useMemo<ColumnDef<PersonRow>[]>(() => [
-    { id: "email", header: "사용자", accessorFn: (p) => p.email, cell: ({ row: { original: p } }) => (
-      <span className="flex min-w-0 items-center gap-2">
-        <Person name={p.email} size={20} />
-        <span className="truncate font-medium">{p.email}</span>
-        {p.kind === "service" && <Chip>서비스</Chip>}
-        {p.devices.length > 3 && <Warn>기기 많음</Warn>}
-      </span>
-    ) },
-    { id: "devices", header: "기기", size: 88, accessorFn: (p) => p.devices.length, cell: ({ row }) => <span className="tnum">{row.original.devices.length}</span> },
-    { id: "sessions", header: "세션", size: 88, accessorFn: (p) => p.sessions, cell: ({ row }) => <span className="tnum">{row.original.sessions}</span> },
-    { id: "keys", header: "키", size: 184, accessorFn: (p) => (p.stopped ? -1 : p.active_keys), cell: ({ row: { original: p } }) => (
-      <span className="flex items-center gap-1.5">
-        {p.stopped ? <Badge variant="secondary" className="border-0 bg-deny/15 font-semibold text-deny">멈춤</Badge>
-          : <Badge variant="secondary" className="border-0 bg-allow/15 font-medium text-allow">활성 {p.active_keys}</Badge>}
-        {p.revoked_keys > 0 && <span className="tnum text-[12px] text-muted-foreground">회수 {p.revoked_keys}</span>}
-      </span>
-    ) },
-    { id: "last", header: "마지막 사용", size: 120, accessorFn: (p) => p.last_used ?? 0, cell: ({ row }) => when(row.original.last_used, view.now) },
-    { id: "denied", header: "거부", size: 88, accessorFn: (p) => p.denied, cell: ({ row }) => <span className={cn("tnum", row.original.denied > 0 ? "font-medium text-deny" : "text-muted-foreground")}>{row.original.denied}</span> },
-  ], [view.now]);
-
   const sessionCols = useMemo<ColumnDef<Run>[]>(() => [
     { id: "state", header: "상태", size: 96, accessorFn: (r) => Number(view.going(r)), cell: ({ row }) => (
       view.going(row.original) ? <StateBadge state="running" /> : <span className="text-muted-foreground">{row.original.ended_at ? "끝남" : "신호 끊김"}</span>
@@ -173,7 +147,6 @@ export default function Page({ data }: { data: unknown | null }) {
     { id: "device", header: "기기", size: 152, accessorFn: (r) => r.host ?? r.device ?? "", cell: ({ row: { original: r } }) => (
       r.device ? <span className="truncate" title={r.device}>{r.host ?? r.device}</span> : <Badge variant="secondary" className="border-0 bg-catch/15 font-semibold text-catch">ID 없음</Badge>
     ) },
-    { id: "user", header: "사용자", size: 128, accessorFn: (r) => r.user ?? "", cell: ({ row }) => who(row.original.user) },
     { id: "what", header: "작업", accessorFn: (r) => r.title ?? r.id, cell: ({ row: { original: r } }) => (
       <span className="flex min-w-0 items-center gap-1.5" title={r.title ?? r.id}>
         {r.folder && <span className="shrink-0 text-muted-foreground">{r.folder}</span>}
@@ -194,7 +167,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const shadowCols = useMemo<ColumnDef<Shadow>[]>(() => [
     { id: "agent", header: "에이전트", size: 152, accessorFn: (a) => a.agent, cell: ({ row }) => <AgentMark agent={row.original.agent} label /> },
     { id: "device", header: "기기", size: 184, accessorFn: (a) => a.host ?? a.device ?? "", cell: ({ row: { original: a } }) => <span className="truncate font-medium" title={a.device ?? ""}>{a.host ?? a.device ?? "–"}</span> },
-    { id: "user", header: "사용자", size: 168, accessorFn: (a) => a.user ?? "", cell: ({ row }) => who(row.original.user) },
     { id: "project", header: "프로젝트", accessorFn: (a) => a.project ?? "", cell: ({ row }) => <code className={cn(mono, "truncate")} title={row.original.project ?? ""}>{row.original.project ?? "–"}</code> },
     { id: "last", header: "마지막으로 보임", size: 128, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
   ], [view.now]);
@@ -216,8 +188,7 @@ export default function Page({ data }: { data: unknown | null }) {
     </PageHeader>
   );
   const dialogs = ask && (
-    <Asks key={ask.kind + ("email" in ask ? ask.email : "")} ask={ask} actor={d.actor} admin={d.admin} demo={d.source.demo}
-      busy={pending !== null} error={error} onSend={request} onCopy={(text) => send("inventory", { type: "copy", text })} onClose={closeAsk} />
+    <Asks admin={d.admin} demo={d.source.demo} busy={pending !== null} error={error} onSend={request} onClose={closeAsk} />
   );
 
   if (d.status !== "ready") {
@@ -238,7 +209,7 @@ export default function Page({ data }: { data: unknown | null }) {
               <span className="text-[15px] font-semibold">{d.status === "failed" ? "불러오기 실패" : "인벤토리 없음"}</span>
               {d.status === "failed"
                 ? <code className="font-mono text-[12px] break-all text-muted-foreground">{d.error}</code>
-                : <div className="flex flex-wrap justify-center gap-1.5"><Chip>기기 등록</Chip><Chip>사용자 키</Chip><Chip>PostgreSQL 엔진</Chip></div>}
+                : <div className="flex flex-wrap justify-center gap-1.5"><Chip>기기 등록</Chip><Chip>훅 설치</Chip><Chip>PostgreSQL 엔진</Chip></div>}
             </div>
           </div>
         )}
@@ -249,37 +220,33 @@ export default function Page({ data }: { data: unknown | null }) {
 
   const picked = open?.kind === "device" ? open.id : null;
   const machine = open?.kind === "device" ? view.machines.find((m) => m.id === open.id) : undefined;
-  const person = open?.kind === "person" ? view.people.find((p) => p.email === open.email) : undefined;
   const server = open?.kind === "server" || open?.kind === "tool" ? servers.find((s) => s.name === (open.kind === "server" ? open.name : open.server)) : undefined;
   const tool = open?.kind === "tool" ? server?.tools.find((t) => t.name === open.tool) : undefined;
   const openServer = (name: string) => setOpen({ kind: "server", name });
   const openTool = (s: string, t: string) => setOpen({ kind: "tool", server: s, tool: t });
   const openDevice = (id: string) => setOpen({ kind: "device", id });
   const chip = filter && PERM[filter.value].label;
-  const owner = holder ?? everyone.find((m) => m.user)?.user ?? null;
-  const scoped = <T,>(list: T[], of: (t: T) => boolean) => (holder ? list.filter(of).length : list.length);
+  const shown = scope ?? machineOrder(view)[0]?.id ?? null;
   const counts: Record<Tab, number> = {
-    devices: base.length, people: scoped(view.people, (p) => p.email === holder),
-    sessions: scoped(view.sessions, (r) => ofHolder(r.user, r.device)), shadow: scoped(view.shadow, (a) => ofHolder(a.user, a.device)), mcp: listed.length,
+    devices: base.length,
+    sessions: view.sessions.filter((r) => ofScope(r.device)).length, shadow: view.shadow.filter((a) => ofScope(a.device)).length, mcp: listed.length,
   };
-  const shownCount = { devices: machines.length, people: people.length, sessions: sessions.length, shadow: shadow.length, mcp: listed.filter((s) => s.tools.some((t) => lit(s, t))).length }[tab];
+  const shownCount = { devices: machines.length, sessions: sessions.length, shadow: shadow.length, mcp: listed.filter((s) => s.tools.some((t) => lit(s, t))).length }[tab];
 
   return (
     <div className="flex h-full flex-col">
       {header}
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-6">
         <div className="grid shrink-0 grid-cols-12 gap-4">
-          <Panel className="col-span-8 min-w-0" title="사용자 · 기기별 에이전트와 MCP" aside={<FleetLegend />}>
+          <Panel className="col-span-8 min-w-0" title="기기별 에이전트와 MCP" aside={<FleetLegend />}>
             <div className="h-[360px]">
               <Fleet view={view} machines={everyone} servers={servers} picked={picked} onDevice={openDevice} onServer={openServer} />
             </div>
           </Panel>
           <Panel className="col-span-4 min-w-0" title="인벤토리">
             <div className="h-[360px]">
-              <Bag view={view} who={owner} onWho={setHolder}
-                onIssue={(email) => setAsk({ kind: "issue", email })} onStop={(email, keys) => setAsk({ kind: "stop", email, keys })}
-                onDevice={openDevice} onServer={openServer} onPerson={(email) => setOpen({ kind: "person", email })}
-                onSessions={(email, mode) => { setQ(shortUser(email)); setFilter(mode ? { kind: "perm", value: mode } : null); setTab("sessions"); }} />
+              <Bag view={view} id={shown} onPick={setScope} onDevice={openDevice} onServer={openServer}
+                onSessions={(id, mode) => { setScope(id); setFilter(mode ? { kind: "perm", value: mode } : null); setTab("sessions"); }} />
             </div>
           </Panel>
         </div>
@@ -295,10 +262,10 @@ export default function Page({ data }: { data: unknown | null }) {
                 ))}
               </TabsList>
             </Tabs>
-            {holder && (
+            {scoped && (
               <Badge variant="secondary" className="h-6 gap-1.5 border-0 bg-primary/15 pr-1 font-medium text-primary">
-                <Person name={holder} size={16} />{shortUser(holder)}
-                <button aria-label="사용자 지우기" onClick={() => setHolder(null)} className="grid size-4 place-items-center rounded-full hover:bg-primary/20"><X className="size-3" /></button>
+                <Laptop className="size-3.5" strokeWidth={1.9} />{scoped.name}
+                <button aria-label="기기 지우기" onClick={() => setScope(null)} className="grid size-4 place-items-center rounded-full hover:bg-primary/20"><X className="size-3" /></button>
               </Badge>
             )}
             {chip && (
@@ -326,7 +293,6 @@ export default function Page({ data }: { data: unknown | null }) {
                   <Checkbox checked={all} onCheckedChange={(v) => setAll(v === true)} />등록 안 된 ID <span className="tnum">{view.unregistered}</span>
                 </label>
               )}
-              {tab === "people" && <Button size="sm" variant="secondary" onClick={() => setAsk({ kind: "issue", email: "" })}><KeyRound />키 발급</Button>}
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색" className="h-7 w-48 pl-8 text-[12.5px]" />
@@ -335,7 +301,6 @@ export default function Page({ data }: { data: unknown | null }) {
           </div>
           <div className="min-h-0 flex-1 text-[13px] [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-auto [&_[data-slot=table-container]]:[scrollbar-color:#4a4a50_transparent] [&_[data-slot=table-container]]:[scrollbar-width:thin] [&_td:first-child]:pl-4 [&_th:first-child]:pl-4">
             {tab === "devices" && <DataTable key="devices" columns={deviceCols} rows={machines} onRow={(m) => setOpen({ kind: "device", id: m.id })} picked={(m) => m.id === picked} />}
-            {tab === "people" && <DataTable key="people" columns={peopleCols} rows={people} onRow={(p) => setOpen({ kind: "person", email: p.email })} picked={(p) => open?.kind === "person" && p.email === open.email} />}
             {tab === "sessions" && <DataTable key="sessions" columns={sessionCols} rows={sessions.slice(0, 300)} onRow={(r) => { if (r.opens) openSession(r.id); else if (r.device) setOpen({ kind: "device", id: r.device }); }} />}
             {tab === "shadow" && <DataTable key="shadow" columns={shadowCols} rows={shadow} onRow={(a) => { if (a.device) setOpen({ kind: "device", id: a.device }); }} />}
             {tab === "mcp" && (view.mcp && servers.length > 0 ? (
@@ -350,12 +315,10 @@ export default function Page({ data }: { data: unknown | null }) {
         </Card>
       </div>
 
-      <Sheet open={!!(machine || person || server)} onOpenChange={(o) => { if (!o && !ask) setOpen(null); }}>
+      <Sheet open={!!(machine || server)} onOpenChange={(o) => { if (!o && !ask) setOpen(null); }}>
         <SheetContent aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()} className="w-[480px] gap-0 data-[side=right]:sm:max-w-[480px]">
-          {machine && <DeviceSheet m={machine} view={view} onPerson={(email) => setOpen({ kind: "person", email })} onSession={openSession} onServer={openServer} onAsk={setAsk}
-            onOwner={(email) => request({ type: "owner", device: machine.id, email: email ?? "", actor: d.actor })}
+          {machine && <DeviceSheet m={machine} view={view} onSession={openSession} onServer={openServer}
             onStop={(stopped) => request({ type: "stop_device", device: machine.id, stopped, actor: d.actor, reason: "인벤토리에서 멈춤" })} />}
-          {person && <PersonSheet p={person} view={view} onDevice={openDevice} onAsk={setAsk} />}
           {server && (tool
             ? <ToolSheet server={server} tool={tool} view={view} onServer={openServer} onDevice={openDevice} />
             : <ServerSheet server={server} view={view} onTool={openTool} onDevice={openDevice} />)}

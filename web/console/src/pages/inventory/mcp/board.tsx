@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Empty, NATURE, NatureIcon, ServiceLogo, ago, num } from "@/kit";
 import { cn } from "@/lib/utils";
-import { Faces, Held, Spark } from "./parts";
+import { Held, Reach, Spark } from "./parts";
 import { COLUMN, COLUMNS, DAYS, VERDICTS, column, machinesOf, toolKey, type Server, type Tool } from "./types";
 
 export function Board({ servers, lit, filtered, now, picked, pickedServer, onTool, onServer }: {
@@ -79,9 +79,8 @@ export function Board({ servers, lit, filtered, now, picked, pickedServer, onToo
                           <NatureIcon n={t.nature} className="relative size-3.5" />
                           <span className={cn("relative min-w-0 flex-1 truncate font-mono text-[12px]", none && "text-muted-foreground")}>{t.name}</span>
                           <Held t={t} className="relative" />
-                          {/* A narrow chip shows one face so the tool's name keeps its room. */}
-                          <span className="relative hidden @[232px]:block"><Faces users={t.users.map((u) => u.user)} ring="ring-secondary" /></span>
-                          <span className="relative hidden @[176px]:block @[232px]:hidden"><Faces users={t.users.map((u) => u.user)} max={1} ring="ring-secondary" bare /></span>
+                          {/* A narrow chip drops the machines so the tool's name keeps its room. */}
+                          <Reach clients={t.users.map((u) => u.client)} className="relative hidden @[176px]:inline-flex" />
                           {!none && <span className="tnum relative min-w-5 shrink-0 text-right text-[12px] font-medium">{num(t.calls)}</span>}
                         </button>
                       </TooltipTrigger>

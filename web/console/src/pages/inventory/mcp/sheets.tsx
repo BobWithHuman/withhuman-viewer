@@ -5,7 +5,7 @@
 import { Laptop } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Legend, NATURE, NatureIcon, Person, ServiceLogo, SplitBar, VerdictBadge, ago, clock, num, shortUser } from "@/kit";
+import { Legend, NATURE, NatureIcon, ServiceLogo, SplitBar, VerdictBadge, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { Chip } from "../marks";
 import type { View } from "../model";
@@ -31,6 +31,9 @@ export function ToolSheet({ server, tool: t, view, onServer, onDevice }: {
   server: Server; tool: Tool; view: View; onServer: (name: string) => void; onDevice: (id: string) => void;
 }) {
   const machine = (client: string) => view.machines.find((m) => isOn(client, m));
+  // The calls by the machine they came from, the busiest first.
+  const byClient = [...t.users.reduce((acc, u) => acc.set(u.client, (acc.get(u.client) ?? 0) + u.n), new Map<string, number>())]
+    .map(([client, n]) => ({ client, n })).sort((a, b) => b.n - a.n);
   const c = column(t);
   return (
     <>
@@ -62,17 +65,16 @@ export function ToolSheet({ server, tool: t, view, onServer, onDevice }: {
             series={[{ key: "calls", label: "호출", color: c === "none" ? "var(--info)" : NATURE[t.nature].color }]} />
         </Section>
 
-        <Section title="호출한 사람" count={t.users.length}>
-          {!t.users.length && NONE}
+        <Section title="호출한 기기" count={byClient.length}>
+          {!byClient.length && NONE}
           <div className="flex flex-col">
-            {t.users.map((u) => {
+            {byClient.map((u) => {
               const m = machine(u.client);
               return (
-                <Line key={`${u.user} ${u.client}`} onClick={m && (() => onDevice(m.id))}>
-                  <Person name={u.user} size={20} />
-                  <span className="w-[84px] shrink-0 truncate">{shortUser(u.user)}</span>
-                  <span className="w-[104px] shrink-0 truncate text-[12px] text-muted-foreground">{u.client}</span>
-                  <span className="h-1.5 min-w-0 flex-1 rounded-full bg-white/5"><i className="block h-full rounded-full bg-foreground/45" style={{ width: `${(u.n / Math.max(1, ...t.users.map((x) => x.n))) * 100}%` }} /></span>
+                <Line key={u.client} onClick={m && (() => onDevice(m.id))}>
+                  <Laptop className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+                  <span className="w-[160px] shrink-0 truncate">{m?.name ?? u.client}</span>
+                  <span className="h-1.5 min-w-0 flex-1 rounded-full bg-white/5"><i className="block h-full rounded-full bg-foreground/45" style={{ width: `${(u.n / Math.max(1, ...byClient.map((x) => x.n))) * 100}%` }} /></span>
                   <b className="tnum w-9 shrink-0 text-right font-medium">{num(u.n)}</b>
                 </Line>
               );
@@ -91,8 +93,8 @@ export function ToolSheet({ server, tool: t, view, onServer, onDevice }: {
                   <VerdictBadge v={VERDICT_OF[u.decision]} />
                 </div>
                 <div className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
-                  <Person name={u.user} size={16} />
-                  <span className="truncate">{shortUser(u.user)}<span className="mx-1 opacity-40">·</span>{u.client}</span>
+                  <Laptop className="size-3.5 shrink-0" strokeWidth={1.75} />
+                  <span className="truncate">{machine(u.client)?.name ?? u.client}</span>
                   <span className="tnum ml-auto shrink-0">{clock(u.at)}</span>
                 </div>
               </div>
@@ -144,8 +146,7 @@ export function ServerSheet({ server: s, view, onTool, onDevice }: {
               return (
                 <Line key={`${i.user} ${i.client}`} onClick={m && (() => onDevice(m.id))}>
                   <Laptop className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
-                  <span className="w-[132px] shrink-0 truncate">{i.client}</span>
-                  <span className="flex min-w-0 text-muted-foreground"><Person name={i.user} size={18} label /></span>
+                  <span className="min-w-0 flex-1 truncate">{m?.name ?? i.client}</span>
                   <When>{clock(i.at)}</When>
                 </Line>
               );
