@@ -15,6 +15,8 @@ export type Device = {
   serial?: string | null; owner?: string | null;
   /** The EDR's agent on the machine, when the engine matched one. */
   edr?: { id: string; status: string | null } | null;
+  /** The security team stopped the machine: every tool call from it is refused. */
+  stopped?: { at: number; by: string | null; reason: string | null; denied: number | null } | null;
 };
 /** A machine the EDR lists that has no hooks: maybe with an agent program the EDR saw on it. */
 export type EdrOnly = { id: string; name: string; os: string | null; status: string | null; serial: string | null; last: number | null; agent: string | null };
@@ -39,7 +41,7 @@ export type Run = {
 };
 /** The app's answer to the request with the same `req`. */
 export type Reply = {
-  req: number; ok: boolean; error?: string; done?: "issued" | "revoked" | "stopped" | "admin" | "owner";
+  req: number; ok: boolean; error?: string; done?: "issued" | "revoked" | "stopped" | "admin" | "owner" | "device_stopped" | "device_released";
   email?: string; key_id?: string; key?: string; count?: number;
 };
 export type Tab = "devices" | "people" | "sessions" | "shadow" | "mcp";

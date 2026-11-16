@@ -6,7 +6,7 @@
 // security team named), marked when the EDR knows it and when someone else's key ran on it; the
 // machines the EDR lists that have no hooks come last.
 
-import { BadgeCheck, BadgeX, Laptop, ShieldCheck, ShieldOff, UserRoundX, Zap } from "lucide-react";
+import { BadgeCheck, BadgeX, Laptop, OctagonX, ShieldCheck, ShieldOff, UserRoundX, Zap } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Empty, Person, ServiceLogo, ago, shortUser } from "@/kit";
@@ -108,6 +108,7 @@ export function Fleet({ view, machines, servers, picked, onDevice, onServer }: {
                 <span className="truncate font-mono text-[12px]">{r.name}</span>
                 {m && tip(<i className={cn("size-1.5 shrink-0 rounded-full", m.state === "running" ? "animate-pulse bg-allow" : m.state === "installed" ? "bg-catch" : "bg-foreground/35")} />, <>{STATE[m.state].label}{m.last ? ` · ${ago(m.last, view.now)}` : ""}</>)}
                 <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {m?.stopped && tip(<span className="inline-flex items-center gap-1 rounded bg-deny/15 px-1.5 text-[11px] leading-[18px] font-semibold text-deny"><OctagonX className="size-3" strokeWidth={2.2} />멈춤</span>, <>멈춤 · {m.stopped.by ?? ""} · {ago(m.stopped.at, view.now)}{m.stopped.denied ? ` · 거부 ${m.stopped.denied}` : ""}</>)}
                   {m?.owner && m.user && m.owner !== m.user && tip(<UserRoundX className="size-3.5 text-review" strokeWidth={2} />, <>담당자 {shortUser(m.owner)} · 실행 {shortUser(m.user)}</>)}
                   {m?.edr && tip(<BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />, <>EDR 확인 · {EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"} · 에이전트 {m.edr.id}</>)}
                   {m && !m.edr && view.edrKnown && m.state !== "unregistered" && tip(<BadgeX className="size-3.5 text-review" strokeWidth={2} />, "EDR에 없는 기기")}

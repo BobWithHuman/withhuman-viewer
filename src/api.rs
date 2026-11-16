@@ -447,6 +447,39 @@ impl Backend {
         .map(|_| ())
     }
 
+    /// Stops a machine (every tool call from it is refused) or lets it go again. The engine's
+    /// admin API keeps it (`POST /v1/admin/clients/{id}/stop`). The machine names itself, so
+    /// this holds only while its hooks keep sending its ID; a person is stopped by their keys.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn stop_device(
+        &self,
+        client: &str,
+        stopped: bool,
+        actor: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        if self.current().demo {
+            let found = self.demo.lock().expect("demo lock").stop_device(
+                now_ms(),
+                client,
+                stopped,
+                actor,
+                reason,
+            );
+            return if found {
+                Ok(())
+            } else {
+                Err("그런 기기가 없습니다.".into())
+            };
+        }
+        self.admin(
+            &["v1", "admin", "clients", client, "stop"],
+            json!({"stopped": stopped, "actor": actor, "reason": reason}),
+        )
+        .await
+        .map(|_| ())
+    }
+
     /// Revokes one key, or every key of a person (the person's kill switch): how many were revoked.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn revoke(

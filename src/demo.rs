@@ -380,6 +380,10 @@ impl Demo {
             owner_email: Some(user.into()),
             edr_agent_id: None,
             edr_status: None,
+            stopped_at: None,
+            stopped_by: None,
+            stop_reason: None,
+            stop_denied_count: None,
         };
         let clients = vec![
             device(
@@ -688,6 +692,27 @@ impl Demo {
             return false;
         };
         d.owner_email = email.map(str::to_owned);
+        self.inventory = Some(inv);
+        true
+    }
+
+    /// Stops a machine, or lets it go again.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub fn stop_device(
+        &mut self,
+        now: i64,
+        client: &str,
+        stopped: bool,
+        actor: &str,
+        reason: &str,
+    ) -> bool {
+        let mut inv = self.inventory(now);
+        let Some(d) = inv.clients.iter_mut().find(|d| d.client_id == client) else {
+            return false;
+        };
+        d.stopped_at = stopped.then_some(now);
+        d.stopped_by = stopped.then(|| actor.to_owned());
+        d.stop_reason = stopped.then(|| reason.to_owned());
         self.inventory = Some(inv);
         true
     }

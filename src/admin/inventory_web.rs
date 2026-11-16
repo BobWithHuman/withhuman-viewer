@@ -194,6 +194,9 @@ fn devices(inv: &Inventory, modes: &HashMap<String, String>) -> Value {
                 "permission_mode": latest.and_then(|r| r.permission_mode.clone()),
                 "engine_mode": modes.get(&d.client_id),
                 "serial": d.serial, "owner": d.owner_email,
+                "stopped": d.stopped_at.map(|at| json!({
+                    "at": at, "by": d.stopped_by, "reason": d.stop_reason, "denied": d.stop_denied_count,
+                })),
                 "edr": d.edr_agent_id.as_ref().map(|id| json!({ "id": id, "status": d.edr_status })),
             })
         })
