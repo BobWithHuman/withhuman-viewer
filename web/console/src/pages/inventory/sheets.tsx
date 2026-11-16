@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { AgentMark, Chip, Dash, EngineBadge, PermBadge, StateBadge } from "./marks";
 import { DeviceActivity } from "./activity";
 import { isOn } from "./mcp/types";
-import { EDR_STATUS, PERM, PERM_KEYS, agentLabel, type Machine, type View } from "./model";
+import { EDR_STATUS, PERM, PERM_KEYS, WHY, agentLabel, type Machine, type View } from "./model";
 
 export function Section({ title, count, aside, children }: { title: string; count?: number; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -56,7 +56,9 @@ export function DeviceSheet({ m, view, onSession, onServer, onStop }: {
   const [armed, setArmed] = useState(false);
   const servers = view.serversOn(m);
   const projects = view.projects.filter((p) => p.device === m.id);
-  const shadow = view.shadow.filter((a) => a.device === m.id);
+  // Projects a check found with no hooks, and agents the EDR saw running with no session open.
+  const shadow = view.shadow.filter((a) => a.device === m.id && a.project);
+  const seen = view.shadow.filter((a) => a.device === m.id && !a.project);
   const runs = view.sessions.filter((r) => r.device === m.id);
   const modes = PERM_KEYS.map((k) => ({ key: k, label: PERM[k].label, color: PERM[k].color, value: runs.filter((r) => r.permission_mode === k).length }));
   return (
@@ -96,6 +98,21 @@ export function DeviceSheet({ m, view, onSession, onServer, onStop }: {
           ["처음 들림", clock(m.first_seen)],
           ["마지막 신호", m.last && `${clock(m.last)} · ${ago(m.last, view.now)}`],
         ]} />
+
+        {seen.length > 0 && (
+          <Section title="섀도 AI" count={seen.length}>
+            <div className="flex flex-col">
+              {seen.map((a, i) => (
+                <Line key={`e${i}`} className="bg-deny/[0.07]">
+                  <ShieldOff className="size-4 shrink-0 text-deny" strokeWidth={1.9} />
+                  <AgentMark agent={a.agent} size={16} label />
+                  <Chip className="shrink-0 bg-deny/15 text-deny">{WHY[a.why ?? ""] ?? "훅 없음"}</Chip>
+                  <When>{clock(a.last_seen)} · {ago(a.last_seen, view.now)}</When>
+                </Line>
+              ))}
+            </div>
+          </Section>
+        )}
 
         <Section title="프로젝트" count={projects.length + shadow.length}
           aside={<Legend items={[{ label: "보호", color: "var(--allow)", value: projects.length }, { label: "섀도", color: "var(--deny)", value: shadow.length }]} />}>

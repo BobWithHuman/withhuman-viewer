@@ -260,7 +260,6 @@ impl Demo {
     fn made_inventory(&self, now: i64) -> crate::model::Inventory {
         use crate::model::{
             ApiKey, Device, DeviceProject, EdrDevice, Inventory, KeyEvent, Person, SessionRun,
-            ShadowAgent,
         };
         const MIN: i64 = 60_000;
         const DAY: i64 = 24 * 60 * MIN;
@@ -429,8 +428,8 @@ impl Demo {
             },
         ];
         // The EDR lists every registered machine but one under its host name, and two machines the
-        // hooks are not on, one of which runs an agent. One machine's owner is not the person
-        // whose key it last presented.
+        // hooks are not on, one of which runs an agent. Its last scans saw Claude Code running on
+        // some of them; where no session of theirs was open then, that is shadow AI.
         let mut clients = clients;
         let mut edr = Vec::new();
         for (i, d) in clients
@@ -451,7 +450,8 @@ impl Demo {
                 status: Some(status.into()),
                 serial: d.serial.clone(),
                 last_seen: d.last_seen,
-                agent: None,
+                agent: (i % 2 == 0).then(|| "claude-code".into()),
+                running_at: (i % 2 == 0).then(|| now - (40 + 90 * i as i64) * MIN),
             });
         }
         if let Some(d) = clients.get_mut(2) {
@@ -465,6 +465,7 @@ impl Demo {
             serial: Some("C02F81KQ0D".into()),
             last_seen: Some(now - 2 * 60 * MIN),
             agent: Some("claude-code".into()),
+            running_at: Some(now - 2 * 60 * MIN),
         });
         edr.push(EdrDevice {
             agent_id: "008".into(),
@@ -474,6 +475,7 @@ impl Demo {
             serial: Some("PF3K9W2X".into()),
             last_seen: Some(now - 20 * MIN),
             agent: None,
+            running_at: None,
         });
         let project = |id: &str, path: &str, at: i64| DeviceProject {
             client_id: id.into(),
@@ -599,38 +601,6 @@ impl Demo {
             events.push(e);
         }
         events.sort_by_key(|e| std::cmp::Reverse(e.at));
-        // Projects the machines' checks found an agent in with no hooks.
-        let shadow =
-            |client: &str, user: &str, agent: &str, project: &str, seen: i64| ShadowAgent {
-                client_id: Some(client.into()),
-                user_email: Some(format!("{user}@example.com")),
-                agent: agent.into(),
-                project: Some(project.into()),
-                last_seen: Some(seen),
-            };
-        let shadow = vec![
-            shadow(
-                "personal-mock",
-                "dev.lee",
-                "codex",
-                "/Users/dev/src/scratch-codex",
-                now - 35 * MIN,
-            ),
-            shadow(
-                "platform/mac-21",
-                "ops.choi",
-                "codex",
-                "/Users/ops/src/oncall-scripts",
-                now - 5 * 60 * MIN,
-            ),
-            shadow(
-                "lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4",
-                "dev.park",
-                "claude-code",
-                "C:/work/legacy-batch",
-                now - 2 * DAY,
-            ),
-        ];
         Inventory {
             clients,
             projects,
@@ -638,7 +608,8 @@ impl Demo {
             keys,
             events,
             sessions,
-            shadow: Some(shadow),
+            // The engine has no check of the projects: shadow AI comes from the EDR.
+            shadow: None,
             edr: Some(edr),
         }
     }

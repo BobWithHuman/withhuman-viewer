@@ -98,8 +98,7 @@ export function demo(now = Date.now()): Data {
   const real = devices.filter((d) => d.registered_at && d.last);
   for (const i of [1, 4, 4, 8, 11, 13, 13, 13, 19, 22]) {
     const d = real[i % real.length];
-    const who = home.get(d.id) ?? "dev";
-    shadow.push({ device: d.id, host: d.host, agent: rnd() < 0.55 ? "claude-code" : "codex", project: `/Users/${who}/${pick(["side", "tmp", "personal", "sandbox", "clients"])}/${pick(["scraper", "quick-fix", "poc-agent", "migration-test", "invoice-bot", "playground", "llm-notes"])}`, last_seen: now - rnd() * 3 * DAY });
+    shadow.push({ device: d.id, host: d.host, agent: rnd() < 0.55 ? "claude-code" : "codex", project: null, last_seen: now - (0.3 + rnd() * 70) * HOUR, why: "no_session" });
   }
   shadow.sort((a, b) => b.last_seen! - a.last_seen!);
 

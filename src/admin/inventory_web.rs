@@ -68,7 +68,8 @@ pub(super) fn page(
     shadow.sort_by_key(|a| std::cmp::Reverse(a.last_seen));
     let mut page = frame(around);
     page["status"] = json!("ready");
-    page["shadow_known"] = json!(inv.shadow.is_some());
+    // Shadow AI is known from a check of the projects, or from the EDR's process scans.
+    page["shadow_known"] = json!(inv.shadow.is_some() || inv.edr.is_some());
     page["devices"] = devices(inv, modes);
     // The machines the EDR lists that no registered machine was matched to.
     page["edr_known"] = json!(inv.edr.is_some());
@@ -100,17 +101,20 @@ pub(super) fn page(
             })
         })
         .collect();
-    page["shadow"] = shadow
+    let mut found: Vec<Value> = shadow
         .iter()
         .map(|a| {
             json!({
                 "device": a.client_id,
                 "host": a.client_id.as_deref().and_then(|c| host.get(c)),
                 "agent": a.agent, "project": a.project,
-                "last_seen": a.last_seen,
+                "last_seen": a.last_seen, "why": "project",
             })
         })
         .collect();
+    found.extend(edr_shadow(inv, &host));
+    found.sort_by_key(|a| std::cmp::Reverse(a["last_seen"].as_i64()));
+    page["shadow"] = json!(found);
     page["sessions"] = inv
         .sessions
         .iter()
@@ -222,6 +226,53 @@ fn index<'a>(list: &mut Vec<&'a str>, x: &'a str) -> usize {
         list.push(x);
         list.len() - 1
     })
+}
+
+/// How far apart a scan and a session's start or end may be and still meet: the clocks of the
+/// EDR and the Hooks differ a little.
+const SLACK_MS: i64 = 2 * 60_000;
+/// A session that never said it ended is taken as open this long after its last signal.
+const OPEN_FOR_MS: i64 = 24 * 60 * 60_000;
+
+/// Shadow AI the EDR saw: a coding agent running at a process scan on a machine with no Hooks
+/// session open then (`why: "no_session"`: the Hooks are off, removed, or not in that folder),
+/// or on a machine that never registered with the engine (`"unregistered"`).
+fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
+    let mut found = Vec::new();
+    for e in inv.edr.iter().flatten() {
+        let (Some(agent), Some(at)) = (e.agent.as_deref(), e.running_at) else {
+            continue;
+        };
+        let clients: Vec<&str> = inv
+            .clients
+            .iter()
+            .filter(|c| c.edr_agent_id.as_deref() == Some(e.agent_id.as_str()))
+            .map(|c| c.client_id.as_str())
+            .collect();
+        let open = inv.sessions.iter().any(|r| {
+            r.client_id.as_deref().is_some_and(|c| clients.contains(&c))
+                && r.created_at.is_some_and(|start| start <= at + SLACK_MS)
+                && match r.ended_at {
+                    Some(end) => end + SLACK_MS >= at,
+                    None => r
+                        .last_seen_at
+                        .or(r.created_at)
+                        .is_some_and(|last| last + OPEN_FOR_MS >= at),
+                }
+        });
+        if open {
+            continue;
+        }
+        let device = clients.first().copied();
+        found.push(json!({
+            "device": device,
+            "host": device.and_then(|c| host.get(c).copied()).unwrap_or(e.name.as_str()),
+            "agent": agent, "project": null, "last_seen": at,
+            "why": if device.is_some() { "no_session" } else { "unregistered" },
+            "edr": e.agent_id,
+        }));
+    }
+    found
 }
 
 /// What every state of the page carries.
@@ -373,5 +424,63 @@ mod tests {
             1,
             "a Call with no machine is no machine's"
         );
+    }
+
+    #[test]
+    fn an_agent_the_edr_saw_running_with_no_session_open_is_shadow_ai() {
+        use crate::model::EdrDevice;
+        let at = 1_000_000_000;
+        let edr = |id: &str, name: &str, running_at: Option<i64>| EdrDevice {
+            agent_id: id.into(),
+            name: name.into(),
+            agent: Some("claude-code".into()),
+            running_at,
+            ..EdrDevice::default()
+        };
+        let client = |id: &str, agent: &str| Device {
+            client_id: id.into(),
+            hostname: Some(format!("{id}-host")),
+            edr_agent_id: Some(agent.into()),
+            ..Device::default()
+        };
+        let session = |client: &str, start: i64, end: Option<i64>| SessionRun {
+            session_id: format!("{client}-{start}"),
+            client_id: Some(client.into()),
+            created_at: Some(start),
+            last_seen_at: Some(start),
+            ended_at: end,
+            ..SessionRun::default()
+        };
+        let inv = Inventory {
+            clients: vec![client("a", "001"), client("b", "002"), client("c", "003")],
+            sessions: vec![
+                // a: a session open at the scan.
+                session("a", at - 3_600_000, None),
+                // b: its session ended an hour before the scan.
+                session("b", at - 7_200_000, Some(at - 3_600_000)),
+                // c: its session started after the scan.
+                session("c", at + 3_600_000, None),
+            ],
+            edr: Some(vec![
+                edr("001", "a-host", Some(at)),
+                edr("002", "b-host", Some(at)),
+                edr("003", "c-host", Some(at)),
+                edr("004", "nobody", Some(at)),
+                // Installed but not running at the scan: nothing to compare.
+                edr("005", "idle", None),
+            ]),
+            ..Inventory::default()
+        };
+        let host: HashMap<&str, &str> = [("b", "b-host"), ("c", "c-host")].into();
+        let found = edr_shadow(&inv, &host);
+        let of = |edr: &str| found.iter().find(|f| f["edr"] == edr);
+        assert!(of("001").is_none(), "a session was open");
+        assert_eq!(of("002").unwrap()["why"], "no_session");
+        assert_eq!(of("002").unwrap()["device"], "b");
+        assert_eq!(of("003").unwrap()["why"], "no_session");
+        assert_eq!(of("004").unwrap()["why"], "unregistered");
+        assert_eq!(of("004").unwrap()["host"], "nobody");
+        assert!(of("005").is_none());
+        assert_eq!(found.len(), 3);
     }
 }

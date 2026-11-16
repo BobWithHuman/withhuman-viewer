@@ -28,7 +28,7 @@ import { Band } from "./inventory/mcp/band";
 import { Board } from "./inventory/mcp/board";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { NATURES, toolKey, type Server, type Tool } from "./inventory/mcp/types";
-import { END, PERM, SOURCE, derive, type Data, type Machine, type Run, type Shadow, type Tab } from "./inventory/model";
+import { END, PERM, SOURCE, WHY, derive, type Data, type Machine, type Run, type Shadow, type Tab } from "./inventory/model";
 import { Bag, machineOrder } from "./inventory/bag";
 import { DeviceSheet } from "./inventory/sheets";
 
@@ -167,7 +167,9 @@ export default function Page({ data }: { data: unknown | null }) {
   const shadowCols = useMemo<ColumnDef<Shadow>[]>(() => [
     { id: "agent", header: "에이전트", size: 152, accessorFn: (a) => a.agent, cell: ({ row }) => <AgentMark agent={row.original.agent} label /> },
     { id: "device", header: "기기", size: 184, accessorFn: (a) => a.host ?? a.device ?? "", cell: ({ row: { original: a } }) => <span className="truncate font-medium" title={a.device ?? ""}>{a.host ?? a.device ?? "–"}</span> },
-    { id: "project", header: "프로젝트", accessorFn: (a) => a.project ?? "", cell: ({ row }) => <code className={cn(mono, "truncate")} title={row.original.project ?? ""}>{row.original.project ?? "–"}</code> },
+    { id: "why", header: "근거", accessorFn: (a) => a.project ?? WHY[a.why ?? ""] ?? "", cell: ({ row: { original: a } }) => (a.project
+      ? <code className={cn(mono, "truncate")} title={a.project}>{a.project}</code>
+      : <Chip className={a.why === "unregistered" ? "bg-review/15 text-review" : "bg-deny/15 text-deny"}>{WHY[a.why ?? ""] ?? "–"}</Chip>) },
     { id: "last", header: "마지막으로 보임", size: 128, accessorFn: (a) => a.last_seen ?? 0, cell: ({ row }) => when(row.original.last_seen, view.now) },
   ], [view.now]);
 

@@ -45,6 +45,8 @@ export function Fleet({ view, machines, servers, picked, onDevice, onServer }: {
   const loose = new Map<string, Row>();
   for (const a of view.shadow) {
     if (a.device && shown.has(a.device)) continue;
+    // A machine the EDR lists without hooks has its own row below.
+    if (a.edr && view.edrOnly.some((e) => e.id === a.edr)) continue;
     const key = `?${a.device ?? a.host ?? ""}`;
     const row = loose.get(key) ?? { key, name: a.host ?? a.device ?? "기기 모름", shadow: [] };
     row.shadow.push(a);
@@ -52,7 +54,7 @@ export function Fleet({ view, machines, servers, picked, onDevice, onServer }: {
   }
   rows.push(...loose.values());
   // The machines the EDR lists with no hooks on them: no one's yet.
-  rows.push(...view.edrOnly.map((e) => ({ key: `edr${e.id}`, name: e.name, shadow: [], edr: e })));
+  rows.push(...view.edrOnly.map((e) => ({ key: `edr${e.id}`, name: e.name, shadow: view.shadow.filter((a) => a.edr === e.id), edr: e })));
 
   // Machines in the order of what needs a look: shadow AI first, then stopped, then running.
   const rank = (r: Row) => (r.shadow.length ? 0 : r.machine?.stopped ? 1 : r.machine?.state === "running" ? 2 : r.edr ? 4 : 3);

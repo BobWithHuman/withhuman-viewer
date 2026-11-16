@@ -115,6 +115,7 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
   const m = id ? view.machines.find((x) => x.id === id) : undefined;
   if (!m) return <div className="flex h-full flex-col"><div className="flex shrink-0 pb-3"><Picker view={view} id={null} onPick={onPick} /></div><Empty>기기 선택</Empty></div>;
   const shadow = view.shadow.filter((a) => a.device === m.id);
+  const hookless = shadow.filter((a) => a.project);
   const projects = view.projects.filter((p) => p.device === m.id);
   const sessions = view.sessions.filter((r) => r.device === m.id);
   const servers = view.serversOn(m)
@@ -148,10 +149,10 @@ export function Bag({ view, id, onPick, onDevice, onServer, onSessions }: {
             )),
           ]}
         </Shelf>
-        <Shelf title="프로젝트" count={projects.length + shadow.length} row={3}>
+        <Shelf title="프로젝트" count={projects.length + hookless.length} row={3}>
           {[
             ...(projects.length ? [<Slot key="p" name="보호" corner={projects.length} onClick={() => onDevice(m.id)} tip={<>보호된 프로젝트 {projects.length}</>}><FolderGit2 className="size-6 text-allow" strokeWidth={1.6} /></Slot>] : []),
-            ...(shadow.length ? [<Slot key="s" name="섀도" tone="var(--deny)" corner={shadow.length} onClick={() => onDevice(m.id)} tip={<>훅 없이 돈 프로젝트 {shadow.length}</>}><FolderGit2 className="size-6 text-deny" strokeWidth={1.6} /></Slot>] : []),
+            ...(hookless.length ? [<Slot key="s" name="섀도" tone="var(--deny)" corner={hookless.length} onClick={() => onDevice(m.id)} tip={<>훅 없이 돈 프로젝트 {hookless.length}</>}><FolderGit2 className="size-6 text-deny" strokeWidth={1.6} /></Slot>] : []),
           ]}
         </Shelf>
         <Shelf title="MCP 서버" count={servers.length} row={6}>

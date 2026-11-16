@@ -410,8 +410,11 @@ pub struct EdrDevice {
     pub status: Option<String>,
     pub serial: Option<String>,
     pub last_seen: Option<i64>,
-    /// An agent program (Claude Code, Codex) the EDR saw running on it, if any.
+    /// An agent program (Claude Code, Codex) the EDR saw on it, if any.
     pub agent: Option<String>,
+    /// When the EDR's latest process scan saw that agent running (ms); none when it was not
+    /// running at the scan, or the engine does not record it yet.
+    pub running_at: Option<i64>,
 }
 
 /// A project a machine's hooks were installed in.
