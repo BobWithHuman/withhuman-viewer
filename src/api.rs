@@ -291,6 +291,133 @@ impl Backend {
         Ok((text("key_id"), text("key")))
     }
 
+    /// What the security team marked and distrusts: the engine's, where it keeps them for
+    /// everyone, else this Mac's file. What the file held before the engine kept them is handed
+    /// to the engine once.
+    #[cfg(feature = "admin")]
+    pub async fn triage(&self) -> crate::admin::triage::Store {
+        use crate::admin::triage::{self, Store};
+        let settings = self.current();
+        if settings.demo || !crate::pg::is_postgres(&settings) {
+            return triage::load();
+        }
+        let pg = crate::pg::Postgres {
+            settings: &settings,
+            pool: &self.pg,
+        };
+        let Ok(found) = pg.triage().await else {
+            return triage::load();
+        };
+        if found.is_null() {
+            return triage::load();
+        }
+        let local = triage::load();
+        if local.marks.is_empty() && local.sources.is_empty() {
+            return Store::from_engine(&found);
+        }
+        // Hand the file's over, the marks by state; set the file aside only when all went.
+        let mut ok = true;
+        for state in ["reviewing", "attack", "benign", "closed"] {
+            let sessions: Vec<&str> = local
+                .marks
+                .iter()
+                .filter(|(_, m)| m.state == state)
+                .map(|(s, _)| s.as_str())
+                .collect();
+            for chunk in sessions.chunks(500) {
+                let by = local.marks[chunk[0]].by.clone();
+                ok &= self
+                    .admin(
+                        &["v1", "admin", "sessions", "mark"],
+                        json!({"session_ids": chunk, "state": state, "actor": by}),
+                    )
+                    .await
+                    .is_ok();
+            }
+        }
+        for b in &local.sources {
+            ok &= self
+                .admin(
+                    &["v1", "admin", "sources", "distrust"],
+                    json!({
+                        "source": b.source, "on": true, "actor": b.by,
+                        "session_id": Some(&b.session).filter(|s| !s.is_empty()), "seq": b.seq,
+                    }),
+                )
+                .await
+                .is_ok();
+        }
+        if ok {
+            triage::set_aside();
+        }
+        match pg.triage().await {
+            Ok(v) if !v.is_null() => Store::from_engine(&v),
+            _ => Store::from_engine(&found),
+        }
+    }
+
+    /// Marks sessions (`state` none takes the mark off): in the engine where it keeps marks,
+    /// else in this Mac's file.
+    #[cfg(feature = "admin")]
+    pub async fn mark_sessions(
+        &self,
+        shared: bool,
+        sessions: &[String],
+        state: Option<&str>,
+        actor: &str,
+    ) -> Result<(), String> {
+        if !shared {
+            let mut store = crate::admin::triage::load();
+            for s in sessions {
+                crate::admin::triage::mark(&mut store, s, state, actor, now_ms());
+            }
+            return Ok(());
+        }
+        for chunk in sessions.chunks(500) {
+            self.admin(
+                &["v1", "admin", "sessions", "mark"],
+                json!({"session_ids": chunk, "state": state, "actor": actor}),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Distrusts a source, or trusts it again: in the engine where it keeps them, else in this
+    /// Mac's file.
+    #[cfg(feature = "admin")]
+    pub async fn distrust(
+        &self,
+        shared: bool,
+        source: &str,
+        on: bool,
+        actor: &str,
+        call: Option<(String, i64)>,
+    ) -> Result<(), String> {
+        if !shared {
+            let mut store = crate::admin::triage::load();
+            let blocked = on.then(|| {
+                let (session, seq) = call.unwrap_or_default();
+                crate::admin::triage::Blocked {
+                    source: source.to_owned(),
+                    by: actor.to_owned(),
+                    at: now_ms(),
+                    session,
+                    seq,
+                }
+            });
+            crate::admin::triage::block(&mut store, source, blocked);
+            return Ok(());
+        }
+        let (session, seq) = call.unzip();
+        self.admin(
+            &["v1", "admin", "sources", "distrust"],
+            json!({"source": source, "on": on, "actor": actor, "session_id": session, "seq": seq}),
+        )
+        .await
+        .map(|_| ())
+    }
+
     /// Names the person a machine belongs to, or takes the name off (`email` none). The engine's
     /// admin API keeps it (`POST /v1/admin/clients/{id}/owner`).
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
