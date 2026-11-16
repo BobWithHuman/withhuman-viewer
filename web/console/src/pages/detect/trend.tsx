@@ -1,5 +1,5 @@
-// The Calls worth a look over the period, as a band of bars stacked by verdict under the flow;
-// dragging across the bars (or pressing one day) makes that stretch the period.
+// The Calls worth a look over the period, as bars stacked by verdict; dragging across the bars
+// (or pressing one day) makes that stretch the period.
 
 import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ReferenceArea, XAxis, YAxis } from "recharts";
@@ -35,7 +35,7 @@ export function Trend({ calls, from, to, onRange }: {
   return (
     <ChartContainer config={CONFIG} className="aspect-auto h-full w-full cursor-crosshair select-none [&_*:focus]:outline-none">
       <BarChart
-        data={rows} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="24%"
+        data={rows} margin={{ top: 8, right: 4, left: 0, bottom: 0 }} barCategoryGap="24%"
         onMouseDown={(s) => { const i = at(s); if (i !== null) setDrag([i, i]); }}
         onMouseMove={(s) => { const i = at(s); if (drag && i !== null && i !== drag[1]) setDrag([drag[0], i]); }}
         onMouseLeave={() => setDrag(null)}
@@ -50,7 +50,7 @@ export function Trend({ calls, from, to, onRange }: {
       >
         <CartesianGrid vertical={false} />
         <XAxis dataKey="t" tickFormatter={(t: number) => tick(t, step)} tickLine={false} axisLine={false} tickMargin={6} minTickGap={28} />
-        <YAxis allowDecimals={false} width={34} tickLine={false} axisLine={false} tickMargin={4} tickCount={3} />
+        <YAxis allowDecimals={false} width={34} tickLine={false} axisLine={false} tickMargin={4} />
         <ChartTooltip cursor={{ fill: "var(--foreground)", fillOpacity: 0.05 }} content={<ChartTooltipContent labelFormatter={(_, p) => moment(Number(p?.[0]?.payload?.t), step)} />} />
         {VERDICTS.map((k) => <Bar key={k} dataKey={k} stackId="calls" fill={`var(--color-${k})`} maxBarSize={64} isAnimationActive={false} />)}
         {drag && <ReferenceArea x1={rows[lo].t} x2={rows[hi].t} fill="var(--primary)" fillOpacity={0.16} stroke="var(--primary)" strokeOpacity={0.5} />}

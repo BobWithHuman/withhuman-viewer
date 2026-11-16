@@ -2,21 +2,20 @@
 //!
 //! - 메인: what to look at now, over every machine; its 탐지 tab lists the Calls worth a look,
 //!   the worst first, each opened beside the list.
-//! - 감사: what the engine stopped, held or let through though hard to undo, and how people
-//!   answered when asked; exported for an audit.
 //! - 인벤토리: the machines, people and sessions the engine protects, and the MCP servers the
 //!   machines have set up; keys issued and revoked (a person's kill switch).
 //! - 민감 정보: the sensitive values found in the sessions, followed to the Calls that used them.
 //! - 정책: the rules to give the engine, kept as a draft until the engine takes them, each
 //!   previewed on the Calls already recorded.
 
-mod audit;
+mod case;
 mod charts;
 mod inventory;
 mod main_page;
 mod policy;
 mod posture;
 mod secrets;
+mod triage;
 // The dashboards' page (web/console) in a frame, and each screen's data for it.
 mod detect_web;
 mod inventory_web;
@@ -29,7 +28,6 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 
-pub use audit::Audit;
 pub use inventory::InventoryPage;
 pub use main_page::Main;
 pub use policy::Policy;
@@ -47,14 +45,8 @@ pub struct Facts(
     pub Signal<Option<i64>>,
 );
 
-/// The main page sending the security team to 감사's approvals: `Some(None)` opens the tab,
-/// `Some(Some((session, seq)))` opens it with that Call's row marked. 감사 takes it and lets go.
-#[derive(Clone, Copy)]
-pub struct ToApprovals(pub Signal<Option<Option<(String, i64)>>>);
-
 /// Reads the Calls on launch, on reload and after the connection changes.
 pub fn use_facts_loader(backend: Arc<Backend>, state: AppState) {
-    use_context_provider(|| ToApprovals(Signal::new(None)));
     let mut facts = use_context_provider(|| Facts(Signal::new(None), Signal::new(None)));
     use_effect(move || {
         // The reload button reads every Call again; a launch or a new connection reads what is new.

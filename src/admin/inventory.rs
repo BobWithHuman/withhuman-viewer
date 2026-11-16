@@ -173,15 +173,6 @@ fn first_tab() -> &'static str {
     }
 }
 
-pub(super) fn event_label(kind: &str) -> &'static str {
-    match kind {
-        "issued" => "키 발급",
-        "revoked" => "회수",
-        "denied" => "회수된 키로 온 호출 거부",
-        _ => "기록",
-    }
-}
-
 /// Who is acting, for the record: the person signed in to this Mac, until the engine knows the
 /// security team's own accounts.
 fn me() -> String {

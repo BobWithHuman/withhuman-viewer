@@ -1,7 +1,7 @@
 // Writes src/ui/icons.rs: Lucide icons as one path each, for the app's own chrome.
 import { readFileSync, writeFileSync } from "node:fs";
 const dir = "web/console/node_modules/lucide-react/dist/esm/icons/";
-const names = ["house", "route", "clipboard-check", "scroll-text", "layout-grid", "star", "shield-check", "lock-keyhole", "monitor-smartphone", "refresh-cw", "maximize", "database", "settings", "panel-left"];
+const names = ["house", "route", "scroll-text", "layout-grid", "star", "shield-check", "lock-keyhole", "monitor-smartphone", "refresh-cw", "maximize", "database", "settings", "panel-left"];
 const n = (v) => +(+v).toFixed(3);
 function toPath(tag, a) {
   if (tag === "path") return a.d;

@@ -98,15 +98,12 @@ fn first_screen() -> Screen {
     }
 }
 
-/// The top bar's other two screens: the security team's 감사 and 정책, or two features to come.
+/// The top bar's other screens: the security team's 정책, or two features to come.
 #[cfg(feature = "admin")]
 #[component]
 fn FeaturePage(second: bool) -> Element {
-    if second {
-        rsx! { crate::admin::Policy {} }
-    } else {
-        rsx! { crate::admin::Audit {} }
-    }
+    let _ = second;
+    rsx! { crate::admin::Policy {} }
 }
 #[cfg(not(feature = "admin"))]
 #[component]
@@ -687,9 +684,12 @@ fn TopBar() -> Element {
                     {line_icon(icons::ROUTE)}
                     "{SCREEN_LABELS.0}"
                 }
-                button { class: "{seg(\"a\")}", onclick: move |_| go(Screen::FeatureA, Mode::Graph),
-                    {line_icon(if cfg!(feature = "admin") { icons::CLIPBOARD_CHECK } else { icons::LAYOUT_GRID })}
-                    "{SCREEN_LABELS.1}"
+                // The security team's app has no second screen here: what 감사 listed is on 메인.
+                if !cfg!(feature = "admin") {
+                    button { class: "{seg(\"a\")}", onclick: move |_| go(Screen::FeatureA, Mode::Graph),
+                        {line_icon(icons::LAYOUT_GRID)}
+                        "{SCREEN_LABELS.1}"
+                    }
                 }
                 button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
                     {line_icon(if cfg!(feature = "admin") { icons::SCROLL_TEXT } else { icons::STAR })}

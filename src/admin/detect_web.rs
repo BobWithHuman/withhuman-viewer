@@ -34,6 +34,16 @@ pub(super) struct Read<'a> {
     pub sessions: &'a [Session],
     /// When the Calls were last read (ms).
     pub refreshed: Option<i64>,
+    /// What the team marked each session as, and the sources it distrusts.
+    pub triage: &'a super::triage::Store,
+    /// Whose the sessions and machines are, and the machines to tell the team about: those
+    /// newly registered and those not heard from, as [`alerts`] lists them.
+    pub owners: &'a super::secrets_web::Owners,
+    pub alerts: &'a Value,
+    /// The case opened, as [`super::case::case`] read it.
+    pub case: Option<&'a Value>,
+    /// What the last save of a file said.
+    pub saved: Option<&'a str>,
     pub loading: bool,
     /// Why the Calls could not be read.
     pub failed: Option<&'a str>,
@@ -128,8 +138,9 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
 }
 
 /// A Call worth a look, as the page lists and counts it.
-fn call(f: &CallFact, severity: Severity) -> Value {
+fn call(f: &CallFact, severity: Severity, owners: &super::secrets_web::Owners) -> Value {
     json!({
+        "user": owners.user(&f.session, f.client.as_deref().unwrap_or_default()),
         "session": f.session,
         "seq": f.seq,
         "at": f.at,
@@ -150,6 +161,38 @@ fn call(f: &CallFact, severity: Severity) -> Value {
         "ran": f.ran,
         "hard": hard_to_undo(f),
     })
+}
+
+/// A machine registered this recently is new; one not heard from this long is silent.
+const NEW_MS: i64 = 7 * 24 * HOUR;
+const SILENT_MS: i64 = 3 * 24 * HOUR;
+
+/// The machines to tell the team about: `new` (registered within the week) and `silent`
+/// (registered, yet not heard from for three days, or its EDR agent disconnected).
+pub(super) fn alerts(inv: &crate::model::Inventory, now: i64) -> Value {
+    let row = |d: &crate::model::Device, at: Option<i64>| {
+        json!({
+            "id": d.client_id, "host": d.hostname, "user": d.owner_email.clone().or_else(|| d.user_email.clone()),
+            "at": at, "edr": d.edr_status,
+        })
+    };
+    let new: Vec<Value> = inv
+        .clients
+        .iter()
+        .filter(|d| d.registered_at.is_some_and(|at| at >= now - NEW_MS))
+        .map(|d| row(d, d.registered_at))
+        .collect();
+    let silent: Vec<Value> = inv
+        .clients
+        .iter()
+        .filter(|d| d.registered_at.is_some())
+        .filter(|d| {
+            d.last_seen.is_none_or(|at| at < now - SILENT_MS)
+                || d.edr_status.as_deref() == Some("disconnected")
+        })
+        .map(|d| row(d, d.last_seen))
+        .collect();
+    json!({ "new": new, "silent": silent })
 }
 
 /// The page's data as JSON text.
@@ -192,7 +235,7 @@ pub(super) fn data(read: &Read) -> String {
             slot.latest = Some((at, mode.clone()));
         }
         if let Some(severity) = Severity::of(f) {
-            calls.push(call(f, severity));
+            calls.push(call(f, severity, read.owners));
         }
     }
     let cover: Vec<Value> = slots
@@ -210,6 +253,11 @@ pub(super) fn data(read: &Read) -> String {
     json!({
         "source": read.source,
         "demo": read.demo,
+        "triage": read.triage.marks,
+        "blocked": read.triage.sources,
+        "alerts": read.alerts,
+        "case": read.case,
+        "saved": read.saved,
         "loading": read.loading,
         "failed": read.failed,
         "refreshed": read.refreshed,
@@ -253,6 +301,11 @@ mod tests {
             facts: &facts,
             sessions: &[],
             refreshed: Some(9),
+            triage: &crate::admin::triage::Store::default(),
+            owners: &crate::admin::secrets_web::Owners::default(),
+            alerts: &Value::Null,
+            case: None,
+            saved: None,
             loading: false,
             failed: None,
             source: "데모 데이터",

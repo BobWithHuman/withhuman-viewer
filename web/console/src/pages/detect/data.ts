@@ -1,7 +1,7 @@
 // What 보안 현황 is given and how it counts: the Calls worth a look, the filter the page keeps,
 // the period's time axis, and the demo shown when the page is opened on its own.
 
-import { Ban, CircleCheck, CircleDashed, CircleHelp, CreditCard, Ellipsis, FilePen, FileText, Hand, type LucideIcon, Send, Share2, SquareTerminal, Trash2, User, Workflow } from "lucide-react";
+import { CreditCard, Ellipsis, FilePen, type LucideIcon, Send, Share2, SquareTerminal, Trash2, Workflow } from "lucide-react";
 import { SEVERITY, VERDICT, type Verdict } from "@/kit";
 
 export const HOUR = 3_600_000;
@@ -20,6 +20,8 @@ export const VERDICTS: Verdict[] = ["deny", "review", "allow"];
 
 export type Call = {
   session: string; seq: number; at: number | null; machine: string; verdict: Verdict; sev: Sev;
+  /** Whose session it is, when the inventory tells. */
+  user?: string | null;
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
   target: string | null; reason: string | null; prompt: string | null; rule: string | null;
   mode: string | null; ran: boolean; hard: boolean;
@@ -33,6 +35,34 @@ export type FlowCount = [number, number, string, string, string, number];
 export type Data = {
   source: string; demo: boolean; loading: boolean; failed: string | null; refreshed: number | null;
   machines: string[]; calls: Call[]; cover: Cover[]; flow: FlowCount[];
+  /** What the team marked each session as, the case opened, and what the last save said. */
+  triage?: Record<string, Mark>; case?: Case | null; saved?: string | null;
+  /** The sources the team distrusts, and the machines to tell it about. */
+  blocked?: Blocked[]; alerts?: { new: Alert[]; silent: Alert[] } | null;
+};
+// A source the team distrusts, and the Call that showed it.
+export type Blocked = { source: string; by: string; at: number; session: string; seq: number };
+// A machine newly registered, or not heard from.
+export type Alert = { id: string; host: string | null; user: string | null; at: number | null; edr: string | null };
+// A session's mark: an attack, or nothing wrong.
+export type Mark = { state: "attack" | "benign"; by: string; at: number };
+export const MARK: Record<Mark["state"], { label: string; cls: string }> = {
+  attack: { label: "공격", cls: "bg-deny/15 text-deny" },
+  benign: { label: "정상", cls: "bg-allow/15 text-allow" },
+};
+// One Call laid out to judge (`src/admin/case.rs`): what was asked, what told the agent to act
+// (the Call whose result it was, and the words), and where else the same thing was read.
+export type Case = {
+  session: string; seq: number; loading?: boolean; error?: string;
+  request?: { seq: number; text: string; intent: string | null; at: number | null } | null;
+  told?: { seq: number; tool: string | null; target: string | null; at: number | null; quote: string | null; paragraph: number | null; probability: number; error: boolean } | null;
+  traced?: boolean;
+  elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; flagged: number }[];
+  elsewhere_total?: number;
+  machine_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string }[];
+  /** Whose session it is, and that person's other Calls worth a look. */
+  user?: string | null;
+  user_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string; machine: string }[];
 };
 
 // The kinds of action, as the engine's questions divide them.
@@ -47,16 +77,15 @@ export const ACTION: Record<string, { label: string; icon: LucideIcon }> = {
   run: { label: "프로그램 실행", icon: SquareTerminal },
   other: { label: "그 외", icon: Ellipsis },
 };
-export const SOURCES = ["request", "segment", "none", "untraced"];
-export const SOURCE_ICON: Record<string, LucideIcon> = { request: User, segment: FileText, none: CircleHelp, untraced: CircleDashed };
-// How a Call was decided, `none` when nothing decided it.
-export const ENDS = ["deny", "review", "allow", "none"];
-export const END: Record<string, { label: string; color: string; icon: LucideIcon; weight: number }> = {
-  deny: { label: "차단", color: VERDICT.deny.color, icon: Ban, weight: 80 },
-  review: { label: "확인 요청", color: VERDICT.review.color, icon: Hand, weight: 58 },
-  allow: { label: "허용", color: VERDICT.allow.color, icon: CircleCheck, weight: 20 },
-  none: { label: "판정 없음", color: "var(--info)", icon: CircleDashed, weight: 12 },
-};
+// Every Call of a stretch, on one machine when one is picked, counted by kind of action.
+export function actionTotals(flow: FlowCount[], from: number, to: number, machine: number | null) {
+  const by: Record<string, number> = {};
+  for (const [hour, m, action, , , n] of flow) {
+    if (hour + HOUR <= from || hour >= to || (machine !== null && m !== machine)) continue;
+    by[action] = (by[action] ?? 0) + n;
+  }
+  return by;
+}
 
 const KIND: Record<string, string> = {
   exfiltration: "데이터·비밀값 외부 전송",
@@ -70,7 +99,7 @@ const KIND: Record<string, string> = {
   other: "그 밖의 이유",
   allowed_irreversible: "되돌리기 어려운 허용",
 };
-export const SOURCE: Record<string, string> = { segment: "도구 결과", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
+const SOURCE: Record<string, string> = { segment: "도구 결과", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
 export const MODE: Record<string, { label: string; cls: string }> = {
   enforce: { label: "엔진 차단 중", cls: "bg-allow/15 text-allow" },
   shadow: { label: "엔진 시범 운영", cls: "bg-review/15 text-review" },
@@ -79,13 +108,14 @@ export const MODE: Record<string, { label: string; cls: string }> = {
 };
 
 // What the Calls can be narrowed by, besides the period.
-export type Dim = "verdict" | "action" | "kind" | "source" | "machine" | "tool" | "folder";
-export const DIMS: Dim[] = ["verdict", "action", "kind", "source", "machine", "tool", "folder"];
+export type Dim = "verdict" | "action" | "kind" | "source" | "session" | "machine" | "tool" | "folder";
+export const DIMS: Dim[] = ["verdict", "action", "kind", "source", "session", "machine", "tool", "folder"];
 export const DIM: Record<Dim, { label: string; of: (c: Call) => string; name: (key: string) => string }> = {
   verdict: { label: "판정", of: (c) => c.verdict, name: (k) => (k === "allow" ? "되돌리기 어려운 허용" : k === "review" ? "확인 요청" : k === "none" ? "판정 없음" : VERDICT[k as Verdict]?.label ?? k) },
   action: { label: "행동", of: (c) => c.action, name: (k) => ACTION[k]?.label ?? k },
   kind: { label: "위반 유형", of: (c) => c.kind ?? "other", name: (k) => KIND[k] ?? k },
   source: { label: "원인", of: (c) => c.source, name: (k) => SOURCE[k] ?? k },
+  session: { label: "세션", of: (c) => c.session, name: (k) => k.slice(0, 8) },
   machine: { label: "단말", of: (c) => c.machine, name: (k) => k },
   tool: { label: "도구", of: (c) => c.tool ?? "", name: (k) => k || "도구 없음" },
   folder: { label: "폴더", of: (c) => c.folder, name: (k) => k || "폴더 없음" },
@@ -157,18 +187,29 @@ export const rangeLabel = ([from, to]: [number, number]) => {
   return md(from) === md(last) ? md(from) : `${md(from)} – ${md(last)}`;
 };
 
-// Counts by a key, each split by severity, the most first.
-export function tally(calls: Call[], of: (c: Call) => string) {
-  const by = new Map<string, { key: string; total: number } & Record<Sev, number>>();
+// How much a Call worth a look weighs when things are ranked by risk.
+export const RISK: Record<Sev, number> = { crit: 8, high: 4, med: 2, after: 1 };
+// A tool's name as a row has room for: an MCP tool as its server and its tool.
+export const toolName = (tool: string | null) => (tool ?? "").replace(/^mcp__/, "").replace(/__/g, " · ");
+
+// The Calls gathered by a key, each group with its Calls by severity and its risk (the sum of
+// its Calls' weights), the riskiest first.
+export type Group = { key: string; calls: Call[]; total: number; risk: number } & Record<Sev, number>;
+export function groups(calls: Call[], of: (c: Call) => string): Group[] {
+  const by = new Map<string, Group>();
   for (const c of calls) {
     const key = of(c);
     let row = by.get(key);
-    if (!row) by.set(key, (row = { key, total: 0, crit: 0, high: 0, med: 0, after: 0 }));
+    if (!row) by.set(key, (row = { key, calls: [], total: 0, risk: 0, crit: 0, high: 0, med: 0, after: 0 }));
+    row.calls.push(c);
     row.total++;
     row[c.sev]++;
+    row.risk += RISK[c.sev];
   }
-  return [...by.values()].sort((a, b) => b.total - a.total || a.key.localeCompare(b.key));
+  return [...by.values()].sort((a, b) => b.risk - a.risk || b.total - a.total || a.key.localeCompare(b.key));
 }
+// The worst of some Calls.
+export const worst = (g: Pick<Group, Sev>): Sev => SEVS.find((s) => g[s] > 0) ?? "after";
 
 // How the machines are covered over a period: those active, those whose latest decision
 // blocked, those whose latest only watched, those with a Call nothing decided, and the mode of
@@ -278,4 +319,36 @@ export function demo(now: number): Data {
     });
   }
   return { source: "데모 데이터", demo: true, loading: false, failed: null, refreshed: now, machines: MACHINES, calls, cover, flow };
+}
+
+// Where a Call was about to send to, when its target names a host: after `http(s)://`, or
+// between `user@` and `:` as scp names it.
+export const hostOf = (target: string | null) => {
+  const m = /https?:\/\/([^/\s:?'"]+)|@([A-Za-z0-9.-]+):/.exec(target ?? "");
+  return m ? m[1] ?? m[2] : null;
+};
+
+// What the decisions suggest changing: how often a marked session was nothing wrong, the tools
+// stopped most, and the kinds of Calls held that people nearly always let run.
+export function tuning(calls: Call[], marks: Record<string, Mark>) {
+  const sessions = [...new Set(calls.map((c) => c.session))];
+  const marked = sessions.filter((s) => marks[s]);
+  const benign = marked.filter((s) => marks[s].state === "benign").length;
+  const tools = new Map<string, number>();
+  for (const c of calls) if (c.verdict === "deny" && c.tool) tools.set(c.tool, (tools.get(c.tool) ?? 0) + 1);
+  const held = new Map<string, { n: number; ran: number }>();
+  for (const c of calls) {
+    if (c.verdict !== "review") continue;
+    const key = DIM.kind.of(c), row = held.get(key) ?? { n: 0, ran: 0 };
+    row.n++;
+    if (c.ran) row.ran++;
+    held.set(key, row);
+  }
+  return {
+    marked: marked.length, benign, attacks: marked.length - benign,
+    tools: [...tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
+    // Held at least five times and let run nine times in ten: a candidate to loosen.
+    loosen: [...held.entries()].map(([kind, r]) => ({ kind, ...r, share: r.ran / r.n })).filter((r) => r.n >= 5 && r.share >= 0.8).sort((a, b) => b.share - a.share || b.n - a.n),
+    held: [...held.entries()].map(([kind, r]) => ({ kind, ...r, share: r.ran / r.n })).sort((a, b) => b.n - a.n),
+  };
 }
