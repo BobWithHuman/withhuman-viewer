@@ -384,6 +384,38 @@ mod tests {
     }
 
     #[test]
+    fn a_value_the_agent_wrote_first_came_in_where_an_earlier_session_read_it() {
+        let mut read = seen(2, 20, "external", "Segment");
+        read.session = "yesterday".into();
+        read.target = Some("/repo/.env".into());
+        let mut typed = seen(1, 5, "user", "Request");
+        typed.session = "long ago".into();
+        let mut later = seen(1, 90, "user", "Request");
+        later.session = "after".into();
+        let mut wrote = seen(3, 60, "agent", "Call");
+        wrote.session = "today".into();
+        let list = trails(&[read, typed, later, wrote]);
+        let today = list
+            .iter()
+            .find(|t| t.session == "today")
+            .expect("today's trail");
+        let before = super::super::secrets_web::came_before(today, &list).expect("came in before");
+        assert_eq!(
+            before.session, "yesterday",
+            "the latest session before it, not one after"
+        );
+        assert_eq!(source_of(before).as_deref(), Some("/repo/.env"));
+        let yesterday = list
+            .iter()
+            .find(|t| t.session == "yesterday")
+            .expect("yesterday's trail");
+        assert!(
+            super::super::secrets_web::came_before(yesterday, &list).is_none(),
+            "it came in in its own session"
+        );
+    }
+
+    #[test]
     fn the_account_money_is_sent_to_is_not_a_value_sent_out() {
         let mut pay = seen(4, 40, "external", "Call");
         pay.tool = Some("mcp__bank__send_money".into());

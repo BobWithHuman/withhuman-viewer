@@ -5,7 +5,7 @@
 // as the engine keeps it, and a place it showed opens in 기록.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, ArrowUpRight, Bot, FileText, Globe, Hash, Laptop, Mail, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, UserRound, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Bot, FileText, Globe, Hash, History, Laptop, Mail, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, UserRound, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { send } from "@/bridge";
 import { Badge } from "@/components/ui/badge";
@@ -329,7 +329,8 @@ function Result({ status, places }: { status: Status; places: string[] }) {
 /** Where a value came in, as a cell names it: a person, the document or tool, or not known. */
 function OriginName({ origin }: { origin: string }) {
   if (origin === "user") return <span className="flex min-w-0 items-center gap-1.5"><MessageSquareText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">사용자 입력</span></span>;
-  if (origin === "agent") return <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground"><Bot className="size-3.5 shrink-0" strokeWidth={1.9} /><span className="truncate">출처 불명</span></span>;
+  if (origin === "agent") return <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground"><Bot className="size-3.5 shrink-0" strokeWidth={1.9} /><span className="truncate">에이전트 작성</span></span>;
+  if (origin === "earlier") return <span className="flex min-w-0 items-center gap-1.5"><History className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">이전 세션</span></span>;
   const p = parts(origin);
   return (
     <span className="flex min-w-0 items-center gap-1.5" title={origin}>
@@ -338,7 +339,7 @@ function OriginName({ origin }: { origin: string }) {
     </span>
   );
 }
-const originOf = (t: Trail) => (fromOf(t) === "user" ? "user" : t.source ?? "agent");
+const originOf = (t: Trail) => (fromOf(t) === "user" ? "user" : t.source ?? (fromOf(t) === "earlier" ? "earlier" : "agent"));
 
 /** A session's values from where they came in to whom they were sent, in a line: the first of
  * each end, the rest counted, and an arrow in how the sends ended. */
@@ -523,8 +524,11 @@ function Origin({ t }: { t: Trail }) {
 /** How a value went, as two ends joined by an arrow: how it came in, and whom it was sent to
  * with the tool that sent it. The arrow carries how it ended. */
 function Path({ trails, status }: { trails: Trail[]; status: Status }) {
-  const first = trails[0], from = fromOf(first), Icon = FROM[from].icon;
+  const first = trails[0], from = fromOf(first), was = first.before;
+  const Icon = from === "earlier" ? FROM.external.icon : FROM[from].icon;
   const typed = trails.some((t) => fromOf(t) === "user");
+  // A value come in in an earlier session names that session under how it came in there.
+  const earlier = was && <span className="flex min-w-0 items-center gap-1 text-[11.5px] text-muted-foreground" title={was.title ?? was.session}><History className="size-3 shrink-0" strokeWidth={1.9} /><span className="shrink-0">이전 세션</span><span className="truncate">· {was.title ?? was.session.slice(0, 8)}</span></span>;
   // The Calls that sent it, the first that got out leading.
   const sends = trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place)).sort((a, b) => Number(a.held) - Number(b.held) || Number(!targetOf(a.place!).target) - Number(!targetOf(b.place!).target));
   const lead = sends[0];
@@ -542,9 +546,14 @@ function Path({ trails, status }: { trails: Trail[]; status: Status }) {
           : first.source ? (
             <>
               <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium"><Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><SourceName name={first.source} /></span>
-              <span className="truncate text-[11.5px] text-muted-foreground" title={first.source}>{[first.sourceTool && toolName(first.sourceTool), short(first.source) !== first.source && first.source].filter(Boolean).join(" · ")}</span>
+              {earlier || <span className="truncate text-[11.5px] text-muted-foreground" title={first.source}>{[first.sourceTool && toolName(first.sourceTool), short(first.source) !== first.source && first.source].filter(Boolean).join(" · ")}</span>}
             </>
-          ) : <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground"><Icon className="size-3.5" strokeWidth={1.9} />출처 불명</span>}
+          ) : was ? (
+            <>
+              <span className="flex items-center gap-1.5 text-[13px] font-medium"><MessageSquareText className="size-3.5 text-muted-foreground" strokeWidth={1.9} />사용자 입력</span>
+              {earlier}
+            </>
+          ) : <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground"><Icon className="size-3.5" strokeWidth={1.9} />에이전트 작성</span>}
       </div>
       <div className="flex flex-col items-center gap-1 px-1.5">
         {status !== "seen" && <span className="text-[11px] font-semibold" style={{ color: tone }}>{STATUS[status].label}</span>}
