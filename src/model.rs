@@ -555,7 +555,8 @@ pub struct McpTool {
     pub name: String,
     /// What the server tells the agent the tool does.
     pub description: String,
-    /// `read`, `write`, `delete` or `send` (out of the company).
+    /// What it does, in the engine's groups: `read`, `change`, `delete`, `send`, `transact`,
+    /// `execute`, `access`, `delegate`, or `unknown`.
     pub nature: String,
     pub calls: Vec<McpUse>,
 }

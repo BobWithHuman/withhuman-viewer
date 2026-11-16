@@ -60,16 +60,21 @@ fn tool(t: &McpTool, now: i64) -> Value {
     })
 }
 
-/// What a tool can do, as the page draws it, from the registry's action for its name: `money`
-/// (it pays or moves an account), `send` (out of the company), `delete`, `write`, or `read`;
-/// none when the registry cannot tell.
+/// What a tool does, in the engine's groups (withhuman-core's `category.rs`), from the registry's
+/// action for its name: `read` (it reads, searches, computes or plans), `change` (it creates or
+/// updates), `delete`, `send`, `transact`, `execute` (it runs or browses), `access` or
+/// `delegate`; none when the registry cannot tell.
 fn nature(tool: &str) -> Option<&'static str> {
     Some(match super::mcp_tools::action(tool)? {
-        "transact" => "money",
-        "send" | "delegate" => "send",
+        "read" | "search" | "compute" | "plan" => "read",
+        "create" | "update" => "change",
         "delete" => "delete",
-        "create" | "update" | "execute" => "write",
-        _ => "read",
+        "send" => "send",
+        "transact" => "transact",
+        "execute" | "browse" => "execute",
+        "access" => "access",
+        "delegate" => "delegate",
+        _ => return None,
     })
 }
 

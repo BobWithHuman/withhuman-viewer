@@ -23,9 +23,9 @@ const SERVERS: { name: string; transport: Server["transport"]; endpoint: string;
     tool("get_file_contents", "read", "Get the contents of a file or a directory at a ref.", 388, 9, ["acme/web src/session/useSession.ts@main", "acme/payments internal/refund/window.go@main", "acme/infra modules/iam/main.tf@main", "acme/collector cmd/collector/main.go@release-0.9"]),
     tool("get_issue", "read", "Get the title, body and comments of an issue.", 141, 5, ["acme/payments#142", "acme/payments#150", "acme/web#77", "acme/gateway#311"]),
     tool("list_pull_requests", "read", "List the pull requests of a repository.", 96, 4, ["acme/payments state:open", "acme/web state:open", "acme/gateway state:open author:@me"]),
-    tool("add_issue_comment", "write", "Add a comment to an issue or a pull request.", 44, 3, ["acme/payments#142", "acme/web#81", "acme/gateway#311"], 3),
-    tool("create_pull_request", "write", "Open a pull request from a branch.", 61, 4, ["acme/payments fix/refund-window → main", "acme/web chore/deps → main", "acme/gateway feat/tls-rotate → main"], 9),
-    tool("merge_pull_request", "write", "Merge a pull request.", 12, 2, ["acme/web#84 squash", "acme/payments#151 merge", "acme/infra#39 squash"], 4, 5),
+    tool("add_issue_comment", "change", "Add a comment to an issue or a pull request.", 44, 3, ["acme/payments#142", "acme/web#81", "acme/gateway#311"], 3),
+    tool("create_pull_request", "change", "Open a pull request from a branch.", 61, 4, ["acme/payments fix/refund-window → main", "acme/web chore/deps → main", "acme/gateway feat/tls-rotate → main"], 9),
+    tool("merge_pull_request", "change", "Merge a pull request.", 12, 2, ["acme/web#84 squash", "acme/payments#151 merge", "acme/infra#39 squash"], 4, 5),
     tool("delete_repository", "delete", "Delete a repository and everything in it."),
   ] },
   { name: "slack", transport: "remote", endpoint: "https://mcp.slack.com/mcp", on: [1, 3, 5, 9, 12, 15, 18], tools: [
@@ -39,8 +39,8 @@ const SERVERS: { name: string; transport: Server["transport"]; endpoint: string;
     tool("search_issues", "read", "Search Jira issues with JQL.", 118, 5, ["project = PAY AND status = \"In Progress\"", "assignee = currentUser() AND sprint in openSprints()", "project = WEB AND labels = regression"]),
     tool("get_issue", "read", "Get a Jira issue with its fields and comments.", 93, 4, ["PAY-1182", "WEB-640", "PLAT-207", "DATA-88"]),
     tool("get_page", "read", "Get a Confluence page as Markdown.", 52, 3, ["ENG/Runbook: 결제 장애 대응", "ENG/ADR-031 게이트웨이 TLS", "DATA/Feature store 스키마"]),
-    tool("create_issue", "write", "Create a Jira issue.", 27, 3, ["PAY Bug: 환불 창이 UTC 기준으로 닫힘", "WEB Task: 세션 갱신 재시도", "PLAT Task: collector 메모리 프로파일"]),
-    tool("update_issue", "write", "Change the fields or the status of a Jira issue.", 33, 2, ["PAY-1182 status → Done", "WEB-640 assignee → front.shin", "PLAT-207 priority → High"], 2),
+    tool("create_issue", "change", "Create a Jira issue.", 27, 3, ["PAY Bug: 환불 창이 UTC 기준으로 닫힘", "WEB Task: 세션 갱신 재시도", "PLAT Task: collector 메모리 프로파일"]),
+    tool("update_issue", "change", "Change the fields or the status of a Jira issue.", 33, 2, ["PAY-1182 status → Done", "WEB-640 assignee → front.shin", "PLAT-207 priority → High"], 2),
     tool("delete_issue", "delete", "Delete a Jira issue.", 3, 1, ["PAY-1175", "PAY-1176", "WEB-611"], 0, 3),
   ] },
   { name: "postgres-ro", transport: "local", endpoint: "npx -y @modelcontextprotocol/server-postgres postgresql://readonly@db.internal.example.com:5432/app", on: [4, 5, 6, 19, 21], tools: [
@@ -52,13 +52,13 @@ const SERVERS: { name: string; transport: Server["transport"]; endpoint: string;
     tool("search_issues", "read", "Search the issues of a project.", 64, 3, ["project:web is:unresolved TypeError", "project:payments level:error refund", "project:ios-app release:5.2.0"]),
     tool("get_issue_details", "read", "Get an issue with its latest event and stack trace.", 82, 3, ["WEB-3F2", "PAYMENTS-91A", "IOS-APP-17C", "WEB-41B"]),
     tool("get_trace", "read", "Get the spans of a trace.", 21, 2, ["a1f4c09e77b24d3e", "0c7be2d15a9f4e61"]),
-    tool("update_issue", "write", "Resolve, ignore or assign an issue.", 6, 1, ["WEB-3F2 status → resolved", "PAYMENTS-91A assignedTo → pay.hong"], 1),
+    tool("update_issue", "change", "Resolve, ignore or assign an issue.", 6, 1, ["WEB-3F2 status → resolved", "PAYMENTS-91A assignedTo → pay.hong"], 1),
   ] },
   { name: "notion", transport: "remote", endpoint: "https://mcp.notion.com/mcp", on: [10, 11, 13], tools: [
     tool("search", "read", "Search the pages and databases of the workspace.", 47, 3, ["디자인 토큰", "온콜 로테이션", "2026 Q4 로드맵"]),
     tool("fetch", "read", "Get a page or a database by its URL or ID.", 59, 3, ["Design system / Tokens", "Eng wiki / 배포 체크리스트", "Product / Q4 roadmap"]),
-    tool("create_pages", "write", "Create pages under a page or in a database.", 11, 2, ["Eng wiki / 회고 2026-11-12", "Design system / Tailwind 4 이전 메모"], 2),
-    tool("update_page", "write", "Change a page's properties or content.", 0, 0, ["Eng wiki / 배포 체크리스트"], 0, 0, 44),
+    tool("create_pages", "change", "Create pages under a page or in a database.", 11, 2, ["Eng wiki / 회고 2026-11-12", "Design system / Tailwind 4 이전 메모"], 2),
+    tool("update_page", "change", "Change a page's properties or content.", 0, 0, ["Eng wiki / 배포 체크리스트"], 0, 0, 44),
   ] },
   { name: "figma", transport: "local", endpoint: "http://127.0.0.1:3845/mcp", on: [10, 12], tools: [
     tool("get_design_context", "read", "Get the layout, styles and code hints of the selected node.", 36, 2, ["Console / Inventory 1:204", "Design system / Button 12:88", "Landing / Hero 4:19"]),
@@ -67,7 +67,7 @@ const SERVERS: { name: string; transport: Server["transport"]; endpoint: string;
   ] },
   { name: "filesystem", transport: "local", endpoint: "npx -y @modelcontextprotocol/server-filesystem /Users/song/work /Users/song/Downloads", on: [22], tools: [
     tool("read_text_file", "read", "Read a file under the allowed directories as text."),
-    tool("write_file", "write", "Create a file or overwrite one under the allowed directories."),
+    tool("write_file", "change", "Create a file or overwrite one under the allowed directories."),
   ] },
 ];
 

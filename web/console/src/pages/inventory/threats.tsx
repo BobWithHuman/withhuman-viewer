@@ -1,7 +1,7 @@
 // The MCP tools that are a threat. A row is a server, the riskiest first, with its tools as chips
-// in the order of their risk (how often the engine stopped their calls), each marked by what it can
-// do. A chip is red at 높음, amber at 중간, plain at 낮음 and dashed when never called; a row shows
-// its riskiest few and opens to the rest. Hovering tells a tool's calls and machines; pressing
+// in the order of their risk (how often the engine stopped their calls), each marked by what it
+// does in the engine's groups. A chip's red deepens with its risk, plain where the engine stopped
+// nothing and dashed when never called; a row shows its riskiest few and opens to the rest. Hovering tells a tool's calls and machines; pressing
 // opens it, and a server's name opens the server. A kind of tool pressed above narrows the chips to
 // it, 위험만 to the tools at risk, and the machine picked beside to the tools it called.
 
@@ -13,22 +13,26 @@ import { cn } from "@/lib/utils";
 import { isOn, type Server, type Tool } from "./mcp/types";
 import type { Machine } from "./model";
 
-/** What a tool can do, the most dangerous first. */
-const KINDS: Nature[] = ["money", "send", "delete", "write", "unknown", "read"];
+/** What a tool does, the most dangerous first. */
+const KINDS: Nature[] = ["transact", "send", "delete", "execute", "access", "delegate", "change", "unknown", "read"];
 /** The chips a row shows before it is opened. */
 const FEW = 8;
 
 /** A tool's risk, 0 to 100: its calls the engine blocked, and half those it held for the user,
  * over its calls and five more, so a tool called once and stopped once does not top the list. */
 export const riskOf = (t: Pick<Tool, "calls" | "deny" | "review">) => Math.round((100 * (t.deny + t.review / 2)) / (t.calls + 5));
-type Level = "high" | "mid" | "low" | "none";
-const levelOf = (t: Tool): Level => (t.calls === 0 ? "none" : riskOf(t) >= 25 ? "high" : riskOf(t) >= 10 ? "mid" : "low");
-const LEVEL: Record<Level, { label: string; chip: string; badge: string }> = {
-  high: { label: "높음", chip: "border-deny/60 bg-deny/20 text-foreground font-semibold", badge: "bg-deny/20 text-deny" },
-  mid: { label: "중간", chip: "border-review/50 bg-review/15 text-foreground", badge: "bg-review/15 text-review" },
-  low: { label: "낮음", chip: "border-transparent bg-secondary text-foreground/80", badge: "bg-white/8 text-muted-foreground" },
-  none: { label: "호출 없음", chip: "border-dashed border-white/15 text-muted-foreground", badge: "" },
+/** At risk: what 위험만 keeps. */
+const atRisk = (t: Tool) => t.calls > 0 && riskOf(t) >= 10;
+/** How red a risk is drawn, 0 to 1: full from 45. */
+const heat = (risk: number) => Math.min(1, risk / 45);
+/** A chip's or a badge's colours for a risk: a red that deepens with it, none at 0. */
+const tint = (risk: number) => {
+  const h = heat(risk);
+  return h > 0
+    ? { background: `color-mix(in oklab, var(--deny) ${Math.round(5 + 27 * h)}%, var(--secondary))`, borderColor: `color-mix(in oklab, var(--deny) ${Math.round(12 + 48 * h)}%, transparent)` }
+    : undefined;
 };
+const ink = (risk: number) => `color-mix(in oklab, var(--deny) ${Math.round(45 + 55 * heat(risk))}%, var(--muted-foreground))`;
 const callsBy = (t: Tool, m: Machine) => t.users.reduce((a, u) => a + (isOn(u.client, m) ? u.n : 0), 0);
 /** The riskiest first, then what can do the most harm, then the most called. */
 const order = (a: Tool, b: Tool) => riskOf(b) - riskOf(a) || Number(a.calls === 0) - Number(b.calls === 0) || KINDS.indexOf(a.nature) - KINDS.indexOf(b.nature) || b.calls - a.calls;
@@ -37,11 +41,11 @@ export function ThreatsLegend() {
   const item = (mark: ReactNode, label: string) => <span className="inline-flex items-center gap-1.5">{mark}{label}</span>;
   return (
     <div className="flex items-center gap-3.5 text-[12px] text-muted-foreground">
-      <span>위험도</span>
-      {item(<i className="size-2.5 rounded-sm border border-deny/60 bg-deny/20" />, "높음")}
-      {item(<i className="size-2.5 rounded-sm border border-review/50 bg-review/15" />, "중간")}
-      {item(<i className="size-2.5 rounded-sm bg-secondary" />, "낮음")}
+      <span className="inline-flex items-center gap-1.5">막은 비율
+        <i className="h-2.5 w-20 rounded-sm" style={{ background: "linear-gradient(90deg, var(--secondary), color-mix(in oklab, var(--deny) 32%, var(--secondary)))" }} />
+      </span>
       {item(<i className="size-2.5 rounded-sm border border-dashed border-foreground/40" />, "호출 없음")}
+      {item(<i className="size-1.5 rounded-full bg-primary" />, "고른 기기")}
     </div>
   );
 }
@@ -56,7 +60,7 @@ export function Threats({ servers, focus, onServer, onTool }: {
   const [opened, setOpened] = useState<Set<string>>(new Set());
   if (!servers.length) return <Empty>MCP 호출 없음</Empty>;
 
-  const shown = (t: Tool) => (!kind || t.nature === kind) && (!mine || !focus || callsBy(t, focus) > 0) && (!risky || levelOf(t) === "high" || levelOf(t) === "mid");
+  const shown = (t: Tool) => (!kind || t.nature === kind) && (!mine || !focus || callsBy(t, focus) > 0) && (!risky || atRisk(t));
   const rows = servers
     .map((s) => ({ s, risk: Math.max(0, ...s.tools.map(riskOf)), tools: s.tools.filter(shown).sort(order) }))
     .filter((r) => r.tools.length)
@@ -97,7 +101,7 @@ export function Threats({ servers, focus, onServer, onTool }: {
                 <span className="min-w-0">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="truncate font-mono text-[12.5px] font-medium">{s.name}</span>
-                    {risk >= 10 && <span className={cn("tnum shrink-0 rounded px-1 text-[10.5px] leading-4 font-semibold", LEVEL[risk >= 25 ? "high" : "mid"].badge)}>{risk}</span>}
+                    {risk >= 10 && <span className="tnum shrink-0 rounded border px-1 text-[10.5px] leading-4 font-semibold" style={{ ...tint(risk), color: ink(risk) }}>{risk}</span>}
                   </span>
                   <span className="tnum flex items-center gap-1 text-[11px] text-muted-foreground"><Laptop className="size-3" strokeWidth={1.9} />{machines}<span className="opacity-40">·</span>호출 {num(calls)}</span>
                 </span>
@@ -118,26 +122,31 @@ export function Threats({ servers, focus, onServer, onTool }: {
   );
 }
 
-/** A tool: what it can do, its name, and its risk or calls, coloured by its risk. */
+/** A tool: what it does, its name, and its risk or calls, in a red that deepens with its risk. */
 function Chip({ t, focus, onClick }: { t: Tool; focus: Machine | null; onClick: () => void }) {
-  const level = levelOf(t), mine = focus ? callsBy(t, focus) : 0;
+  const risk = riskOf(t), mine = focus ? callsBy(t, focus) : 0;
   const machines = new Set(t.users.map((u) => u.client)).size;
+  const stopped = t.calls ? Math.round((100 * (t.deny + t.review)) / t.calls) : 0;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button onClick={onClick}
-          className={cn("inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border px-2 transition-colors hover:border-white/40", LEVEL[level].chip, mine > 0 && "ring-1 ring-primary")}>
+        <button onClick={onClick} style={t.calls ? tint(risk) : undefined}
+          className={cn("relative inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border px-2 transition-colors hover:border-white/40",
+            t.calls === 0 ? "border-dashed border-white/15 text-muted-foreground" : "border-transparent bg-secondary text-foreground/85",
+            heat(risk) > 0.55 && "font-semibold text-foreground")}>
+          {mine > 0 && <i className="absolute -top-0.5 -left-0.5 size-1.5 rounded-full bg-primary" />}
           <span className="shrink-0" style={{ color: NATURE[t.nature].color }}><NatureIcon n={t.nature} className="size-3" /></span>
           <span className="truncate font-mono text-[11.5px]">{t.name}</span>
-          {(level === "high" || level === "mid") && <span className={cn("tnum shrink-0 text-[11px] font-semibold", level === "high" ? "text-deny" : "text-review")}>{riskOf(t)}</span>}
-          {level === "low" && <span className="tnum shrink-0 text-[11px] text-muted-foreground">{num(t.calls)}</span>}
+          {atRisk(t)
+            ? <span className="tnum shrink-0 text-[11px] font-semibold" style={{ color: ink(risk) }}>{risk}</span>
+            : t.calls > 0 && <span className="tnum shrink-0 text-[11px] font-normal text-muted-foreground">{num(t.calls)}</span>}
         </button>
       </TooltipTrigger>
       <TooltipContent className="max-w-[300px]">
         <div className="flex flex-col gap-1 py-0.5">
           <span className="font-mono font-medium">{t.name}</span>
           {t.description && <span className="opacity-80">{t.description}</span>}
-          <span className="tnum">위험도 {LEVEL[level].label}{t.calls ? ` ${riskOf(t)}` : ""} · {NATURE[t.nature].label}</span>
+          <span className="tnum">{NATURE[t.nature].label}{t.calls ? ` · 위험도 ${risk} · 막은 비율 ${stopped}%` : " · 호출 없음"}</span>
           <span className="tnum">호출 {num(t.calls)}{t.review ? ` · 확인 ${t.review}` : ""}{t.deny ? ` · 차단 ${t.deny}` : ""} · 기기 {machines}</span>
           {focus && mine > 0 && <span className="tnum">{focus.name} · {num(mine)}</span>}
         </div>

@@ -3,7 +3,7 @@
 // one product.
 
 import {
-  ArrowDown, ArrowUp, ArrowUpDown, CircleHelp, Eye, Landmark, Pencil, Send, Trash2, TriangleAlert, type LucideIcon,
+  ArrowDown, ArrowUp, ArrowUpDown, CircleHelp, Eye, KeyRound, Landmark, Pencil, Send, Share2, SquareTerminal, Trash2, TriangleAlert, type LucideIcon,
 } from "lucide-react";
 import {
   type ColumnDef, type SortingState, flexRender, getCoreRowModel, getSortedRowModel, useReactTable,
@@ -25,14 +25,17 @@ export const VERDICT: Record<Verdict, { label: string; color: string; cls: strin
   review: { label: "확인", color: "var(--review)", cls: "bg-review/15 text-review" },
   deny: { label: "차단", color: "var(--deny)", cls: "bg-deny/15 text-deny" },
 };
-/** What a tool can do, as 인벤토리의 MCP 탭 and the registry name it. */
-export type Nature = "read" | "write" | "delete" | "send" | "money" | "unknown";
+/** What a tool does, in the engine's groups (withhuman-core's `category.rs`). */
+export type Nature = "read" | "change" | "delete" | "send" | "transact" | "execute" | "access" | "delegate" | "unknown";
 export const NATURE: Record<Nature, { label: string; color: string; icon: LucideIcon }> = {
   read: { label: "읽기", color: "var(--read)", icon: Eye },
-  write: { label: "쓰기", color: "var(--write)", icon: Pencil },
+  change: { label: "변경", color: "var(--write)", icon: Pencil },
   delete: { label: "삭제", color: "var(--deny)", icon: Trash2 },
-  send: { label: "외부 전송", color: "var(--send)", icon: Send },
-  money: { label: "돈·계정", color: "var(--money)", icon: Landmark },
+  send: { label: "전송", color: "var(--send)", icon: Send },
+  transact: { label: "결제·거래", color: "var(--money)", icon: Landmark },
+  execute: { label: "실행", color: "var(--catch)", icon: SquareTerminal },
+  access: { label: "권한·접근", color: "var(--review)", icon: KeyRound },
+  delegate: { label: "위임", color: "var(--info)", icon: Share2 },
   unknown: { label: "분류 없음", color: "var(--muted-foreground)", icon: CircleHelp },
 };
 export type Severity = "crit" | "high" | "med" | "low" | "info";
