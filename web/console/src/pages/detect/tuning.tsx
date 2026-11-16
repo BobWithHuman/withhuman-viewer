@@ -27,8 +27,10 @@ function Bar({ label, value, share, color, mono, onClick }: { label: string; val
   );
 }
 
-export function Tuning({ calls, marks, blocked, ask, onPick }: {
+export function Tuning({ calls, marks, blocked, shared, ask, onPick }: {
   calls: Call[]; marks: Record<string, Mark>; blocked: Blocked[]; ask: Ask; onPick: (dim: "kind" | "tool", key: string) => void;
+  /** Whether the engine keeps the sources: it then holds what they cause; else they are only noted here. */
+  shared?: boolean;
 }) {
   const t = tuning(calls, marks);
   const most = t.tools[0]?.[1] ?? 1;
@@ -52,7 +54,7 @@ export function Tuning({ calls, marks, blocked, ask, onPick }: {
         {!t.tools.length && <Empty />}
         {t.tools.map(([tool, n]) => <Bar key={tool} label={toolName(tool)} value={n.toLocaleString()} share={n / most} color="var(--deny)" mono onClick={() => onPick("tool", tool)} />)}
       </Part>
-      <Part title="차단한 출처" aside={blocked.length || undefined}>
+      <Part title="차단한 출처" aside={<>{shared ? "엔진 적용" : "기록만"}{blocked.length ? ` · ${blocked.length}` : ""}</>}>
         {!blocked.length && <Empty />}
         {blocked.map((b) => (
           <div key={b.source} className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px]">

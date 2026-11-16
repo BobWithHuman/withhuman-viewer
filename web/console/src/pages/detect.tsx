@@ -182,7 +182,7 @@ export default function Page({ data }: { data: unknown | null }) {
                 </ToggleGroup>
               )}>
               {side === "tune"
-                ? <div className="scroll min-h-0 flex-1 overflow-y-auto px-2 py-2"><Tuning calls={inPeriod} marks={marks} blocked={blocked} ask={ask} onPick={(dim, key) => toggle(dim, key)} /></div>
+                ? <div className="scroll min-h-0 flex-1 overflow-y-auto px-2 py-2"><Tuning calls={inPeriod} marks={marks} blocked={blocked} shared={d.shared} ask={ask} onPick={(dim, key) => toggle(dim, key)} /></div>
                 : <>
               {rankBy === "machine" && cover.active > 0 && (
                 <div className="flex shrink-0 flex-col gap-2 border-b px-4 pb-3">

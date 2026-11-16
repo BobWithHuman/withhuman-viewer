@@ -4,7 +4,7 @@
 // record of keys issued, revoked and refused.
 
 import { ArrowUpRight, BadgeCheck, Ban, KeyRound, Laptop, OctagonX, ShieldCheck, ShieldOff, ShieldX } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -52,11 +52,15 @@ export const Line = ({ onClick, children, className }: { onClick?: () => void; c
 );
 export const When = ({ children }: { children: ReactNode }) => <span className="tnum ml-auto shrink-0 text-[12px] text-muted-foreground">{children}</span>;
 
-export function DeviceSheet({ m, view, onPerson, onSession, onServer, onAsk, onOwner }: {
+export function DeviceSheet({ m, view, onPerson, onSession, onServer, onAsk, onOwner, onStop }: {
   m: Machine; view: View; onPerson: (email: string) => void; onSession: (id: string) => void; onServer: (name: string) => void; onAsk: (ask: Ask) => void;
   /** Names the machine's owner, or takes the name off. */
   onOwner: (email: string | null) => void;
+  /** Stops the machine, or lets it go again. */
+  onStop: (stopped: boolean) => void;
 }) {
+  // Stopping asks twice: the first press arms it.
+  const [armed, setArmed] = useState(false);
   const servers = view.serversOn(m);
   const projects = view.projects.filter((p) => p.device === m.id);
   const shadow = view.shadow.filter((a) => a.device === m.id);
@@ -80,6 +84,11 @@ export function DeviceSheet({ m, view, onPerson, onSession, onServer, onAsk, onO
           <EngineBadge mode={m.engine_mode} />
           {m.permission_mode && <PermBadge mode={m.permission_mode} />}
           {m.shadow > 0 && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><ShieldOff />섀도 AI {m.shadow}</Badge>}
+          {m.stopped && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><OctagonX />멈춤{m.stopped.denied ? ` · 거부 ${m.stopped.denied}` : ""}</Badge>}
+          {m.state !== "unregistered" && (m.stopped
+            ? <Button size="xs" variant="outline" className="ml-auto" onClick={() => onStop(false)}>멈춤 풀기</Button>
+            : <Button size="xs" variant="outline" className={cn("ml-auto", armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
+                onClick={() => { if (armed) { onStop(true); setArmed(false); } else setArmed(true); }}><OctagonX />{armed ? "한 번 더" : "기기 멈춤"}</Button>)}
         </div>
       </SheetHeader>
       <div className="scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">

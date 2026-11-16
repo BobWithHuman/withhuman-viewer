@@ -85,7 +85,7 @@ export default function Page({ data }: { data: unknown | null }) {
     else {
       setAsk(null);
       setToast(r.done === "revoked" ? `키 회수됨 · ${shortUser(r.email ?? "")} · ${r.key_id}`
-        : r.done === "stopped" ? `멈춤 · ${shortUser(r.email ?? "")} · 키 ${r.count ?? 0}개 회수` : r.done === "owner" ? "담당자 저장됨" : "관리 API 저장됨");
+        : r.done === "stopped" ? `멈춤 · ${shortUser(r.email ?? "")} · 키 ${r.count ?? 0}개 회수` : r.done === "owner" ? "담당자 저장됨" : r.done === "device_stopped" ? "기기 멈춤" : r.done === "device_released" ? "기기 멈춤 풀림" : "관리 API 저장됨");
     }
   }, [d.reply, pending, standalone]);
   // The app names the tab to open on; it changes the tab again only when it names another.
@@ -353,7 +353,8 @@ export default function Page({ data }: { data: unknown | null }) {
       <Sheet open={!!(machine || person || server)} onOpenChange={(o) => { if (!o && !ask) setOpen(null); }}>
         <SheetContent aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()} className="w-[480px] gap-0 data-[side=right]:sm:max-w-[480px]">
           {machine && <DeviceSheet m={machine} view={view} onPerson={(email) => setOpen({ kind: "person", email })} onSession={openSession} onServer={openServer} onAsk={setAsk}
-            onOwner={(email) => request({ type: "owner", device: machine.id, email: email ?? "", actor: d.actor })} />}
+            onOwner={(email) => request({ type: "owner", device: machine.id, email: email ?? "", actor: d.actor })}
+            onStop={(stopped) => request({ type: "stop_device", device: machine.id, stopped, actor: d.actor, reason: "인벤토리에서 멈춤" })} />}
           {person && <PersonSheet p={person} view={view} onDevice={openDevice} onAsk={setAsk} />}
           {server && (tool
             ? <ToolSheet server={server} tool={tool} view={view} onServer={openServer} onDevice={openDevice} />

@@ -170,6 +170,10 @@ export function demoAnswer(d: Data, m: Record<string, unknown>, req: number): Da
     return { ...p, active_keys: active, revoked_keys: mine.length - active, stopped: active === 0 && mine.length > 0 };
   });
   let devices = d.devices;
+  if (m.type === "stop_device") {
+    devices = devices?.map((x) => (x.id === m.device ? { ...x, stopped: m.stopped ? { at, by: actor, reason: String(m.reason ?? ""), denied: 0 } : null } : x));
+    reply = { req, ok: true, done: m.stopped ? "device_stopped" : "device_released" };
+  }
   if (m.type === "owner") {
     devices = devices?.map((x) => (x.id === m.device ? { ...x, owner: email || null } : x));
     reply = { req, ok: true, done: "owner" };

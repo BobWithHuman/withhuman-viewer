@@ -386,6 +386,12 @@ pub struct Device {
     /// (`active`, `disconnected`, `never_connected` or `pending`).
     pub edr_agent_id: Option<String>,
     pub edr_status: Option<String>,
+    /// The security team stopped the machine: when, who, why, and how many of its Calls were
+    /// refused since.
+    pub stopped_at: Option<i64>,
+    pub stopped_by: Option<String>,
+    pub stop_reason: Option<String>,
+    pub stop_denied_count: Option<i64>,
 }
 
 /// A machine as the company's EDR (Wazuh) lists it, whether or not the engine's hooks are on it.

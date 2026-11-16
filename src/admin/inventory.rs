@@ -9,6 +9,7 @@
 //!   person's Calls from then on. Those go to the engine's admin API, and its record is 감사's
 //!   킬스위치 기록;
 //! - `owner`: a machine's owner named, or the name taken off;
+//! - `stop_device`: a machine stopped, or let go again;
 //! - `admin`: the admin API's address and token kept;
 //! - `open_session`: a session opened on the route map; `copy`: a text put on the clipboard;
 //! - `ack`: the last answer was seen, so a key just issued is not kept any longer.
@@ -120,6 +121,20 @@ pub fn InventoryPage() -> Element {
                             Err(e) => failed(e),
                         },
                     ));
+                });
+            }
+            "stop_device" => {
+                let (device, actor, reason) = (text("device"), text("actor"), text("reason"));
+                let stopped = m["stopped"].as_bool().unwrap_or(true);
+                let (backend, req) = (backend.clone(), m["req"].clone());
+                spawn(async move {
+                    reply.set(Some(match backend.stop_device(&device, stopped, &actor, &reason).await {
+                        Ok(()) => {
+                            bump += 1;
+                            json!({ "req": req, "ok": true, "done": if stopped { "device_stopped" } else { "device_released" } })
+                        }
+                        Err(e) => failed(e),
+                    }));
                 });
             }
             kind @ ("issue" | "revoke_key" | "stop") => {
