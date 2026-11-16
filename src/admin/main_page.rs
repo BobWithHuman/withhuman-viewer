@@ -61,23 +61,6 @@ pub(super) fn kind_of(f: &CallFact) -> Option<String> {
     )
 }
 
-pub(super) fn kind_label(kind: &str) -> String {
-    match kind {
-        "exfiltration" => "데이터·비밀값 외부 전송",
-        "hijacked_goal" => "목표 탈취(도구 결과가 끌어온 목표)",
-        "unconfirmed_irreversible" => "묻지 않은 되돌릴 수 없는 행위",
-        "security_change" => "보안 설정 변경",
-        "unrelated_change" => "요청과 무관한 변경",
-        "out_of_scope_access" => "요청 범위 밖 접근",
-        "explicit" => "사용자가 말한 것 위반",
-        "safeguard" => "에이전트 안전장치 변경",
-        "other" => "그 밖의 이유",
-        ALLOWED_IRREVERSIBLE => "되돌리기 어려운 허용",
-        other => return other.to_owned(),
-    }
-    .to_owned()
-}
-
 /// What made the agent take a Call, as the filter names it.
 pub(super) fn source_of(f: &CallFact) -> &'static str {
     match f.link.as_deref() {
@@ -88,30 +71,12 @@ pub(super) fn source_of(f: &CallFact) -> &'static str {
     }
 }
 
-pub(super) fn source_label(source: &str) -> &'static str {
-    match source {
-        "request" => "사용자 요청",
-        "segment" => "도구 결과",
-        "none" => "찾지 못함",
-        _ => "추적 없음",
-    }
-}
-
 pub(super) fn decision_key(f: &CallFact) -> &'static str {
     match f.decision.as_deref() {
         Some("ALLOW") => "ALLOW",
         Some("REVIEW") => "REVIEW",
         Some("DENY") => "DENY",
         _ => "NONE",
-    }
-}
-
-pub(super) fn decision_label(decision: &str) -> &'static str {
-    match decision {
-        "ALLOW" => "허용",
-        "REVIEW" => "확인 요청",
-        "DENY" => "차단",
-        _ => "판정 없음",
     }
 }
 
@@ -186,34 +151,63 @@ impl Severity {
 #[component]
 pub fn Main() -> Element {
     let mut state = use_context::<AppState>();
-    let p = (state.public)();
     let super::Facts(found, refreshed) = use_context::<super::Facts>();
-    let mut to_approvals = use_context::<super::ToApprovals>().0;
+    let backend = use_context::<std::sync::Arc<crate::api::Backend>>();
+    // What the team marked each session as, the case opened, and what a save said.
+    let mut marks = use_signal(super::triage::load);
+    // The inventory, for whose each session is and which machines to tell the team about.
+    let inventory = use_resource({
+        let backend = backend.clone();
+        move || {
+            let b = backend.clone();
+            let _ = (state.reload)();
+            let _ = (state.public)();
+            async move { b.inventory().await.ok().flatten() }
+        }
+    });
+    let mut case = use_signal(|| None::<Value>);
+    let mut saved = use_signal(|| None::<String>);
 
-    let sessions: Vec<Session> = match &*state.sessions.read() {
-        Load::Ready(list) => list.clone(),
-        _ => Vec::new(),
-    };
-    let loading = matches!(*state.sessions.read(), Load::Loading) || found.read().is_none();
-    let (facts, failed): (Vec<CallFact>, Option<String>) = match &*found.read() {
-        Some(Ok(list)) => (list.clone(), None),
-        Some(Err(e)) => (Vec::new(), Some(e.clone())),
-        None => (Vec::new(), None),
-    };
-    let data = super::detect_web::data(&super::detect_web::Read {
-        facts: &facts,
-        sessions: &sessions,
-        refreshed: refreshed(),
-        loading,
-        failed: failed.as_deref(),
-        source: &p.store(),
-        demo: p.demo,
+    // The page's data is built again only when what it is built from changes.
+    let data = use_memo(move || {
+        let p = (state.public)();
+        let sessions: Vec<Session> = match &*state.sessions.read() {
+            Load::Ready(list) => list.clone(),
+            _ => Vec::new(),
+        };
+        let loading = matches!(*state.sessions.read(), Load::Loading) || found.read().is_none();
+        let found = found.read();
+        let (facts, failed): (&[CallFact], Option<&str>) = match &*found {
+            Some(Ok(list)) => (list, None),
+            Some(Err(e)) => (&[], Some(e)),
+            None => (&[], None),
+        };
+        super::detect_web::data(&super::detect_web::Read {
+            facts,
+            sessions: &sessions,
+            refreshed: refreshed(),
+            triage: &marks.read(),
+            owners: &match &*inventory.read() {
+                Some(Some(inv)) => super::secrets_web::Owners::of(inv),
+                _ => Default::default(),
+            },
+            alerts: &match &*inventory.read() {
+                Some(Some(inv)) => super::detect_web::alerts(inv, now_ms()),
+                _ => Value::Null,
+            },
+            case: case.read().as_ref(),
+            saved: saved.read().as_deref(),
+            loading,
+            failed,
+            source: &p.store(),
+            demo: p.demo,
+        })
     });
 
     rsx! {
         super::web::Frame {
             page: "detect",
-            data,
+            data: data(),
             onmsg: move |m: Value| {
                 // The Call a message is about, when it names one.
                 let call = m
@@ -226,9 +220,78 @@ pub fn Main() -> Element {
                         state.open_call(session, seq);
                         state.screen.set(Screen::Work);
                     }
-                    (Some("approvals"), call) => {
-                        to_approvals.set(Some(call));
-                        state.screen.set(Screen::FeatureA);
+                    // The case of a Call, read from its session's graph.
+                    (Some("case"), Some((session, seq))) => {
+                        let backend = backend.clone();
+                        case.set(Some(serde_json::json!({ "session": session, "seq": seq, "loading": true })));
+                        spawn(async move {
+                            let facts = match &*found.peek() {
+                                Some(Ok(list)) => list.clone(),
+                                _ => Vec::new(),
+                            };
+                            let owners = match &*inventory.peek() {
+                                Some(Some(inv)) => super::secrets_web::Owners::of(inv),
+                                _ => Default::default(),
+                            };
+                            let read = super::case::case(&backend, &session, seq, &facts, &owners).await;
+                            // Only when that case is still the one open.
+                            if case.peek().as_ref().is_some_and(|c| c["session"] == read["session"] && c["seq"] == read["seq"]) {
+                                case.set(Some(read));
+                            }
+                        });
+                    }
+                    (Some("triage"), _) => {
+                        if let Some(session) = m.get("session").and_then(Value::as_str) {
+                            let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
+                            super::triage::mark(&mut marks.write(), session, m.get("state").and_then(Value::as_str), &by, now_ms());
+                        }
+                    }
+                    // A source distrusted, or trusted again (`on` false).
+                    (Some("source"), call) => {
+                        if let Some(source) = m.get("source").and_then(Value::as_str) {
+                            let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
+                            let blocked = (m.get("on").and_then(Value::as_bool) != Some(false)).then(|| {
+                                let (session, seq) = call.unwrap_or_default();
+                                super::triage::Blocked { source: source.to_owned(), by, at: now_ms(), session, seq }
+                            });
+                            super::triage::block(&mut marks.write(), source, blocked);
+                        }
+                    }
+                    // The kill switch from a case: every key of the person revoked.
+                    (Some("stop"), call) => {
+                        if let Some(email) = m.get("email").and_then(Value::as_str).map(str::to_owned) {
+                            let backend = backend.clone();
+                            let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
+                            let why = call.map_or_else(|| "보안 현황에서 멈춤".to_owned(), |(s, n)| format!("사건 {s} #{n}"));
+                            spawn(async move {
+                                saved.set(Some(match backend.revoke(None, Some(&email), &by, &why).await {
+                                    Ok(n) => format!("멈춤 · {email} · 키 {n}개 회수"),
+                                    Err(e) => format!("멈춤 실패 · {e}"),
+                                }));
+                            });
+                        }
+                    }
+                    (Some("inventory"), _) => state.screen.set(Screen::Inventory),
+                    // A file the page made (a list, or one case's evidence), saved where asked.
+                    (Some("export"), _) => {
+                        let name = m.get("name").and_then(Value::as_str).unwrap_or("withhuman.json").to_owned();
+                        let text = m.get("text").and_then(Value::as_str).unwrap_or_default().to_owned();
+                        spawn(async move {
+                            let kind = name.rsplit('.').next().unwrap_or("json").to_owned();
+                            let Some(file) = rfd::AsyncFileDialog::new()
+                                .add_filter(kind.to_uppercase(), &[kind.as_str()])
+                                .set_file_name(&name)
+                                .save_file()
+                                .await
+                            else {
+                                return;
+                            };
+                            let path = file.path().to_path_buf();
+                            saved.set(Some(match std::fs::write(&path, text) {
+                                Ok(()) => format!("저장됨 · {}", path.display()),
+                                Err(e) => format!("저장 실패 · {e}"),
+                            }));
+                        });
                     }
                     (Some("settings"), _) => state.settings_open.set(true),
                     _ => {}

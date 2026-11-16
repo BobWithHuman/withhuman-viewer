@@ -1,25 +1,34 @@
-// What to look at now, as one list seen three ways: the latest Calls worth a look, the prompts
-// whose turns were stopped most, and the Calls a person let run after the engine asked. A row
-// opens its detail at the right, from where the Call opens in 기록 or in 감사's approvals.
+// What to look at now, as one list seen three ways: the sessions with Calls worth a look, the
+// riskiest first, each with its machine, its tools and what was stopped or held in it; those
+// Calls one by one; and the Calls a person let run after the engine asked. A row opens its
+// detail at the right, from where the Call opens in 기록 or in 감사's approvals.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowUpRight, Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DataTable, Panel, VerdictBadge, Warn, ago, clock } from "@/kit";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { DataTable, Panel, VerdictBadge, Warn, clock } from "@/kit";
 import { cn } from "@/lib/utils";
-import { type Call, DIM, MODE, SEV, SEVS, type Sev } from "./data";
+import { CaseView } from "./case";
+import { ACTION, type Alert, type Blocked, type Call, type Case, DIM, type Group, MARK, type Mark, SEV, SEVS, type Sev, groups, toolName, worst } from "./data";
 
 /** What the page asks the app to do. */
-export type Ask = (message: { do: "open" | "approvals" | "settings"; session?: string; seq?: number }) => void;
+export type Ask = (message:
+  | { do: "open" | "case"; session: string; seq: number }
+  | { do: "triage"; session: string; state: string | null }
+  | { do: "source"; source: string; on: boolean; session: string; seq: number }
+  | { do: "stop"; email: string; session: string; seq: number }
+  | { do: "inventory" }
+  | { do: "export"; name: string; text: string }
+  | { do: "settings" }) => void;
 
-/** A prompt whose turns had Calls stopped: its stops, the newest first. */
-type Stopped = { prompt: string; stops: Call[]; machines: string[] };
-type View = "calls" | "prompts" | "approved";
+type View = "sessions" | "calls" | "approved" | "devices";
 const NO_PROMPT = "프롬프트 없음";
 /** How many rows a view lists; the newest or the most come first. */
 const ROWS = 300;
@@ -27,21 +36,63 @@ const ROWS = 300;
 export function SevBadge({ s }: { s: Sev }) {
   return <Badge variant="secondary" className={cn("border-0 font-semibold", SEV[s].cls)}>{SEV[s].label}</Badge>;
 }
-const short = (tool: string | null) => (tool ?? "").replace(/^mcp__/, "").replace(/__/g, " · ");
 const Mono = ({ children }: { children: ReactNode }) => <span className="font-mono text-[12px]">{children}</span>;
 const What = ({ c }: { c: Call }) => (
   <span className="flex min-w-0 items-center gap-2">
-    {c.tool && <span className="max-w-32 shrink-0 truncate rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{short(c.tool)}</span>}
+    {c.tool && <span className="max-w-32 shrink-0 truncate rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{toolName(c.tool)}</span>}
     <code className="min-w-0 truncate font-mono text-[12px]">{c.target ?? c.tool}</code>
   </span>
 );
 const When = ({ at }: { at: number | null }) => <span className="tnum text-[12px] text-muted-foreground">{clock(at)}</span>;
 
+/** A Call's verdict, and for one held whether the person let it run. */
+const Verdict = ({ c }: { c: Call }) => <VerdictBadge v={c.verdict}>{c.verdict === "review" ? (c.ran ? "확인 · 승인" : "확인 · 반려") : c.verdict === "allow" ? "허용" : undefined}</VerdictBadge>;
+/** How many of some Calls were stopped, held and allowed though hard to undo. */
+function Verdicts({ calls }: { calls: Call[] }) {
+  const n = (v: string) => calls.filter((c) => c.verdict === v).length;
+  return (
+    <span className="tnum flex items-center gap-2.5 text-[12px]">
+      {([["deny", "차단", "text-deny"], ["review", "확인", "text-review"], ["allow", "허용", "text-allow"]] as const).map(([v, label, cls]) => (
+        <span key={v} className={cn("inline-flex items-center gap-1", n(v) ? cls : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />{label} {n(v)}</span>
+      ))}
+    </span>
+  );
+}
+/** The tools some Calls used, the most used first. */
+function Tools({ calls }: { calls: Call[] }) {
+  const n = new Map<string, number>();
+  for (const c of calls) if (c.tool) n.set(c.tool, (n.get(c.tool) ?? 0) + 1);
+  const list = [...n.entries()].sort((a, b) => b[1] - a[1]);
+  return (
+    <span className="flex min-w-0 items-center gap-1 overflow-hidden" title={list.map(([t, c]) => `${toolName(t)} ${c}`).join(" · ")}>
+      {list.slice(0, 2).map(([t, c]) => <span key={t} className="max-w-28 shrink-0 truncate rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-foreground/85">{toolName(t)}{c > 1 && <b className="tnum ml-1 font-medium">{c}</b>}</span>)}
+      {list.length > 2 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{list.length - 2}</span>}
+    </span>
+  );
+}
+/** The worst Call of a session, the newest of those. */
+const first = (g: Group) => { const w = worst(g); return g.calls.find((c) => c.sev === w) ?? g.calls[0]; };
+
+const sessionColumns = (marks: Record<string, Mark>): ColumnDef<Group>[] => [
+  { id: "mark", header: "처리", size: 84, accessorFn: (g) => marks[g.key]?.state ?? "", cell: ({ row }) => {
+    const m = marks[row.original.key];
+    return m ? <span className={cn("rounded px-1.5 text-[11.5px] leading-[20px] font-semibold", MARK[m.state].cls)}>{MARK[m.state].label}</span> : <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground"><i className="size-1.5 rounded-full bg-primary" />미처리</span>;
+  } },
+  { id: "sev", header: "심각도", size: 96, accessorFn: (g) => g.risk, cell: ({ row }) => <SevBadge s={worst(row.original)} /> },
+  { id: "prompt", header: "세션", accessorFn: (g) => g.calls[0].prompt ?? "", cell: ({ row }) => <span className={cn("block truncate", !row.original.calls[0].prompt && "text-muted-foreground")}>{row.original.calls[0].prompt ?? NO_PROMPT}</span> },
+  { id: "machine", header: "단말", size: 160, accessorFn: (g) => g.calls[0].machine, cell: ({ row }) => <Mono>{row.original.calls[0].machine}</Mono> },
+  { id: "tools", header: "도구", size: 210, accessorFn: (g) => g.calls[0].tool ?? "", cell: ({ row }) => <Tools calls={row.original.calls} /> },
+  { id: "found", header: "탐지", size: 200, accessorFn: (g) => g.total, cell: ({ row }) => <Verdicts calls={row.original.calls} /> },
+  { id: "target", header: "가장 심각한 호출", accessorFn: (g) => first(g).target ?? "", cell: ({ row }) => <code className="block truncate font-mono text-[12px] text-muted-foreground">{first(row.original).target ?? first(row.original).tool}</code> },
+  { id: "at", header: "최근", size: 104, accessorFn: (g) => g.calls[0].at ?? 0, cell: ({ row }) => <When at={row.original.calls[0].at} /> },
+];
 const CALLS: ColumnDef<Call>[] = [
   { id: "sev", header: "심각도", size: 96, accessorFn: (c) => -SEVS.indexOf(c.sev), cell: ({ row }) => <SevBadge s={row.original.sev} /> },
-  { id: "kind", header: "유형", size: 208, accessorFn: (c) => DIM.kind.name(DIM.kind.of(c)) },
-  { id: "target", header: "대상", accessorFn: (c) => c.target ?? "", cell: ({ row }) => <What c={row.original} /> },
-  { id: "source", header: "원인", size: 100, accessorFn: (c) => DIM.source.name(c.source), cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span> },
+  { id: "verdict", header: "판정", size: 116, accessorFn: (c) => c.verdict, cell: ({ row }) => <Verdict c={row.original} /> },
+  { id: "target", header: "호출", accessorFn: (c) => c.target ?? "", cell: ({ row }) => <What c={row.original} /> },
+  { id: "action", header: "행동", size: 132, accessorFn: (c) => ACTION[c.action]?.label ?? c.action, cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span> },
+  { id: "kind", header: "위반 유형", size: 196, accessorFn: (c) => DIM.kind.name(DIM.kind.of(c)) },
+  { id: "source", header: "정한 쪽", size: 100, accessorFn: (c) => DIM.source.name(c.source), cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span> },
   { id: "machine", header: "단말", size: 152, accessorKey: "machine", cell: ({ row }) => <Mono>{row.original.machine}</Mono> },
   { id: "at", header: "시각", size: 104, accessorFn: (c) => c.at ?? 0, cell: ({ row }) => <When at={row.original.at} /> },
 ];
@@ -52,26 +103,30 @@ const APPROVED: ColumnDef<Call>[] = [
   { id: "machine", header: "단말", size: 152, accessorKey: "machine", cell: ({ row }) => <Mono>{row.original.machine}</Mono> },
   { id: "at", header: "시각", size: 104, accessorFn: (c) => c.at ?? 0, cell: ({ row }) => <When at={row.original.at} /> },
 ];
-const prompts = (most: number): ColumnDef<Stopped>[] => [
-  { id: "prompt", header: "프롬프트", accessorKey: "prompt", cell: ({ row }) => <span className={cn(row.original.prompt === NO_PROMPT && "text-muted-foreground")}>{row.original.prompt}</span> },
-  {
-    id: "stops", header: "차단", size: 200, accessorFn: (p) => p.stops.length,
-    cell: ({ row }) => (
-      <span className="flex items-center gap-2">
-        <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.05]"><i className="block h-full rounded-full bg-deny" style={{ width: `${(row.original.stops.length / most) * 100}%` }} /></span>
-        <b className="tnum w-6 text-right font-semibold">{row.original.stops.length}</b>
-      </span>
-    ),
-  },
-  { id: "machine", header: "단말", size: 184, accessorFn: (p) => p.machines[0], cell: ({ row }) => <span className="flex items-center gap-1.5"><span className="min-w-0 truncate font-mono text-[12px]">{row.original.machines[0]}</span>{row.original.machines.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{row.original.machines.length - 1}</span>}</span> },
-  { id: "at", header: "최근", size: 104, accessorFn: (p) => p.stops[0].at ?? 0, cell: ({ row }) => <When at={row.original.stops[0].at} /> },
+/** A machine to tell the team about, with why: newly registered, or not heard from. */
+type Told = Alert & { why: "new" | "silent" };
+const DEVICES: ColumnDef<Told>[] = [
+  { id: "why", header: "알림", size: 110, accessorFn: (a) => a.why, cell: ({ row }) => (row.original.why === "new"
+    ? <span className="rounded bg-info/15 px-1.5 text-[11.5px] leading-[20px] font-semibold text-info">새 기기</span>
+    : <span className="rounded bg-review/15 px-1.5 text-[11.5px] leading-[20px] font-semibold text-review">연결 끊김</span>) },
+  { id: "host", header: "기기", accessorFn: (a) => a.host ?? a.id, cell: ({ row }) => <span className="flex min-w-0 items-baseline gap-2"><Mono>{row.original.host ?? row.original.id}</Mono>{row.original.host && <span className="truncate font-mono text-[11px] text-muted-foreground">{row.original.id}</span>}</span> },
+  { id: "user", header: "담당자", size: 220, accessorFn: (a) => a.user ?? "", cell: ({ row }) => (row.original.user ? <span className="truncate">{row.original.user}</span> : <span className="text-muted-foreground">모름</span>) },
+  { id: "edr", header: "EDR", size: 120, accessorFn: (a) => a.edr ?? "", cell: ({ row }) => <span className="text-muted-foreground">{row.original.edr === "active" ? "연결됨" : row.original.edr === "disconnected" ? "끊김" : row.original.edr ?? "–"}</span> },
+  { id: "at", header: "시각", size: 104, accessorFn: (a) => a.at ?? 0, cell: ({ row }) => <When at={row.original.at} /> },
 ];
 
-export function Watch({ calls, ask, className }: { calls: Call[]; ask: Ask; className?: string }) {
-  const [view, setView] = useState<View>("calls");
+export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, alerts, className }: {
+  calls: Call[]; ask: Ask; loading?: boolean; className?: string;
+  /** The sources the team distrusts, and the machines to tell it about. */
+  blocked: Blocked[]; alerts: Told[];
+  /** What the team marked each session as, the case the app read, and what the last save said. */
+  marks: Record<string, Mark>; caseData?: Case | null; saved?: string | null;
+}) {
+  const [view, setView] = useState<View>("sessions");
   const [query, setQuery] = useState("");
   const [call, setCall] = useState<Call | null>(null);
-  const [prompt, setPrompt] = useState<Stopped | null>(null);
+  // Whether the sessions already marked are listed too.
+  const [every, setEvery] = useState(false);
 
   const found = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -79,21 +134,22 @@ export function Watch({ calls, ask, className }: { calls: Call[]; ask: Ask; clas
     return calls.filter((c) => [c.target, c.prompt, c.machine, c.tool, c.folder, c.reason, DIM.kind.name(DIM.kind.of(c))].some((t) => t?.toLowerCase().includes(q)));
   }, [calls, query]);
   const newest = useMemo(() => [...found].sort((a, b) => (b.at ?? 0) - (a.at ?? 0) || b.seq - a.seq), [found]);
-  const stopped = useMemo(() => {
-    const by = new Map<string, Stopped>();
-    for (const c of newest) {
-      if (c.verdict !== "deny") continue;
-      const key = c.prompt ?? NO_PROMPT;
-      let row = by.get(key);
-      if (!row) by.set(key, (row = { prompt: key, stops: [], machines: [] }));
-      row.stops.push(c);
-      if (!row.machines.includes(c.machine)) row.machines.push(c.machine);
-    }
-    return [...by.values()].sort((a, b) => b.stops.length - a.stops.length || a.prompt.localeCompare(b.prompt));
-  }, [newest]);
+  // The sessions, the riskiest first; each one's Calls stay the newest first.
+  const allSessions = useMemo(() => groups(newest, (c) => c.session), [newest]);
+  const sessions = useMemo(() => (every ? allSessions : allSessions.filter((g) => !marks[g.key])), [allSessions, every, marks]);
+  const columns = useMemo(() => sessionColumns(marks), [marks]);
+  const group = call ? allSessions.find((g) => g.key === call.session) : undefined;
+  const open = (c: Call) => { setCall(c); ask({ do: "case", session: c.session, seq: c.seq }); };
+  // What is listed now, as a file: the sessions with their Calls, or the Calls alone.
+  const exported = () => ask({
+    do: "export", name: `withhuman-${view}-${new Date().toISOString().slice(0, 10)}.json`,
+    text: JSON.stringify(view === "sessions"
+      ? sessions.map((g) => ({ session: g.key, mark: marks[g.key] ?? null, machine: g.calls[0].machine, prompt: g.calls[0].prompt, calls: g.calls }))
+      : view === "calls" ? newest : approved, null, 2),
+  });
   // The hardest to undo first, then the newest.
-  const approved = useMemo(() => newest.filter((c) => c.verdict === "review" && c.ran).sort((a, b) => Number(b.hard) - Number(a.hard)), [newest]);
-  const promptColumns = useMemo(() => prompts(stopped[0]?.stops.length ?? 1), [stopped]);
+  // Those in a session already marked are left out with the marked sessions.
+  const approved = useMemo(() => newest.filter((c) => c.verdict === "review" && c.ran && (every || !marks[c.session])).sort((a, b) => Number(b.hard) - Number(a.hard)), [newest, every, marks]);
 
   const tab = (v: View, label: string, n: number) => (
     <TabsTrigger value={v} className="gap-1.5 px-2.5 text-[13px]">{label}<span className="tnum text-[11.5px] text-muted-foreground">{n.toLocaleString()}</span></TabsTrigger>
@@ -101,9 +157,18 @@ export function Watch({ calls, ask, className }: { calls: Call[]; ask: Ask; clas
   return (
     <Panel
       pad={false} className={cn("min-h-0 overflow-hidden [&>[data-slot=card-content]]:flex [&>[data-slot=card-content]]:min-h-0 [&>[data-slot=card-content]]:flex-1 [&>[data-slot=card-content]]:flex-col", className)}
-      title={<Tabs value={view} onValueChange={(v) => setView(v as View)}><TabsList>{tab("calls", "탐지", newest.length)}{tab("prompts", "차단을 일으킨 프롬프트", stopped.length)}{tab("approved", "사용자 승인", approved.length)}</TabsList></Tabs>}
+      title={<Tabs value={view} onValueChange={(v) => setView(v as View)}><TabsList>{tab("sessions", every ? "탐지 세션" : "처리할 세션", sessions.length)}{tab("calls", "호출", newest.length)}{tab("approved", "사용자 승인", approved.length)}{tab("devices", "기기 알림", alerts.length)}</TabsList></Tabs>}
       aside={<>
-        {view === "approved" && <Button variant="ghost" size="sm" onClick={() => ask({ do: "approvals" })}>감사 승인 기록<ArrowUpRight /></Button>}
+        {saved && <span className="max-w-[320px] truncate text-[12px]" title={saved}>{saved}</span>}
+        {(view === "sessions" || view === "approved") && (
+          <ToggleGroup type="single" size="sm" value={every ? "all" : "open"} onValueChange={(v) => v && setEvery(v === "all")}>
+            <ToggleGroupItem value="open" className="px-2.5 text-[12.5px]">미처리</ToggleGroupItem>
+            <ToggleGroupItem value="all" className="px-2.5 text-[12.5px]">전체</ToggleGroupItem>
+          </ToggleGroup>
+        )}
+        {view === "devices"
+          ? <Button variant="outline" size="sm" onClick={() => ask({ do: "inventory" })}>인벤토리</Button>
+          : <Button variant="outline" size="sm" onClick={exported}><Download />내보내기</Button>}
         <span className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="검색" className="h-7 w-52 pl-7 text-[12.5px] md:text-[12.5px]" />
@@ -111,83 +176,18 @@ export function Watch({ calls, ask, className }: { calls: Call[]; ask: Ask; clas
       </>}
     >
       <div className="min-h-0 flex-1 border-t [&_[data-slot=table-container]]:scroll [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-y-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
-        {view === "calls" && <DataTable columns={CALLS} rows={newest.slice(0, ROWS)} onRow={setCall} picked={(c) => c === call} dense />}
-        {view === "prompts" && <DataTable columns={promptColumns} rows={stopped.slice(0, ROWS)} onRow={setPrompt} picked={(p) => p === prompt} dense />}
-        {view === "approved" && <DataTable columns={APPROVED} rows={approved.slice(0, ROWS)} onRow={setCall} picked={(c) => c === call} dense />}
+        {!loading && view === "calls" && <DataTable columns={CALLS} rows={newest.slice(0, ROWS)} onRow={open} picked={(c) => c === call} dense />}
+        {loading && <div className="flex flex-col gap-2 p-4">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-8 rounded-md" />)}</div>}
+        {!loading && view === "sessions" && <DataTable columns={columns} rows={sessions.slice(0, ROWS)} onRow={(g) => open(first(g))} picked={(g) => g.key === call?.session} dense />}
+        {!loading && view === "devices" && <DataTable columns={DEVICES} rows={alerts} onRow={() => ask({ do: "inventory" })} dense />}
+        {!loading && view === "approved" && <DataTable columns={APPROVED} rows={approved.slice(0, ROWS)} onRow={open} picked={(c) => c === call} dense />}
       </div>
 
-      <Sheet open={!!prompt && !call} onOpenChange={(open) => !open && setPrompt(null)}>
-        <SheetContent className="gap-0 data-[side=right]:w-[460px] data-[side=right]:sm:max-w-[460px]">
-          {prompt && <>
-            <SheetHeader className="gap-1.5 border-b pr-12">
-              <div className="flex items-center gap-1.5"><VerdictBadge v="deny">차단 {prompt.stops.length}</VerdictBadge></div>
-              <SheetTitle className="text-[15px]">차단을 일으킨 프롬프트</SheetTitle>
-              <SheetDescription className="tnum text-[12px]">{clock(prompt.stops[0].at)} · {ago(prompt.stops[0].at)}</SheetDescription>
-            </SheetHeader>
-            <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4">
-              <Field label="프롬프트"><Quote>{prompt.prompt}</Quote></Field>
-              <Field label="차단된 호출">
-                <div className="flex flex-col overflow-hidden rounded-lg border">
-                  {prompt.stops.map((c) => (
-                    <button key={`${c.session}-${c.seq}`} onClick={() => setCall(c)} className="flex items-center gap-2 border-b px-2.5 py-2 text-left transition-colors last:border-b-0 hover:bg-accent/70">
-                      <SevBadge s={c.sev} />
-                      <code className="min-w-0 flex-1 truncate font-mono text-[12px]">{c.target ?? c.tool}</code>
-                      <When at={c.at} />
-                    </button>
-                  ))}
-                </div>
-              </Field>
-            </div>
-            <SheetFooter className="flex-row border-t">
-              <Button onClick={() => ask({ do: "open", session: prompt.stops[0].session, seq: prompt.stops[0].seq })}>최근 차단 기록에서 열기<ArrowUpRight /></Button>
-            </SheetFooter>
-          </>}
-        </SheetContent>
-      </Sheet>
-
-      <Sheet open={!!call} onOpenChange={(open) => !open && setCall(null)}>
-        <SheetContent className="gap-0 data-[side=right]:w-[460px] data-[side=right]:sm:max-w-[460px]">
-          {call && <>
-            <SheetHeader className="gap-1.5 border-b pr-12">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <SevBadge s={call.sev} />
-                <VerdictBadge v={call.verdict}>{call.verdict === "review" ? (call.ran ? "확인 요청 · 승인" : "확인 요청 · 반려") : undefined}</VerdictBadge>
-                {call.hard && <Warn>되돌리기 어려움</Warn>}
-              </div>
-              <SheetTitle className="text-[15px]">{DIM.kind.name(DIM.kind.of(call))}</SheetTitle>
-              <SheetDescription className="tnum text-[12px]">{clock(call.at)} · {ago(call.at)}</SheetDescription>
-            </SheetHeader>
-            <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4">
-              <Field label="대상"><pre className="rounded-lg border bg-background p-3 font-mono text-[12px] leading-relaxed break-all whitespace-pre-wrap">{call.target ?? call.tool}</pre></Field>
-              <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12.5px]">
-                <Row label="도구"><Mono>{call.tool ?? "–"}</Mono></Row>
-                <Row label="단말"><Mono>{call.machine}</Mono></Row>
-                <Row label="폴더"><Mono>{call.cwd ?? (call.folder || "–")}</Mono></Row>
-                <Row label="원인">{DIM.source.name(call.source)}</Row>
-                <Row label="규칙"><Mono>{call.rule ?? "–"}</Mono></Row>
-                <Row label="엔진">{(MODE[call.mode ?? "none"] ?? MODE.none).label}</Row>
-                <Row label="실행">{call.ran ? "실행됨" : "실행 안 됨"}</Row>
-              </dl>
-              {call.reason && <Field label="판정 이유"><Quote>{call.reason}</Quote></Field>}
-              {call.prompt && <Field label="프롬프트"><Quote>{call.prompt}</Quote></Field>}
-            </div>
-            <SheetFooter className="flex-row border-t">
-              <Button onClick={() => ask({ do: "open", session: call.session, seq: call.seq })}>기록에서 열기<ArrowUpRight /></Button>
-              {call.verdict === "review" && <Button variant="outline" onClick={() => ask({ do: "approvals", session: call.session, seq: call.seq })}>감사 승인 기록<ArrowUpRight /></Button>}
-            </SheetFooter>
-          </>}
+      <Sheet open={!!call} onOpenChange={(on) => !on && setCall(null)}>
+        <SheetContent className="gap-0 data-[side=right]:w-[min(1040px,92vw)] data-[side=right]:sm:max-w-[min(1040px,92vw)]" onOpenAutoFocus={(e) => e.preventDefault()}>
+          {call && group && <CaseView call={call} group={group} data={caseData} mark={marks[call.session]} blocked={blocked} ask={ask} onCall={open} />}
         </SheetContent>
       </Sheet>
     </Panel>
   );
 }
-
-const Field = ({ label, children }: { label: string; children: ReactNode }) => (
-  <section className="flex flex-col gap-1.5"><h3 className="text-[12px] text-muted-foreground">{label}</h3>{children}</section>
-);
-const Row = ({ label, children }: { label: string; children: ReactNode }) => (
-  <><dt className="text-muted-foreground">{label}</dt><dd className="min-w-0 break-all">{children}</dd></>
-);
-const Quote = ({ children }: { children: ReactNode }) => (
-  <p className="rounded-lg bg-secondary/60 px-3 py-2.5 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{children}</p>
-);
