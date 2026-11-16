@@ -5,14 +5,13 @@
 // as the engine keeps it, and a place it showed opens in 기록.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, ArrowUpRight, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Bot, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { send } from "@/bridge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, ago, clock } from "@/kit";
@@ -27,7 +26,6 @@ import { SourceBars, parts } from "./secrets/sources";
 const DAY = 24 * 3600e3;
 const PERIODS: [string, string][] = [["1", "24시간"], ["7", "7일"], ["30", "30일"], ["all", "전체"]];
 const RANK: Record<Status, number> = { out: 3, blocked: 2, seen: 0 };
-type Tab = "values" | "sessions" | "sources";
 /** What a figure pressed leaves on the page: every value, those put in a prompt, those a session
  * tried to send out, or those that came out of a document or a tool result. */
 type Focus = "all" | "prompt" | "tries" | "sources";
@@ -37,9 +35,17 @@ const FOCUS: Record<Focus, (t: Trail) => boolean> = {
   tries: (t) => t.mentions.some((m) => m.out),
   sources: (t) => !!t.source,
 };
-type Open = { value: Value } | { attempt: Attempt } | { source: Source } | null;
+type Open = { value: Value } | { input: Trail } | { attempt: Attempt } | { source: Source } | null;
 type Split = "kind" | "source" | "place" | "client";
 const SPLITS: [Split, string][] = [["kind", "종류"], ["source", "출처"], ["place", "전송 대상"], ["client", "단말"]];
+/** What each figure's list is of and its bars split by first: the values; each value a person
+ * put in a prompt, by machine; the sessions that tried to send them, by where to; the sources. */
+const LIST: Record<Focus, { label: string; split: Split }> = {
+  all: { label: "값", split: "kind" },
+  prompt: { label: "입력", split: "client" },
+  tries: { label: "유출 시도", split: "place" },
+  sources: { label: "출처", split: "kind" },
+};
 
 /** Asks the app to show a place a value was in on the route map of 기록. */
 const openInRecord = (session: string, seq: number) => send("secrets", { type: "open", session, seq });
@@ -74,7 +80,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const d = (data as Data | null) ?? DEMO;
   const [period, setPeriod] = useState("7");
   const [filter, setFilter] = useState<Filter>({});
-  const [tab, setTab] = useState<Tab>("values");
   const [focus, setFocus] = useState<Focus>("all");
   const [split, setSplit] = useState<Split>("kind");
   const [query, setQuery] = useState("");
@@ -119,11 +124,16 @@ export default function Page({ data }: { data: unknown | null }) {
   const shownFrom = useMemo(() => sources(shown), [shown]);
   const chips = (Object.keys(filter) as Dim[]).filter((k) => filter[k] !== undefined);
   const chipLabel = (k: Dim) => (k === "from" ? FROM[filter.from!].label : k === "category" ? categoryLabel(filter.category!) : k === "status" ? STATUS[filter.status!].label : filter[k]!);
-  const only = (f: Focus, to: Tab) => {
+  const only = (f: Focus) => {
     setFocus(f);
     setFilter({});
-    setTab(to);
+    setSplit(LIST[f].split);
+    setOpen(null);
   };
+  // The bars' splits worth having: every value a person typed came from them, so not by source.
+  const splits = SPLITS.filter(([v]) => !(focus === "prompt" && v === "source"));
+  const shownInputs = useMemo(() => [...shown].sort((a, b) => RANK[b.status] - RANK[a.status] || (b.last ?? 0) - (a.last ?? 0)), [shown]);
+  const listed = { all: shownValues.length, prompt: shownInputs.length, tries: shownTries.length, sources: shownFrom.length }[focus];
 
   return (
     <div className="flex h-full flex-col">
@@ -140,16 +150,16 @@ export default function Page({ data }: { data: unknown | null }) {
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-6 pb-6">
         <div className="grid shrink-0 grid-cols-4 gap-4">
           <Stat label="탐지된 민감정보" icon={ShieldAlert} value={values(inPeriod).length} unit={`개 · 노출 ${inPeriod.length}회`} delta={delta((l) => values(l).length)}
-            active={focus === "all"} onClick={() => only("all", "values")} />
+            active={focus === "all"} onClick={() => only("all")} />
           <Stat label="사용자 입력" icon={MessageSquareText} value={prompted.length}
             unit={`회 · 세션 ${new Set(prompted.map((t) => t.session)).size} · 단말 ${new Set(prompted.map((t) => t.client)).size}`}
             delta={delta((l) => l.filter((t) => fromOf(t) === "user").length)}
-            active={focus === "prompt"} onClick={() => only("prompt", "values")} />
+            active={focus === "prompt"} onClick={() => only("prompt")} />
           <Stat label="유출 시도" icon={Send} value={tries.length} tone={tries.some((a) => a.ran > 0) ? "var(--deny)" : undefined}
             unit={`개 · 유출 ${tries.filter((a) => a.ran > 0).length} · 차단 ${tries.filter((a) => a.ran === 0).length}`}
-            active={focus === "tries"} onClick={() => only("tries", "sessions")} />
+            active={focus === "tries"} onClick={() => only("tries")} />
           <Stat label="출처" icon={FileText} value={from.length} unit={`곳 · 값 ${from.reduce((a, s) => a + s.trails.length, 0)}`}
-            active={focus === "sources"} onClick={() => only("sources", "values")} />
+            active={focus === "sources"} onClick={() => only("sources")} />
         </div>
 
         <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_340px] gap-4 min-[1600px]:grid-cols-[minmax(0,1fr)_400px]">
@@ -164,7 +174,7 @@ export default function Page({ data }: { data: unknown | null }) {
           )}
           <Panel title={
             <ToggleGroup type="single" size="sm" value={split} onValueChange={(v) => v && setSplit(v as Split)} className="-ml-1.5">
-              {SPLITS.map(([v, l]) => <ToggleGroupItem key={v} value={v} className="px-2 text-[13px] text-muted-foreground data-[state=on]:text-foreground">{l}</ToggleGroupItem>)}
+              {splits.map(([v, l]) => <ToggleGroupItem key={v} value={v} className="px-2 text-[13px] text-muted-foreground data-[state=on]:text-foreground">{l}</ToggleGroupItem>)}
             </ToggleGroup>
           } aside={<span className="tnum">{splitBars.length}</span>}>
             <SplitBars bars={splitBars} split={split} picked={filter[split]} height={flowHeight}
@@ -173,15 +183,7 @@ export default function Page({ data }: { data: unknown | null }) {
         </div>
 
         <Panel pad={false} className="min-h-[264px] flex-1 overflow-hidden [&>[data-slot=card-content]]:min-h-0 [&>[data-slot=card-content]]:flex-1 [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-auto"
-          title={
-            <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-              <TabsList className="-ml-1">
-                {([["values", "값", shownValues.length], ["sessions", "유출 시도", shownTries.length], ["sources", "출처", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
-                  <TabsTrigger key={v} value={v} className="gap-1.5 px-2.5 text-[12.5px]">{l}<span className="tnum text-[11.5px] text-muted-foreground">{n}</span></TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          }
+          title={LIST[focus].label} count={listed}
           aside={<>
             {chips.map((k) => (
               <button key={k} onClick={() => setFilter({ ...filter, [k]: undefined })} className="inline-flex h-6 max-w-[180px] items-center gap-1 rounded-md bg-primary/15 pr-1 pl-2 text-[12px] text-primary transition-colors hover:bg-primary/25">
@@ -194,16 +196,19 @@ export default function Page({ data }: { data: unknown | null }) {
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
             </label>
           </>}>
-          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt")} rows={shownValues} onRow={(v) => setOpen({ value: v })}
+          {focus === "all" && <DataTable dense columns={valueColumns(d.now)} rows={shownValues} onRow={(v) => setOpen({ value: v })}
             picked={(v) => !!open && "value" in open && open.value.key === v.key} />}
-          {tab === "sessions" && <DataTable dense columns={attemptColumns(d.now)} rows={shownTries} onRow={(a) => setOpen({ attempt: a })} picked={(a) => !!open && "attempt" in open && open.attempt.session === a.session} />}
-          {tab === "sources" && <DataTable dense columns={sourceColumns(d.now)} rows={shownFrom} onRow={(s) => setOpen({ source: s })} picked={(s) => !!open && "source" in open && open.source.name === s.name} />}
+          {focus === "prompt" && <DataTable dense columns={inputColumns(d.now)} rows={shownInputs} onRow={(t) => setOpen({ input: t })}
+            picked={(t) => !!open && "input" in open && open.input.id === t.id} />}
+          {focus === "tries" && <DataTable dense columns={attemptColumns(d.now)} rows={shownTries} onRow={(a) => setOpen({ attempt: a })} picked={(a) => !!open && "attempt" in open && open.attempt.session === a.session} />}
+          {focus === "sources" && <DataTable dense columns={sourceColumns(d.now)} rows={shownFrom} onRow={(s) => setOpen({ source: s })} picked={(s) => !!open && "source" in open && open.source.name === s.name} />}
         </Panel>
       </div>
 
       <Sheet open={open !== null} onOpenChange={(on) => !on && setOpen(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[520px] data-[side=right]:sm:max-w-[520px]" aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
           {open && "value" in open && <ValueSheet v={open.value} all={byValue.get(valueKey(open.value.trails[0])) ?? open.value.trails} now={d.now} />}
+          {open && "input" in open && <ValueSheet v={values([open.input])[0]} all={byValue.get(valueKey(open.input)) ?? [open.input]} now={d.now} />}
           {open && "attempt" in open && <AttemptSheet a={open.attempt} now={d.now} />}
           {open && "source" in open && <SourceSheet s={open.source} now={d.now} />}
         </SheetContent>
@@ -289,16 +294,49 @@ function SourceName({ name }: { name: string }) {
 /** What a person typed a value in, else the session's name. */
 const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionName(t);
 
+/** How a value ended, with whom it was sent to when it left or was about to. */
+function Result({ status, places }: { status: Status; places: string[] }) {
+  const to = targets(places);
+  return (
+    <span className="flex min-w-0 items-center gap-2"><StatusBadge s={status} />
+      {status !== "seen" && to.length > 0 && <><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</>}
+    </span>
+  );
+}
+
+/** Where a value came in, as a cell names it: a person, the document or tool, or not known. */
+function OriginName({ origin }: { origin: string }) {
+  if (origin === "user") return <span className="flex min-w-0 items-center gap-1.5"><MessageSquareText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">사용자 입력</span></span>;
+  if (origin === "agent") return <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground"><Bot className="size-3.5 shrink-0" strokeWidth={1.9} /><span className="truncate">출처 불명</span></span>;
+  const p = parts(origin);
+  return (
+    <span className="flex min-w-0 items-center gap-1.5" title={origin}>
+      {!p.server && (p.command ? <SquareTerminal className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /> : <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />)}
+      <SourceName name={origin} />
+    </span>
+  );
+}
+const originOf = (t: Trail) => (fromOf(t) === "user" ? "user" : t.source ?? "agent");
+
+/** A session's values from where they came in to whom they were sent, in a line: the first of
+ * each end, the rest counted, and an arrow in how the sends ended. */
+function Route({ trails, places, ran }: { trails: Trail[]; places: string[]; ran: boolean }) {
+  const from = [...new Set(trails.map(originOf))].sort((a, b) => Number(a === "agent") - Number(b === "agent"));
+  const to = targets(places);
+  const more = (n: number) => n > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{n - 1}</span>;
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="flex min-w-0 max-w-[48%] shrink-0 items-center gap-1.5"><OriginName origin={from[0]} />{more(from.length)}</span>
+      <ArrowRight className="size-3.5 shrink-0" style={{ color: ran ? "var(--deny)" : "var(--review)" }} strokeWidth={2.2} />
+      <span className="flex min-w-0 items-center gap-1.5">{to.length ? <Places names={to.slice(0, 1)} /> : <span className="text-muted-foreground">대상 모름</span>}{more(to.length)}</span>
+    </span>
+  );
+}
+
 /** A value over every session it showed in: how it ended at its worst, where it was sent, the
  * Call that carried it, where it came from, and how far it spread. */
-const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
-  { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => (
-    // Where a value that left, or was about to, was sent: the result names it.
-    <span className="flex min-w-0 items-center gap-2"><StatusBadge s={v.status} />{(() => {
-      const to = targets(v.places);
-      return v.status !== "seen" && to.length > 0 && <><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</>;
-    })()}</span>
-  ) },
+const valueColumns = (now: number): ColumnDef<Value>[] => [
+  { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => <Result status={v.status} places={v.places} /> },
   { id: "text", header: "값", size: 300, accessorFn: (v) => v.text, cell: ({ row: { original: v } }) => {
     const Icon = CATEGORY[v.category as Category]?.icon;
     return (
@@ -309,15 +347,7 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
       </span>
     );
   } },
-  typed
-    // Every value here was typed by a person: the prompt it was typed in tells more than where from.
-    ? { id: "typed", header: "입력 프롬프트", size: 250, accessorFn: (v) => typedIn(v.trails[0]), cell: ({ row: { original: v } }) => (
-      <span className="flex min-w-0 items-center gap-1.5" title={v.trails.map(typedIn).join("\n")}>
-        <span className="truncate">{typedIn(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
-      </span>
-    ) }
-    // Where it came in: the person's input, or the tool's response and what it came out of.
-    : { id: "from", header: "유입 경로", size: 280, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => {
+  { id: "from", header: "유입 경로", size: 280, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => {
       const typed = v.froms.includes("user"), from = typed ? "user" : v.froms[0];
       return (
         <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
@@ -332,6 +362,33 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
   { id: "open", header: "", size: 44, enableSorting: false, cell: ({ row: { original: v } }) => {
     const t = v.trails.find((x) => x.status === "out"), m = t?.mentions.find((x) => x.out && !x.held) ?? t?.mentions.find((x) => x.out);
     return t && m ? (
+      <button aria-label="기록에서 열기" title="기록에서 열기" onClick={(e) => { e.stopPropagation(); openInRecord(t.session, m.seq); }}
+        className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><ArrowUpRight className="size-3.5" /></button>
+    ) : null;
+  } },
+];
+
+/** A value a person put in a prompt, once a session: how it ended, the value, the prompt, and
+ * the machine. */
+const inputColumns = (now: number): ColumnDef<Trail>[] => [
+  { id: "status", header: "결과", size: 200, accessorFn: (t) => RANK[t.status], cell: ({ row: { original: t } }) => <Result status={t.status} places={placesOf(t)} /> },
+  { id: "text", header: "값", size: 250, accessorFn: (t) => t.text, cell: ({ row: { original: t } }) => {
+    const Icon = CATEGORY[t.category as Category]?.icon;
+    return (
+      <span className="flex min-w-0 items-center gap-2" title={t.text}>
+        {Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
+        <Masked className="min-w-0 truncate">{t.text}</Masked>
+        <span className="shrink-0 text-[12px] text-muted-foreground">{t.kind}</span>
+      </span>
+    );
+  } },
+  { id: "typed", header: "입력 프롬프트", size: 320, accessorFn: typedIn, cell: ({ row: { original: t } }) => <span className="block truncate" title={typedIn(t)}>{typedIn(t)}</span> },
+  { id: "client", header: "단말", size: 150, accessorFn: machineName, cell: ({ row: { original: t } }) => <Client name={machineName(t)} /> },
+  { id: "last", header: "마지막", size: 88, accessorFn: (t) => t.last ?? 0, cell: ({ row: { original: t } }) => <When at={t.last} now={now} /> },
+  // The prompt it was typed in, in 기록.
+  { id: "open", header: "", size: 44, enableSorting: false, cell: ({ row: { original: t } }) => {
+    const m = t.mentions.find((x) => x.said) ?? t.mentions[0];
+    return m ? (
       <button aria-label="기록에서 열기" title="기록에서 열기" onClick={(e) => { e.stopPropagation(); openInRecord(t.session, m.seq); }}
         className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><ArrowUpRight className="size-3.5" /></button>
     ) : null;
@@ -364,11 +421,11 @@ function Sent({ ran, held }: { ran: number; held: number }) {
 /** A session that tried to send values out: what it is, where to, the Call that carried them,
  * which values, and how its sends ended. */
 const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
-  { id: "status", header: "결과", size: 132, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <StatusBadge s={a.ran > 0 ? "out" : "blocked"} /> },
-  { id: "session", header: "세션", size: 250, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
-  { id: "places", header: "전송 대상", size: 200, accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
-  { id: "values", header: "값", size: 190, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
-  { id: "sent", header: "전송", size: 132, accessorFn: (a) => a.ran * 1000 + a.held, cell: ({ row: { original: a } }) => <Sent ran={a.ran} held={a.held} /> },
+  { id: "status", header: "결과", size: 88, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <StatusBadge s={a.ran > 0 ? "out" : "blocked"} /> },
+  { id: "route", header: "출처 → 전송 대상", size: 340, accessorFn: (a) => `${a.trails.map(originOf).join(" ")} ${a.places.join(" ")}`, cell: ({ row: { original: a } }) => <Route trails={a.trails} places={a.places} ran={a.ran > 0} /> },
+  { id: "session", header: "세션", size: 220, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
+  { id: "values", header: "값", size: 170, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
+  { id: "sent", header: "전송", size: 124, accessorFn: (a) => a.ran * 1000 + a.held, cell: ({ row: { original: a } }) => <Sent ran={a.ran} held={a.held} /> },
   { id: "client", header: "단말", size: 150, accessorFn: (a) => a.client, cell: ({ row: { original: a } }) => <Client name={a.client} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (a) => a.last ?? 0, cell: ({ row: { original: a } }) => <When at={a.last} now={now} /> },
 ];
@@ -397,6 +454,10 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
         <Sent ran={n.out} held={n.blocked} />
       </span>
     );
+  } },
+  { id: "to", header: "전송 대상", size: 200, accessorFn: (s) => targets(s.trails.flatMap(placesOf)).join(" "), cell: ({ row: { original: s } }) => {
+    const to = targets(s.trails.flatMap(placesOf));
+    return to.length ? <span className="flex min-w-0 items-center gap-1.5"><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</span> : <span className="text-muted-foreground">–</span>;
   } },
   { id: "spread", header: "영향 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (s) => s.last ?? 0, cell: ({ row: { original: s } }) => <When at={s.last} now={now} /> },
