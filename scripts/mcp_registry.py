@@ -10,10 +10,15 @@ and which service each server is (servers.json).
         their tools, to add to servers.json by hand.
     python3 scripts/mcp_registry.py check
         Checks services.json, servers.json and registry.json against each other.
+    python3 scripts/mcp_registry.py actions
+        Writes data/mcp/tool_actions.json, which the app carries to tell what an MCP tool does
+        from its name: the action most registry tools whose name starts with a word have
+        (`verbs`), and the tools whose own action differs from their first word's (`names`).
 """
 
 import collections
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -102,6 +107,31 @@ def check():
     sys.exit(1 if bad else 0)
 
 
+def first_word(name):
+    """A tool name's first word, lowercased: `sendEmail`, `send_email` and `send-email` give `send`."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name)
+    return re.split(r"[^A-Za-z0-9]+", spaced.strip("_- ."))[0].lower()
+
+
+def actions():
+    by_name = collections.defaultdict(collections.Counter)
+    by_verb = collections.defaultdict(collections.Counter)
+    for tools in load()[2].values():
+        for name, _category, action, _reason in tools:
+            by_name[name.lower()][action] += 1
+            by_verb[first_word(name)][action] += 1
+    # A word is kept when enough tools start with it to trust what most of them do.
+    verbs = {v: c.most_common(1)[0][0] for v, c in sorted(by_verb.items()) if v and sum(c.values()) >= 3}
+    names = {}
+    for name, c in sorted(by_name.items()):
+        action = c.most_common(1)[0][0]
+        if verbs.get(first_word(name)) != action:
+            names[name] = action
+    out = DATA / "tool_actions.json"
+    out.write_text(json.dumps({"verbs": verbs, "names": names}, ensure_ascii=False, separators=(",", ":")) + "\n")
+    print(f"{out}: 첫 단어 {len(verbs)}개, 예외 이름 {len(names)}개, {out.stat().st_size // 1024}KB")
+
+
 if __name__ == "__main__":
     cmd, *rest = sys.argv[1:] or ["help"]
     if cmd == "slim" and rest:
@@ -110,5 +140,7 @@ if __name__ == "__main__":
         suggest()
     elif cmd == "check":
         check()
+    elif cmd == "actions":
+        actions()
     else:
         print(__doc__)
