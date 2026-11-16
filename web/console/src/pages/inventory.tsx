@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
 import { Asks, type Ask } from "./inventory/dialogs";
 import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./inventory/marks";
-import { Threats } from "./inventory/threats";
+import { Threats, ThreatsLegend } from "./inventory/threats";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
 import { isOn } from "./inventory/mcp/types";
 import { END, ENGINE, WHY, derive, type Data, type Run, type Shadow, type Tab } from "./inventory/model";
@@ -218,9 +218,9 @@ export default function Page({ data }: { data: unknown | null }) {
       {header}
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-6">
         <div className="grid shrink-0 grid-cols-12 gap-4">
-          <Panel className="col-span-8 min-w-0" title="MCP 위협" aside={view.mcp?.from_calls && <Chip>호출 기준</Chip>}>
+          <Panel className="col-span-8 min-w-0" title="MCP 위협" aside={<>{view.mcp?.from_calls && <Chip>호출 기준</Chip>}<ThreatsLegend /></>}>
             <div className="h-[360px]">
-              <Threats servers={servers} focus={current ?? null} onTool={openTool} />
+              <Threats servers={servers} focus={current ?? null} onServer={openServer} onTool={openTool} />
             </div>
           </Panel>
           <Panel className="col-span-4 min-w-0" title="인벤토리">
