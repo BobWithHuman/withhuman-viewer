@@ -308,7 +308,8 @@ pub fn App() -> Element {
         fit: Signal::new(0),
     });
     // The session list, opened from the session's name in the top bar.
-    use_context_provider(|| flow::Picking(Signal::new(false)));
+    // VIEWER_PICK opens the session list at once, for a look at it.
+    use_context_provider(|| flow::Picking(Signal::new(std::env::var("VIEWER_PICK").is_ok())));
     use_loaders(backend.clone(), state);
     #[cfg(feature = "admin")]
     crate::admin::use_facts_loader(backend.clone(), state);
@@ -714,6 +715,7 @@ fn TopBar() -> Element {
             if screen == Screen::Work && mode == Mode::Graph {
                 div { class: "tb-session", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                     flow::SessionPick { class: "tb-pick" }
+                    if cfg!(feature = "admin") { flow::SessionDrop {} }
                 }
             }
             div { class: "tb-spacer" }

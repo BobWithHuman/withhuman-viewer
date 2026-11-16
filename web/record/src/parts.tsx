@@ -68,7 +68,7 @@ export function VerdictChip({ s }: { s: Step }) {
 export function Mono({ text, mark }: { text: string; mark?: string }) {
   const parts = mark && text.includes(mark) ? text.split(mark) : [text];
   return (
-    <pre className="m-0 rounded-md bg-box px-4 py-3 font-mono text-[12.5px] leading-[1.6] whitespace-pre-wrap text-[#e8e8e8]">
+    <pre className="m-0 rounded-md bg-box px-3 py-2 font-mono text-[11.5px] leading-[1.55] whitespace-pre-wrap text-[#e8e8e8]">
       {parts.map((p, i) => <span key={i}>{p}{i < parts.length - 1 && <mark className="rounded-[3px] bg-block/25 px-0.5 text-[#ffb4ab]">{mark}</mark>}</span>)}
     </pre>
   );
@@ -77,27 +77,27 @@ export function Mono({ text, mark }: { text: string; mark?: string }) {
 /** Everything about one step: its text, the engine's numbers, and what it caught. */
 export function DetailBody({ s }: { s: Step }) {
   return (
-    <div className="space-y-4">
-      {s.text && <div><div className="mb-2 text-[13px] font-semibold text-fg">{s.text.label}</div><Mono text={s.text.body} mark={s.text.mark} /></div>}
-      <dl className="grid grid-cols-[96px_1fr] gap-x-4 gap-y-2 text-[13px]">
-        {s.catch && <><dt className="text-right font-semibold">위험 점수</dt><dd className="m-0 flex items-center gap-1.5 text-fg"><TriangleAlert className="size-4 fill-catch text-[#282828]" />{s.catch.score}</dd></>}
+    <div className="space-y-3">
+      {s.text && <div><div className="mb-1.5 text-[11.5px] text-mut">{s.text.label}</div><Mono text={s.text.body} mark={s.text.mark} /></div>}
+      <dl className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1 text-[11.5px]">
+        {s.catch && <><dt className="text-mut">위험 점수</dt><dd className="m-0 flex items-center gap-1.5 text-fg"><TriangleAlert className="size-3.5 fill-catch text-[#282828]" />{s.catch.score}</dd></>}
         {s.detail.map(([k, v], i) => (
           <div key={i} className="contents">
-            <dt className="text-right font-semibold">{k}</dt>
-            <dd className="m-0 text-mut">{k === "판정" && s.verdict ? <span className={cx("rounded-md px-2 py-0.5 text-[12px] font-semibold", VERDICT[s.verdict][1])}>{v}</span> : k === "규칙" ? <code className="font-mono text-[12px]">{v}</code> : v}</dd>
+            <dt className="text-mut">{k}</dt>
+            <dd className="m-0 text-fg/85">{k === "판정" && s.verdict ? <span className={cx("rounded-md px-1.5 py-px text-[11px] font-semibold", VERDICT[s.verdict][1])}>{v}</span> : k === "규칙" ? <code className="font-mono text-[11px]">{v}</code> : v}</dd>
           </div>
         ))}
       </dl>
       {s.catch && (
         <div>
-          <div className="mb-2 text-[13px] font-semibold text-fg">탐지</div>
-          <div className="flex items-center rounded-md bg-box px-4 py-3">
-            <div><div className="text-[13.5px] text-fg">{s.catch.name}</div><div className="font-mono text-[11.5px] text-mut">{s.catch.sub}</div></div>
-            <span className="ml-auto flex items-center gap-1.5 text-[13px] font-semibold"><TriangleAlert className="size-4 fill-catch text-[#242424]" />{s.catch.score}</span>
+          <div className="mb-1.5 text-[11.5px] text-mut">탐지</div>
+          <div className="flex items-center rounded-md bg-box px-3 py-2">
+            <div><div className="text-[12px] text-fg">{s.catch.name}</div><div className="font-mono text-[11px] text-mut">{s.catch.sub}</div></div>
+            <span className="ml-auto flex items-center gap-1.5 text-[12px] font-semibold"><TriangleAlert className="size-3.5 fill-catch text-[#242424]" />{s.catch.score}</span>
           </div>
         </div>
       )}
-      {s.inside && <div className="flex flex-wrap gap-1.5">{s.inside.map((t) => <span key={t} className="rounded-md bg-chip px-2 py-1 font-mono text-[12px]">{t}</span>)}</div>}
+      {s.inside && <div className="flex flex-wrap gap-1.5">{s.inside.map((t) => <span key={t} className="rounded-md bg-chip px-1.5 py-0.5 font-mono text-[11px]">{t}</span>)}</div>}
     </div>
   );
 }

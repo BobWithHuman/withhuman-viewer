@@ -1717,6 +1717,27 @@ button.primary { background: var(--c-accent); border-color: var(--c-accent); }
 .topbar .tb-pick .lb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .topbar .tb-pick .act { flex: none; display: flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px; border-radius: 5px; background: var(--af-btn); color: #f2f2f2; font-size: 11.5px; }
 .tb-icon[hidden] { display: none; }
+/* The security team's session list, dropped from the top bar. */
+.tb-session { position: relative; }
+.tb-drop-shade { position: fixed; inset: 0; z-index: 59; }
+.tb-drop { position: absolute; z-index: 60; top: 34px; left: 0; width: 480px; max-height: min(560px, calc(100vh - 80px)); display: flex; flex-direction: column;
+  border: 1px solid #333; border-radius: 10px; background: #1e1e1e; box-shadow: 0 16px 40px rgb(0 0 0 / .5); overflow: hidden; user-select: text; }
+.tb-drop-find { flex: none; height: 34px; margin: 8px; padding: 0 10px; border: 1px solid #333; border-radius: 7px; background: #161616; color: #ededed; font-size: 12.5px; outline: none; }
+.tb-drop-find:focus { border-color: #3577f6; }
+.tb-drop-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 6px; }
+.tb-drop-none { padding: 18px; text-align: center; color: #8e8e8e; font-size: 12.5px; }
+.tb-drop .tb-drop-row { width: 100%; height: auto; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-radius: 7px;
+  background: none; color: #e6e6e6; text-align: left; font-size: 12.5px; }
+.tb-drop .tb-drop-row:hover:not(:disabled) { background: #2a2a2a; }
+.tb-drop .tb-drop-row.on { background: #192d53; box-shadow: inset 0 0 0 1px #3577f6; }
+.tb-drop-row .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #5a5a5a; }
+.tb-drop-row .dot.red { background: #ff6b5e; } .tb-drop-row .dot.amber { background: #f2c26b; }
+.tb-drop-row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tb-drop-row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.tb-drop-row .p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8e8e8e; font-size: 11.5px; }
+.tb-drop-row .side { flex: none; display: flex; align-items: center; gap: 8px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tb-drop-row .n.red { color: #ff8b80; } .tb-drop-row .n.amber { color: #f2c26b; }
+.tb-drop-row .w { color: #8e8e8e; }
 .admin .home-stat:nth-child(5) .v { color: #ff9f5a; }
 .admin .home-stat:nth-child(6) .v { color: #c4c4c4; }
 .admin-mode { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px;
