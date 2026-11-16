@@ -194,7 +194,7 @@ export default function Page({ data }: { data: unknown | null }) {
               <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·사용자·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
             </label>
           </>}>
-          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt")} rows={shownValues} onRow={(v) => setOpen({ value: v })}
+          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt", shownValues.some((v) => v.users.length > 0))} rows={shownValues} onRow={(v) => setOpen({ value: v })}
             picked={(v) => !!open && "value" in open && open.value.key === v.key} />}
           {tab === "sessions" && <DataTable dense columns={attemptColumns(d.now)} rows={shownTries} onRow={(a) => setOpen({ attempt: a })} picked={(a) => !!open && "attempt" in open && open.attempt.session === a.session} />}
           {tab === "sources" && <DataTable dense columns={sourceColumns(d.now)} rows={shownFrom} onRow={(s) => setOpen({ source: s })} picked={(s) => !!open && "source" in open && open.source.name === s.name} />}
@@ -269,15 +269,29 @@ function Places({ names }: { names: string[] }) {
   );
 }
 
+/** Where values went, by service: "bob@x.com · slack (MCP)" is slack. */
+const services = (places: string[]) => [...new Set(places.map((p) => p.split(" · ").pop()!))];
+
+/** A document or tool a value came out of, as a cell names it: an MCP tool by its server's logo
+ * and its own name, a path by its file name. */
+function SourceName({ name }: { name: string }) {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (mcp) return <span className="flex min-w-0 items-center gap-1.5" title={name}><ServiceLogo name={mcp[1]} size={16} /><Masked className="truncate">{mcp[2]}</Masked></span>;
+  return <Masked className="truncate" >{short(name)}</Masked>;
+}
+
 /** What a person typed a value in, else the session's name. */
 const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionName(t);
 
 /** A value over every session it showed in: how it ended at its worst, where it was sent, the
  * Call that carried it, where it came from, and how far it spread. */
-const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
+const valueColumns = (now: number, typed: boolean, people: boolean): ColumnDef<Value>[] => [
   { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => (
     // Where a value that left, or was about to, was sent: the result names it.
-    <span className="flex min-w-0 items-center gap-2"><StatusBadge s={v.status} />{v.places.length > 0 && v.status !== "seen" && <Places names={v.places.slice(0, 1)} />}{v.places.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{v.places.length - 1}</span>}</span>
+    <span className="flex min-w-0 items-center gap-2"><StatusBadge s={v.status} />{(() => {
+      const to = services(v.places);
+      return v.status !== "seen" && to.length > 0 && <><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</>;
+    })()}</span>
   ) },
   { id: "text", header: "값", size: 300, accessorFn: (v) => v.text, cell: ({ row: { original: v } }) => {
     const Icon = CATEGORY[v.category as Category]?.icon;
@@ -296,15 +310,19 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
         <span className="truncate">{typedIn(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
       </span>
     ) }
-    : { id: "from", header: "유입 경로", size: 280, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => (
-      <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
-        <span className="shrink-0 rounded bg-secondary px-1.5 text-[11.5px] leading-[19px] text-foreground/85">{FROM[v.froms[0]].label}</span>
-        {v.sources.length > 0 && <><Masked className="truncate">{short(v.sources[0])}</Masked>{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>}
-      </span>
-    ) },
-  { id: "users", header: "사용자", size: 120, accessorFn: (v) => v.users.join(" "), cell: ({ row: { original: v } }) => (
+    // Where it came in: the person's input, or the tool's response and what it came out of.
+    : { id: "from", header: "유입 경로", size: 280, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => {
+      const typed = v.froms.includes("user"), from = typed ? "user" : v.froms[0];
+      return (
+        <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
+          <span className="shrink-0 rounded bg-secondary px-1.5 text-[11.5px] leading-[19px] text-foreground/85">{FROM[from].label}</span>
+          {!typed && v.sources.length > 0 && <><SourceName name={v.sources[0]} />{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>}
+        </span>
+      );
+    } },
+  ...(people ? [{ id: "users", header: "사용자", size: 120, accessorFn: (v) => v.users.join(" "), cell: ({ row: { original: v } }) => (
     v.users.length === 1 ? <Person name={v.users[0]} size={20} label /> : v.users.length ? <People names={v.users} max={4} /> : <span className="text-muted-foreground/60">–</span>
-  ) },
+  ) } as ColumnDef<Value>] : []),
   { id: "spread", header: "영향 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (v) => v.last ?? 0, cell: ({ row: { original: v } }) => <When at={v.last} now={now} /> },
   // A value that went out opens in 기록 at the Call that sent it, without the detail between.
@@ -440,7 +458,7 @@ function Path({ trails, places, status }: { trails: Trail[]; places: string[]; s
       <ArrowRight className="size-4 self-center text-muted-foreground" />
       <div className={cn(box, status === "out" && "border-deny/50 bg-deny/8", status === "blocked" && "border-review/50 bg-review/8")}>
         <span className="text-[11px] text-muted-foreground">간 곳</span>
-        {places.length ? <span className="flex min-w-0 items-center gap-1.5"><Places names={places.slice(0, 1)} />{places.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{places.length - 1}</span>}</span> : <span className="text-[12.5px] text-muted-foreground">밖으로 안 나감</span>}
+        {places.length ? <span className="flex min-w-0 items-center gap-1.5"><Places names={services(places).slice(0, 1)} />{services(places).length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{services(places).length - 1}</span>}</span> : <span className="text-[12.5px] text-muted-foreground">밖으로 안 나감</span>}
       </div>
     </div>
   );

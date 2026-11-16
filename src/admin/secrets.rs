@@ -28,12 +28,29 @@ static OUTWARD: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex")
 });
 
-/// Whether a Call sends what it holds outside: a fetch, an MCP tool, or a command that reaches out.
+/// Whether the value is whom the Call sends to (an account money goes to, an address mail goes
+/// to) rather than what it sends: the masked value's visible start and end match the recipient.
+fn is_recipient(m: &SecretMention) -> bool {
+    let (Some(value), Some(to)) = (m.text.as_deref(), m.recipient.as_deref()) else {
+        return false;
+    };
+    let parts: Vec<&str> = value.split(['*', '…']).filter(|p| !p.is_empty()).collect();
+    let (Some(head), Some(tail)) = (parts.first(), parts.last()) else {
+        return false;
+    };
+    let to: String = to.chars().filter(|c| !c.is_whitespace()).collect();
+    head.len() + tail.len() >= 4 && to.starts_with(head) && to.ends_with(tail)
+}
+
+/// Whether a Call sends the value outside: a fetch, an MCP tool that sends, or a command that
+/// reaches out, with the value as what it sends and not as whom it sends to.
 pub(super) fn outward(m: &SecretMention) -> bool {
     let tool = m.tool.as_deref().unwrap_or("");
-    tool == "WebFetch"
-        || crate::metro::mcp_parts(tool).is_some_and(|(_, name)| super::mcp_tools::sends_out(name))
-        || (tool == "Bash" && m.target.as_deref().is_some_and(|t| OUTWARD.is_match(t)))
+    !is_recipient(m)
+        && (tool == "WebFetch"
+            || crate::metro::mcp_parts(tool)
+                .is_some_and(|(_, name)| super::mcp_tools::sends_out(name))
+            || (tool == "Bash" && m.target.as_deref().is_some_and(|t| OUTWARD.is_match(t))))
 }
 
 /// A Call the agent put the value in.
@@ -364,6 +381,20 @@ mod tests {
         assert_eq!(t.from, "external", "it first came from a tool result");
         assert_eq!((t.calls, t.out_ran, t.out_stopped), (2, 1, 0));
         assert_eq!(t.status().1, "out");
+    }
+
+    #[test]
+    fn the_account_money_is_sent_to_is_not_a_value_sent_out() {
+        let mut pay = seen(4, 40, "external", "Call");
+        pay.tool = Some("mcp__bank__send_money".into());
+        pay.text = Some("SE35****0003".into());
+        pay.recipient = Some("SE3550000000054910000003".into());
+        assert!(!outward(&pay), "the IBAN is whom it pays");
+        pay.recipient = Some("GB29NWBK60161331926819".into());
+        assert!(
+            outward(&pay),
+            "another account's number in the payment is sent"
+        );
     }
 
     #[test]
