@@ -1333,7 +1333,7 @@ impl Flow {
                             sub: if c.blocked {
                                 format!("{} · 차단", c.sub())
                             } else if c.warn {
-                                format!("{} · 확인 요청", c.sub())
+                                format!("{} · 사용자 확인", c.sub())
                             } else if c.loose {
                                 format!("{} · 시킨 것 없음", c.sub())
                             } else if c.via.is_some() {

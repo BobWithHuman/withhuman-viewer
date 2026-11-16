@@ -39,7 +39,7 @@ const FOCUS: Record<Focus, (t: Trail) => boolean> = {
 };
 type Open = { value: Value } | { trail: Trail } | { attempt: Attempt } | { source: Source } | null;
 type Split = "kind" | "source" | "place" | "user" | "client";
-const SPLITS: [Split, string][] = [["kind", "종류"], ["source", "출처"], ["place", "보낸 곳"], ["user", "사용자"], ["client", "단말"]];
+const SPLITS: [Split, string][] = [["kind", "종류"], ["source", "출처"], ["place", "전송 대상"], ["user", "사용자"], ["client", "단말"]];
 
 /** Asks the app to show a place a value was in on the route map of 기록. */
 const openInRecord = (session: string, seq: number) => send("secrets", { type: "open", session, seq });
@@ -139,22 +139,22 @@ export default function Page({ data }: { data: unknown | null }) {
 
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-6 pb-6">
         <div className="grid shrink-0 grid-cols-4 gap-4">
-          <Stat label="드러난 값" icon={ShieldAlert} value={values(inPeriod).length} unit={`개 · 드러난 곳 ${inPeriod.length}`} delta={delta((l) => values(l).length)}
+          <Stat label="탐지된 민감정보" icon={ShieldAlert} value={values(inPeriod).length} unit={`개 · 노출 ${inPeriod.length}회`} delta={delta((l) => values(l).length)}
             active={focus === "all"} onClick={() => only("all", "values")} />
-          <Stat label="프롬프트에 넣음" icon={MessageSquareText} value={prompted.length}
+          <Stat label="사용자 입력" icon={MessageSquareText} value={prompted.length}
             unit={`회 · 세션 ${new Set(prompted.map((t) => t.session)).size} · 단말 ${new Set(prompted.map((t) => t.client)).size}`}
             delta={delta((l) => l.filter((t) => fromOf(t) === "user").length)}
             active={focus === "prompt"} onClick={() => only("prompt", "values")} />
-          <Stat label="유출 시도 세션" icon={Send} value={tries.length} tone={tries.some((a) => a.ran > 0) ? "var(--deny)" : undefined}
-            unit={`개 · 나감 ${tries.filter((a) => a.ran > 0).length} · 막힘 ${tries.filter((a) => a.ran === 0).length}`}
+          <Stat label="유출 시도" icon={Send} value={tries.length} tone={tries.some((a) => a.ran > 0) ? "var(--deny)" : undefined}
+            unit={`개 · 유출 ${tries.filter((a) => a.ran > 0).length} · 차단 ${tries.filter((a) => a.ran === 0).length}`}
             active={focus === "tries"} onClick={() => only("tries", "sessions")} />
-          <Stat label="값을 읽어 온 곳" icon={FileText} value={from.length} unit={`곳 · 값 ${from.reduce((a, s) => a + s.trails.length, 0)}`}
+          <Stat label="노출 출처" icon={FileText} value={from.length} unit={`곳 · 값 ${from.reduce((a, s) => a + s.trails.length, 0)}`}
             active={focus === "sources"} onClick={() => only("sources", "values")} />
         </div>
 
         <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_340px] gap-4 min-[1600px]:grid-cols-[minmax(0,1fr)_400px]">
           {focus === "sources" ? (
-            <Panel title="값을 읽어 온 곳" count={flowSources.length} aside={<Legend items={STATUSES.map((k) => ({ label: STATUS[k].label, color: STATUS[k].color, value: ended[k] }))} />}>
+            <Panel title="노출 출처" count={flowSources.length} aside={<Legend items={STATUSES.map((k) => ({ label: STATUS[k].label, color: STATUS[k].color, value: ended[k] }))} />}>
               <SourceBars sources={flowSources} picked={filter.source} height={flowHeight} onPick={(name) => setFilter({ ...filter, source: filter.source === name ? undefined : name })} />
             </Panel>
           ) : (
@@ -176,7 +176,7 @@ export default function Page({ data }: { data: unknown | null }) {
           title={
             <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
               <TabsList className="-ml-1">
-                {([["values", "값", shownValues.length], ["sessions", "유출 시도 세션", shownTries.length], ["sources", "읽어 온 곳", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
+                {([["values", "값", shownValues.length], ["sessions", "유출 시도", shownTries.length], ["sources", "노출 출처", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
                   <TabsTrigger key={v} value={v} className="gap-1.5 px-2.5 text-[12.5px]">{l}<span className="tnum text-[11.5px] text-muted-foreground">{n}</span></TabsTrigger>
                 ))}
               </TabsList>
@@ -297,11 +297,11 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
       </span>
     );
   } },
-  { id: "places", header: "보낸 곳", size: 200, accessorFn: (v) => v.places.join(" "), cell: ({ row: { original: v } }) => (v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground/60">–</span>) },
-  { id: "carrier", header: "실어 나른 호출", accessorFn: (v) => v.carrier ?? "", cell: ({ row: { original: v } }) => (v.carrier ? <Masked className="block truncate text-muted-foreground" >{v.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
+  { id: "places", header: "전송 대상", size: 200, accessorFn: (v) => v.places.join(" "), cell: ({ row: { original: v } }) => (v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground/60">–</span>) },
+  { id: "carrier", header: "전송 호출", accessorFn: (v) => v.carrier ?? "", cell: ({ row: { original: v } }) => (v.carrier ? <Masked className="block truncate text-muted-foreground" >{v.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
   typed
     // Every value here was typed by a person: the prompt it was typed in tells more than where from.
-    ? { id: "typed", header: "넣은 프롬프트", size: 250, accessorFn: (v) => typedIn(v.trails[0]), cell: ({ row: { original: v } }) => (
+    ? { id: "typed", header: "입력 프롬프트", size: 250, accessorFn: (v) => typedIn(v.trails[0]), cell: ({ row: { original: v } }) => (
       <span className="flex min-w-0 items-center gap-1.5" title={v.trails.map(typedIn).join("\n")}>
         <span className="truncate">{typedIn(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
       </span>
@@ -316,7 +316,7 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
   { id: "users", header: "사용자", size: 120, accessorFn: (v) => v.users.join(" "), cell: ({ row: { original: v } }) => (
     v.users.length === 1 ? <Person name={v.users[0]} size={20} label /> : v.users.length ? <People names={v.users} max={4} /> : <span className="text-muted-foreground/60">–</span>
   ) },
-  { id: "spread", header: "퍼진 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
+  { id: "spread", header: "영향 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (v) => v.last ?? 0, cell: ({ row: { original: v } }) => <When at={v.last} now={now} /> },
   // A value that went out opens in 기록 at the Call that sent it, without the detail between.
   { id: "open", header: "", size: 44, enableSorting: false, cell: ({ row: { original: v } }) => {
@@ -345,8 +345,8 @@ function Kinds({ trails }: { trails: Trail[] }) {
 function Sent({ ran, held }: { ran: number; held: number }) {
   return (
     <span className="tnum flex items-center gap-2.5 text-[12px]">
-      <span className={cn("inline-flex items-center gap-1", ran ? "text-deny" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />나감 {ran}</span>
-      <span className={cn("inline-flex items-center gap-1", held ? "text-review" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />막힘 {held}</span>
+      <span className={cn("inline-flex items-center gap-1", ran ? "text-deny" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />유출 {ran}</span>
+      <span className={cn("inline-flex items-center gap-1", held ? "text-review" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />차단 {held}</span>
     </span>
   );
 }
@@ -356,8 +356,8 @@ function Sent({ ran, held }: { ran: number; held: number }) {
 const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
   { id: "status", header: "결과", size: 132, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <StatusBadge s={a.ran > 0 ? "out" : "blocked"} /> },
   { id: "session", header: "세션", size: 250, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
-  { id: "places", header: "보낸 곳", size: 200, accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
-  { id: "carrier", header: "실어 나른 호출", accessorFn: (a) => a.carrier ?? "", cell: ({ row: { original: a } }) => (a.carrier ? <Masked className="block truncate text-muted-foreground">{a.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
+  { id: "places", header: "전송 대상", size: 200, accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
+  { id: "carrier", header: "전송 호출", accessorFn: (a) => a.carrier ?? "", cell: ({ row: { original: a } }) => (a.carrier ? <Masked className="block truncate text-muted-foreground">{a.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
   { id: "values", header: "값", size: 190, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
   { id: "sent", header: "전송", size: 132, accessorFn: (a) => a.ran * 1000 + a.held, cell: ({ row: { original: a } }) => <Sent ran={a.ran} held={a.held} /> },
   { id: "client", header: "단말", size: 150, accessorFn: (a) => a.client, cell: ({ row: { original: a } }) => <Client name={a.client} /> },
@@ -367,7 +367,7 @@ const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
 /** A document, command or tool the agents read values from: what it is, how many values and how
  * they ended, which kinds, and how far they spread. */
 const sourceColumns = (now: number): ColumnDef<Source>[] => [
-  { id: "name", header: "읽어 온 곳", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => {
+  { id: "name", header: "노출 출처", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => {
     const p = parts(s.name);
     return (
       <span className="flex min-w-0 items-center gap-2" title={s.name}>
@@ -378,7 +378,7 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
     );
   } },
   { id: "values", header: "값", size: 190, accessorFn: (s) => s.trails.length, cell: ({ row: { original: s } }) => <Kinds trails={s.trails} /> },
-  { id: "ended", header: "끝난 곳", size: 250, accessorFn: (s) => { const n = byStatus(s.trails); return n.out * 1e6 + n.blocked * 1e3 + s.trails.length; }, cell: ({ row: { original: s } }) => {
+  { id: "ended", header: "처리 결과", size: 250, accessorFn: (s) => { const n = byStatus(s.trails); return n.out * 1e6 + n.blocked * 1e3 + s.trails.length; }, cell: ({ row: { original: s } }) => {
     const n = byStatus(s.trails);
     return (
       <span className="flex items-center gap-2.5">
@@ -389,7 +389,7 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
       </span>
     );
   } },
-  { id: "spread", header: "퍼진 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
+  { id: "spread", header: "영향 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (s) => s.last ?? 0, cell: ({ row: { original: s } }) => <When at={s.last} now={now} /> },
 ];
 
@@ -484,9 +484,9 @@ function ValueSheet({ v, onTrail }: { v: Value; onTrail: (t: Trail) => void }) {
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
         <Facts rows={[
           ["사용자", v.users.length ? <span className="flex flex-wrap gap-x-3 gap-y-1">{v.users.map((u) => <Person key={u} name={u} size={20} label />)}</span> : <span className="text-muted-foreground">모름</span>],
-          ["퍼진 범위", <span className="tnum">세션 {v.sessions} · 단말 {v.clients.length}</span>],
-          ["보낸 곳", v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground">–</span>],
-          ["실어 나른 호출", v.carrier ? <Masked className="break-all">{v.carrier}</Masked> : <span className="text-muted-foreground">–</span>],
+          ["영향 범위", <span className="tnum">세션 {v.sessions} · 단말 {v.clients.length}</span>],
+          ["전송 대상", v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground">–</span>],
+          ["전송 호출", v.carrier ? <Masked className="break-all">{v.carrier}</Masked> : <span className="text-muted-foreground">–</span>],
           ["출처", <span className="break-all">{v.sources.length ? v.sources.map(short).join(", ") : v.froms.map((f) => FROM[f].label).join(" · ")}</span>],
           ["마지막", <span className="tnum">{clock(v.last)}</span>],
         ]} />
@@ -545,7 +545,7 @@ function TrailSheet({ t, others, onTrail }: { t: Trail; others: Trail[]; onTrail
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
         <div className="grid grid-cols-3 gap-2">
-          {([["호출에 넣음", t.calls, "var(--write)"], ["밖으로 나감", t.outRan, "var(--deny)"], ["막힘", t.outStopped, "var(--review)"]] as [string, number, string][]).map(([l, n, c]) => (
+          {([["호출 사용", t.calls, "var(--write)"], ["유출", t.outRan, "var(--deny)"], ["차단", t.outStopped, "var(--review)"]] as [string, number, string][]).map(([l, n, c]) => (
             <div key={l} className="rounded-lg border px-3 py-2">
               <div className="text-[12px] text-muted-foreground">{l}</div>
               <div className="tnum text-[20px] leading-tight font-semibold" style={{ color: n ? c : "var(--muted-foreground)" }}>{n}</div>
@@ -553,7 +553,7 @@ function TrailSheet({ t, others, onTrail }: { t: Trail; others: Trail[]; onTrail
           ))}
         </div>
         {t.mentions.filter((m) => m.said).slice(0, 3).map((m, k) => (
-          <Section key={`${m.seq}-${k}`} title={k ? "다시 넣은 프롬프트" : "넣은 프롬프트"}>
+          <Section key={`${m.seq}-${k}`} title={k ? "재입력 프롬프트" : "입력 프롬프트"}>
             <button onClick={() => openInRecord(t.session, m.seq)} className="group grid gap-1.5 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/60">
               <Said text={m.said!} value={t.text} />
               <span className="tnum flex items-center gap-1 text-[11.5px] text-muted-foreground">{time(m.at)}<ArrowUpRight className="size-3 opacity-0 transition-opacity group-hover:opacity-100" /></span>
@@ -562,16 +562,16 @@ function TrailSheet({ t, others, onTrail }: { t: Trail; others: Trail[]; onTrail
         ))}
         <Facts rows={[
           ["유형", categoryLabel(t.category)],
-          ["들어온 곳", FROM[fromOf(t)].label],
+          ["유입 경로", FROM[fromOf(t)].label],
           ...(t.source ? [["출처", <Masked className="break-all">{t.source}</Masked>] as [string, ReactNode]] : []),
-          ...(placesOf(t).length ? [["보낸 곳", <Places names={placesOf(t)} />] as [string, ReactNode]] : []),
+          ...(placesOf(t).length ? [["전송 대상", <Places names={placesOf(t)} />] as [string, ReactNode]] : []),
           ["사용자", t.user ? <Person name={t.user} size={20} label /> : <span className="text-muted-foreground">모름</span>],
           ["단말", <span className="flex min-w-0 items-center gap-2"><Client name={machineName(t)} />{t.host && t.host !== t.client && <Masked className="truncate text-muted-foreground">{t.client}</Masked>}</span>],
           ["세션", <span className="line-clamp-2">{sessionName(t)}</span>],
           ["마지막", <span className="tnum">{clock(t.last)}</span>],
         ]} />
         {others.length > 0 && (
-          <Section title="같은 값이 쓰인 다른 세션" count={others.length}>
+          <Section title="동일 값 사용 세션" count={others.length}>
             <div className="grid gap-1">
               {others.map((o) => (
                 <button key={o.id} onClick={() => onTrail(o)} className="flex w-full min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
@@ -585,7 +585,7 @@ function TrailSheet({ t, others, onTrail }: { t: Trail; others: Trail[]; onTrail
             </div>
           </Section>
         )}
-        <Section title="지나간 곳" count={t.mentions.length}>
+        <Section title="이동 경로" count={t.mentions.length}>
           <Line>{t.mentions.map((m, i) => <MentionRow key={`${m.seq}-${i}`} m={m} session={t.session} />)}</Line>
         </Section>
       </div>
@@ -604,7 +604,7 @@ function AttemptSheet({ a }: { a: Attempt }) {
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
         <Facts rows={[
           ["보내려 한 곳", <span className="flex flex-wrap gap-x-3 gap-y-1">{a.places.map((p) => <span key={p} className="inline-flex items-center gap-1.5"><PlaceMark name={p} size={16} />{p}</span>)}</span>],
-          ["호출", <span className="tnum flex gap-3"><span>나감 <b className={cn("font-medium", a.ran > 0 && "text-deny")}>{a.ran}</b></span><span>막힘 <b className={cn("font-medium", a.held > 0 && "text-review")}>{a.held}</b></span></span>],
+          ["호출", <span className="tnum flex gap-3"><span>유출 <b className={cn("font-medium", a.ran > 0 && "text-deny")}>{a.ran}</b></span><span>차단 <b className={cn("font-medium", a.held > 0 && "text-review")}>{a.held}</b></span></span>],
           ["마지막", <span className="tnum">{clock(a.last)}</span>],
         ]} />
         <Section title="보내려 한 값" count={a.trails.length}>

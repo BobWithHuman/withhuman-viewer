@@ -111,7 +111,7 @@ const CALLS: ColumnDef<Call>[] = [
   { id: "target", header: "호출", accessorFn: (c) => c.target ?? "", cell: ({ row }) => <What c={row.original} /> },
   { id: "action", header: "행동", size: 132, accessorFn: (c) => ACTION[c.action]?.label ?? c.action, cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span> },
   { id: "kind", header: "위반 유형", size: 196, accessorFn: (c) => DIM.kind.name(DIM.kind.of(c)) },
-  { id: "source", header: "정한 쪽", size: 100, accessorFn: (c) => DIM.source.name(c.source), cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span> },
+  { id: "source", header: "유발 원인", size: 100, accessorFn: (c) => DIM.source.name(c.source), cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span> },
   { id: "machine", header: "단말", size: 152, accessorKey: "machine", cell: ({ row }) => <Mono>{row.original.machine}</Mono> },
   { id: "at", header: "시각", size: 104, accessorFn: (c) => c.at ?? 0, cell: ({ row }) => <When at={row.original.at} /> },
 ];
@@ -190,7 +190,7 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, al
   return (
     <Panel
       pad={false} className={cn("min-h-0 overflow-hidden [&>[data-slot=card-content]]:flex [&>[data-slot=card-content]]:min-h-0 [&>[data-slot=card-content]]:flex-1 [&>[data-slot=card-content]]:flex-col", className)}
-      title={<Tabs value={view} onValueChange={(v) => setView(v as View)}><TabsList>{tab("sessions", every ? "사건" : "처리할 일", sessions.length)}{tab("calls", "호출", newest.length)}{tab("approved", "사용자 승인", approved.length)}{tab("devices", "기기 알림", alerts.length)}</TabsList></Tabs>}
+      title={<Tabs value={view} onValueChange={(v) => setView(v as View)}><TabsList>{tab("sessions", every ? "사건" : "처리 대기", sessions.length)}{tab("calls", "호출", newest.length)}{tab("approved", "사용자 승인", approved.length)}{tab("devices", "기기 알림", alerts.length)}</TabsList></Tabs>}
       aside={<>
         {saved && <span className="max-w-[320px] truncate text-[12px]" title={saved}>{saved}</span>}
         {(view === "sessions" || view === "approved") && (

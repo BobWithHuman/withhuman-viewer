@@ -71,7 +71,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
       <SheetHeader className="gap-2 border-b pr-12">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={cn("rounded-md px-1.5 text-[12px] leading-[22px] font-semibold", SEV[call.sev].cls)}>{SEV[call.sev].label}</span>
-          <VerdictBadge v={call.verdict}>{call.verdict === "review" ? (call.ran ? "확인 요청 · 승인" : "확인 요청 · 반려") : undefined}</VerdictBadge>
+          <VerdictBadge v={call.verdict}>{call.verdict === "review" ? (call.ran ? "사용자 확인 · 승인" : "사용자 확인 · 반려") : undefined}</VerdictBadge>
           {call.hard && <Warn>되돌리기 어려움</Warn>}
           <span className="tnum ml-1 text-[12px] text-muted-foreground">{clock(call.at)} · {ago(call.at)}</span>
         </div>
@@ -94,11 +94,11 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
 
       <div className="grid shrink-0 grid-cols-2 gap-3 border-b p-5">
         <section className="grid content-start gap-1.5">
-          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground"><MessageSquareText className="size-3.5" />사용자가 시킨 말</h3>
+          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground"><MessageSquareText className="size-3.5" />사용자 요청</h3>
           <Box className="max-h-[132px] overflow-y-auto">{read?.request?.text ?? call.prompt ?? <span className="text-muted-foreground">프롬프트 없음</span>}</Box>
         </section>
         <section className="grid content-start gap-1.5">
-          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-catch"><FileText className="size-3.5" />읽은 글이 시킨 말{told && <span className="tnum ml-auto">{Math.round(told.probability * 100)}%</span>}</h3>
+          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-catch"><FileText className="size-3.5" />유도 문구{told && <span className="tnum ml-auto">{Math.round(told.probability * 100)}%</span>}</h3>
           <Box tone={told?.quote ? "var(--catch)" : undefined} className="max-h-[132px] overflow-y-auto">
             {!read ? <span className="text-muted-foreground">불러오는 중</span>
               : told?.quote ? told.quote
@@ -138,10 +138,10 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
               {call.tool && <span className="mr-2 rounded-md bg-secondary px-1.5 py-0.5 font-sans text-[11px] text-muted-foreground">{toolName(call.tool)}</span>}
               {call.target ?? call.tool}
             </Box>
-            {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">보내려던 곳</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
+            {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">전송 대상</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
             {call.leak && (
               <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
-                <span className="rounded bg-deny/15 px-1.5 leading-[20px] font-semibold text-deny">밖으로 나간 값</span>
+                <span className="rounded bg-deny/15 px-1.5 leading-[20px] font-semibold text-deny">유출된 값</span>
                 {call.leak.kinds.map((k) => <span key={k} className="rounded bg-secondary px-1.5 leading-[20px]">{k}</span>)}
                 <span className="text-muted-foreground">→</span>
                 {call.leak.places.map((p) => <Mono key={p}>{p.replace(" (MCP)", "")}</Mono>)}

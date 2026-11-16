@@ -127,7 +127,7 @@ fn station_step(st: &Station) -> Value {
         detail.push(json!([
             "원인",
             format!(
-                "도구 결과 · 호출 #{} ({}%)",
+                "도구 응답 · 호출 #{} ({}%)",
                 src.by,
                 (src.probability * 100.0).round()
             )
@@ -151,7 +151,7 @@ fn station_step(st: &Station) -> Value {
     }
     let catch = st.source.as_ref().map(|src| {
         json!({
-            "name": if src.error { "도구 오류가 시킴" } else { "도구 결과가 시킴" },
+            "name": if src.error { "도구 오류가 유도" } else { "도구 응답이 유도" },
             "sub": src.quote.clone().unwrap_or_default(),
             "score": (src.probability * 100.0).round() as i64,
         })

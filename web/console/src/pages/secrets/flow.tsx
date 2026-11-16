@@ -7,9 +7,9 @@ import { Flow as Bands, type FlowColumn, type FlowRow } from "@/kit/flow";
 import { CATEGORIES, CATEGORY, FROM, FROMS, STATUS, STATUSES, categoryLabel, fromOf, type Category, type Filter, type From, type Status, type Trail } from "./data";
 
 const COLUMNS: [FlowColumn, FlowColumn, FlowColumn] = [
-  { title: "들어온 곳", order: FROMS, label: (k) => FROM[k as From].label, icon: (k) => FROM[k as From].icon },
+  { title: "유입 경로", order: FROMS, label: (k) => FROM[k as From].label, icon: (k) => FROM[k as From].icon },
   { title: "유형", order: CATEGORIES, label: categoryLabel, icon: (k) => CATEGORY[k as Category]?.icon },
-  { title: "끝난 곳", order: STATUSES, label: (k) => STATUS[k as Status].label, icon: (k) => STATUS[k as Status].icon },
+  { title: "처리 결과", order: STATUSES, label: (k) => STATUS[k as Status].label, icon: (k) => STATUS[k as Status].icon },
 ];
 /** How much of a band is its end's colour when nothing is picked: the worse the end, the more. */
 const WEIGHT: Record<Status, number> = { out: 78, blocked: 54, used: 22, seen: 13 };

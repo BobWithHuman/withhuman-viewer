@@ -108,10 +108,10 @@ const KIND: Record<string, string> = {
   explicit: "사용자 지시 위반",
   safeguard: "에이전트 안전장치 변경",
   other: "그 밖의 이유",
-  allowed_irreversible: "되돌리기 어려운 허용",
+  allowed_irreversible: "고위험 허용",
   secret_out: "민감 정보 유출",
 };
-const SOURCE: Record<string, string> = { segment: "도구 결과", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
+const SOURCE: Record<string, string> = { segment: "도구 응답", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
 export const MODE: Record<string, { label: string; cls: string }> = {
   enforce: { label: "엔진 차단 중", cls: "bg-allow/15 text-allow" },
   shadow: { label: "엔진 시범 운영", cls: "bg-review/15 text-review" },
@@ -123,7 +123,7 @@ export const MODE: Record<string, { label: string; cls: string }> = {
 export type Dim = "verdict" | "action" | "kind" | "source" | "session" | "machine" | "tool" | "folder";
 export const DIMS: Dim[] = ["verdict", "action", "kind", "source", "session", "machine", "tool", "folder"];
 export const DIM: Record<Dim, { label: string; of: (c: Call) => string; name: (key: string) => string }> = {
-  verdict: { label: "판정", of: (c) => c.verdict, name: (k) => (k === "allow" ? "되돌리기 어려운 허용" : k === "review" ? "확인 요청" : k === "none" ? "판정 없음" : VERDICT[k as Verdict]?.label ?? k) },
+  verdict: { label: "판정", of: (c) => c.verdict, name: (k) => (k === "allow" ? "고위험 허용" : k === "review" ? "사용자 확인" : k === "none" ? "판정 없음" : VERDICT[k as Verdict]?.label ?? k) },
   action: { label: "행동", of: (c) => c.action, name: (k) => ACTION[k]?.label ?? k },
   kind: { label: "위반 유형", of: (c) => c.kind ?? "other", name: (k) => KIND[k] ?? k },
   source: { label: "원인", of: (c) => c.source, name: (k) => SOURCE[k] ?? k },

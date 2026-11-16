@@ -65,7 +65,7 @@ pub(super) fn node_label(m: &SecretMention) -> &'static str {
         (Some("Request"), _) => "사용자 요청",
         (Some("Call"), _) => "호출",
         (_, Some("agent")) => "에이전트의 말",
-        (Some("Segment" | "Error"), _) => "도구 결과",
+        (Some("Segment" | "Error"), _) => "도구 응답",
         _ => "기록",
     }
 }
