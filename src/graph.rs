@@ -501,6 +501,9 @@ pub(crate) fn preview(props: Map<String, Value>) -> Map<String, Value> {
 }
 
 /// The fields a node's caption needs, read before its payload is cut short.
+/// How much of a prompt a node keeps: enough for a long request, pasted logs aside.
+const PROMPT_CHARS: usize = 4000;
+
 pub(crate) fn summary(props: &Map<String, Value>) -> Map<String, Value> {
     let payload = props
         .get("payload_json")
@@ -560,7 +563,11 @@ pub(crate) fn summary(props: &Map<String, Value>) -> Map<String, Value> {
         .filter_map(|(key, value)| {
             value
                 .filter(|v| !v.is_empty())
-                .map(|v| (key.to_owned(), Value::String(clip(&v, 200))))
+                // A person's prompt is read whole where it is shown; the rest are brief.
+                .map(|v| {
+                    let limit = if key == "prompt" { PROMPT_CHARS } else { 200 };
+                    (key.to_owned(), Value::String(clip(&v, limit)))
+                })
         })
         .collect()
 }
@@ -661,6 +668,11 @@ mod tests {
         let s = summary(&props);
         assert_eq!(s["tool_name"], "Bash");
         assert_eq!(s["brief"].as_str().unwrap().len(), 200);
+        let props: Map<String, Value> = serde_json::from_value(json!({
+            "payload_json": json!({"prompt": "y".repeat(1000)}).to_string(),
+        }))
+        .unwrap();
+        assert_eq!(summary(&props)["prompt"].as_str().unwrap().len(), 1000);
     }
 
     #[test]
