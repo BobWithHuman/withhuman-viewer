@@ -713,9 +713,12 @@ fn TopBar() -> Element {
                         "{SCREEN_LABELS.1}"
                     }
                 }
-                button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
-                    {line_icon(if cfg!(feature = "admin") { icons::SCROLL_TEXT } else { icons::STAR })}
-                    "{SCREEN_LABELS.2}"
+                // The security team's 정책 waits until it has something to set.
+                if !cfg!(feature = "admin") {
+                    button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
+                        {line_icon(icons::STAR)}
+                        "{SCREEN_LABELS.2}"
+                    }
                 }
             }
             // On the route map, the session looked at, opening the list to switch.

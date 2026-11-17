@@ -1,8 +1,8 @@
-// 보안 현황, the security team's main page, in three parts. Over time: the Calls the engine
+// 보안 현황, the security team's main page, in three parts, top to bottom. Over time: the Calls the engine
 // stopped, held or allowed though hard to undo, day by day (dragging across the days makes them
 // the period), under their counts.
 // The riskiest: the machines, sessions, tools or kinds of action ranked by the weight of the
-// Calls worth a look on each. And the list of what to look at first, a session a row. Pressing a band, a figure, a machine or a row
+// Calls worth a look on each, beside it. Under them, the list of what to look at first, a session a row. Pressing a band, a figure, a machine or a row
 // narrows the rest; what is applied shows as chips, each removable. The counting is done here,
 // over the Calls the app hands over once.
 
@@ -134,7 +134,6 @@ export default function Page({ data }: { data: unknown | null }) {
 
       <div className="scroll min-h-0 flex-1 overflow-y-auto px-6 pb-6">
         <div className="flex min-h-full flex-col gap-3">
-          <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} alerts={alerts} className="h-[clamp(420px,58vh,760px)] shrink-0" />
           <div className="grid h-[clamp(360px,42vh,480px)] shrink-0 grid-cols-[minmax(0,2.4fr)_minmax(0,1fr)] gap-3">
             <Panel
               className={`h-full ${FILL}`}
@@ -209,6 +208,7 @@ export default function Page({ data }: { data: unknown | null }) {
                 </>}
             </Panel>
           </div>
+          <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} alerts={alerts} className="h-[clamp(420px,58vh,760px)] shrink-0" />
         </div>
       </div>
     </div>
