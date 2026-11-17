@@ -284,6 +284,7 @@ impl Demo {
                     "at": props.and_then(|p| p.get("decided_at").filter(|v| v.is_i64()).or(p.get("observed_at"))),
                     "tool": payload["tool_name"],
                     "target": target,
+                    "recipient": crate::model::recipient_of(input),
                     "ran": ran.contains(&seq),
                 }));
             }

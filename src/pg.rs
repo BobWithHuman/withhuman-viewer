@@ -45,21 +45,20 @@ fn first_of(column: &str, key: &str) -> String {
 /// Whom or where a Call's arguments name to send to: the first of the keys tools commonly use
 /// for a recipient, a channel or an account.
 fn recipient(column: &str) -> String {
-    let texts = [
-        "recipient",
-        "to",
-        "email",
-        "channel",
-        "channel_name",
-        "channel_id",
-        "account",
-        "iban",
-    ];
     let lists = ["recipients", "to"];
-    let all: Vec<String> = texts
+    // Whom first, then where: a repository as `owner/repo`, then the other places tools name.
+    let repo = format!(
+        "nullif(concat_ws('/', {}, coalesce({}, {})), '')",
+        field(column, "owner"),
+        field(column, "repo"),
+        field(column, "repository")
+    );
+    let all: Vec<String> = crate::model::RECIPIENT_KEYS
         .iter()
         .map(|k| field(column, k))
         .chain(lists.iter().map(|k| first_of(column, k)))
+        .chain([repo])
+        .chain(crate::model::PLACE_KEYS.iter().map(|k| field(column, k)))
         .collect();
     format!("coalesce({})", all.join(", "))
 }

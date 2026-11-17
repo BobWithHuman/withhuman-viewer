@@ -296,8 +296,9 @@ const HOSTLIKE = /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/\S*)?$/i;
  * bob@x.com by slack; "slack (MCP)" is no one named, by slack; a host is itself; anything else
  * is the tool that sent it, naming no one. */
 const targetOf = (place: string): { target: string | null; server: string | null; tool: string | null } => {
-  if (place.endsWith("(MCP)")) {
-    const parts = place.replace(" (MCP)", "").split(" · ");
+  // An MCP server, or a command line tool (`origin · git (CLI)`): whom or where, by which service.
+  if (place.endsWith("(MCP)") || place.endsWith("(CLI)")) {
+    const parts = place.replace(/ \((MCP|CLI)\)$/, "").split(" · ");
     return parts.length > 1 ? { target: parts[0], server: parts[1], tool: null } : { target: null, server: parts[0], tool: null };
   }
   if (HOSTLIKE.test(place)) return { target: place, server: null, tool: null };
