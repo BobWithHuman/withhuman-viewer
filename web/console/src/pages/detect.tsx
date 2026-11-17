@@ -17,7 +17,7 @@ import { Legend, PageHeader, Panel, VERDICT, Warn } from "@/kit";
 import { cn } from "@/lib/utils";
 import { send } from "../bridge";
 import { type RankBy, Ranking } from "./detect/breakdown";
-import { type Call, DIM, DIMS, type Data, type Dim, type Filter, MODE, type Period, VERDICTS, actionTotals, coverage, demo, passes, rangeLabel, span, within } from "./detect/data";
+import { type Call, DIM, DIMS, type Data, type Dim, type Filter, MODE, type Period, VERDICTS, actionTotals, coverage, demo, named, passes, rangeLabel, span, within } from "./detect/data";
 import { type Ask, type Told, Watch } from "./detect/list";
 import { Trend } from "./detect/trend";
 import { Tuning } from "./detect/tuning";
@@ -98,7 +98,7 @@ export default function Page({ data }: { data: unknown | null }) {
 
   const chips: { key: string; label: string; value: string; drop: () => void }[] = [
     ...(period.range ? [{ key: "range", label: "기간", value: rangeLabel(period.range), drop: () => setPeriod((p) => ({ ...p, range: null })) }] : []),
-    ...DIMS.filter((dim) => filter[dim] !== undefined).map((dim) => ({ key: dim, label: DIM[dim].label, value: dim === "session" ? d.calls.find((c) => c.session === filter.session)?.prompt ?? DIM.session.name(filter.session!) : DIM[dim].name(filter[dim]!), drop: () => setFilter((f) => ({ ...f, [dim]: undefined })) })),
+    ...DIMS.filter((dim) => filter[dim] !== undefined).map((dim) => ({ key: dim, label: DIM[dim].label, value: dim === "session" ? named(d.calls.find((c) => c.session === filter.session)) ?? DIM.session.name(filter.session!) : DIM[dim].name(filter[dim]!), drop: () => setFilter((f) => ({ ...f, [dim]: undefined })) })),
   ];
 
   return (

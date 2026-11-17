@@ -6,7 +6,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Empty } from "@/kit";
 import { cn } from "@/lib/utils";
-import { ACTION, type Call, DIM, SEV, SEVS, groups, toolName } from "./data";
+import { ACTION, type Call, DIM, SEV, SEVS, groups, named, toolName } from "./data";
 
 export type RankBy = "machine" | "session" | "tool" | "action";
 const NO_PROMPT = "프롬프트 없음";
@@ -34,7 +34,7 @@ export function Ranking({ calls, by, picked, onPick, totals }: {
               <span className={cn("tnum row-span-2 pt-px text-[12px]", i < 3 ? "font-semibold text-foreground" : "text-muted-foreground")}>{i + 1}</span>
               <span className="flex min-w-0 items-baseline gap-2">
                 {by === "session"
-                  ? <span className="flex min-w-0 flex-1 items-baseline gap-2"><span className="truncate text-[13px]">{r.calls[0].prompt ?? NO_PROMPT}</span><span className="max-w-[40%] shrink-0 truncate font-mono text-[11px] text-muted-foreground">{r.calls[0].machine}</span></span>
+                  ? <span className="flex min-w-0 flex-1 items-baseline gap-2"><span className="truncate text-[13px]">{named(r.calls[0]) ?? NO_PROMPT}</span><span className="max-w-[40%] shrink-0 truncate font-mono text-[11px] text-muted-foreground">{r.calls[0].machine}</span></span>
                   : by === "action"
                     ? (() => { const Icon = ACTION[r.key]?.icon; return <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px]">{Icon && <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}<span className="truncate">{ACTION[r.key]?.label ?? r.key}</span></span>; })()
                     : <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{by === "tool" ? toolName(r.key) || "도구 없음" : r.key}</span>}

@@ -16,7 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DataTable, Panel, VerdictBadge, Warn, clock } from "@/kit";
 import { cn } from "@/lib/utils";
 import { CaseView } from "./case";
-import { ACTION, type Alert, type Blocked, type Call, type Case, type CaseGroup, DIM, type Group, MARK, type Mark, SEV, SEVS, type Sev, cases, isOpen, stateOf, toolName, worst } from "./data";
+import { ACTION, type Alert, type Blocked, type Call, type Case, type CaseGroup, DIM, type Group, MARK, type Mark, SEV, SEVS, type Sev, cases, isOpen, named, stateOf, toolName, worst } from "./data";
 
 /** What the page asks the app to do. */
 export type Ask = (message:
@@ -85,14 +85,14 @@ const caseColumns = (marks: Record<string, Mark>): ColumnDef<CaseGroup>[] => [
     ? <span className="tnum inline-flex items-center gap-1 rounded bg-deny/15 px-1.5 text-[11.5px] leading-[20px] font-semibold text-deny"><Zap className="size-3" />실행됨 {row.original.ran}</span>
     : <span className="text-[12px] text-muted-foreground">막음</span>) },
   { id: "sev", header: "심각도", size: 88, accessorFn: (g) => g.risk, cell: ({ row }) => <SevBadge s={worst(row.original)} /> },
-  { id: "case", header: "사건", accessorFn: (g) => g.cause ?? g.calls[0].prompt ?? "", cell: ({ row }) => {
+  { id: "case", header: "사건", accessorFn: (g) => g.cause ?? named(g.calls[0]) ?? "", cell: ({ row }) => {
     const g = row.original;
     const leaked = g.leaked.length > 0 && (
       <span className="shrink-0 rounded bg-deny/15 px-1.5 text-[11px] leading-[19px] font-semibold text-deny" title={g.leaked.join(", ")}>유출 · {g.leaked[0]}{g.leaked.length > 1 ? ` +${g.leaked.length - 1}` : ""}</span>
     );
-    return leaked ? <span className="flex min-w-0 items-center gap-2">{leaked}<span className="truncate">{g.cause ?? g.calls[0].prompt ?? NO_PROMPT}</span></span> : g.cause
+    return leaked ? <span className="flex min-w-0 items-center gap-2">{leaked}<span className="truncate">{g.cause ?? named(g.calls[0]) ?? NO_PROMPT}</span></span> : g.cause
       ? <span className="flex min-w-0 items-center gap-2" title={g.cause}><span className="shrink-0 rounded bg-catch/15 px-1.5 text-[11px] leading-[19px] font-medium text-catch">원인</span><Mono>{g.cause.length > 80 ? `${g.cause.slice(0, 80)}…` : g.cause}</Mono></span>
-      : <span className={cn("block truncate", !g.calls[0].prompt && "text-muted-foreground")}>{g.calls[0].prompt ?? NO_PROMPT}</span>;
+      : <span className={cn("block truncate", !named(g.calls[0]) && "text-muted-foreground")} title={g.calls[0].prompt ?? undefined}>{named(g.calls[0]) ?? NO_PROMPT}</span>;
   } },
   { id: "reach", header: "범위", size: 150, accessorFn: (g) => g.sessions.length * 1000 + g.machines.length, cell: ({ row }) => {
     const g = row.original;
@@ -156,7 +156,7 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, al
   const found = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return calls;
-    return calls.filter((c) => [c.target, c.prompt, c.machine, c.tool, c.folder, c.reason, DIM.kind.name(DIM.kind.of(c))].some((t) => t?.toLowerCase().includes(q)));
+    return calls.filter((c) => [c.target, c.title, c.prompt, c.machine, c.tool, c.folder, c.reason, DIM.kind.name(DIM.kind.of(c))].some((t) => t?.toLowerCase().includes(q)));
   }, [calls, query]);
   const newest = useMemo(() => [...found].sort((a, b) => (b.at ?? 0) - (a.at ?? 0) || b.seq - a.seq), [found]);
   // The sessions, the riskiest first; each one's Calls stay the newest first.

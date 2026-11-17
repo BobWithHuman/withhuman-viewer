@@ -256,6 +256,13 @@ pub(super) fn data(read: &Read) -> String {
     let mut slots: BTreeMap<(i64, usize), Slot> = BTreeMap::new();
     let mut flow: BTreeMap<(i64, usize, &str, &str, &str), usize> = BTreeMap::new();
     let mut calls = Vec::new();
+    // Each session by its short name, as 기록's list gives it.
+    let titles: HashMap<&str, String> = read
+        .sessions
+        .iter()
+        .filter(|s| !s.title().is_empty())
+        .map(|s| (s.id.as_str(), crate::layout::clip(s.title(), 60)))
+        .collect();
     for f in read.facts {
         let name = machine_of_fact(f);
         let machine = *place.entry(name.clone()).or_insert_with(|| {
@@ -286,7 +293,9 @@ pub(super) fn data(read: &Read) -> String {
         }
         let leak = read.leaks.get(&(f.session.clone(), f.seq));
         if let Some(severity) = Severity::of(f).or(leak.map(|_| Severity::Critical)) {
-            calls.push(call(f, severity, leak));
+            let mut row = call(f, severity, leak);
+            row["title"] = json!(titles.get(f.session.as_str()));
+            calls.push(row);
         }
     }
     let cover: Vec<Value> = slots

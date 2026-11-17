@@ -27,6 +27,8 @@ export type Call = {
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
   /** A shell command's program, which the tools are told apart by. */
   program?: string | null;
+  /** The session's short name, as 기록's list gives it. */
+  title?: string | null;
   target: string | null; reason: string | null; prompt: string | null; rule: string | null;
   mode: string | null; ran: boolean; hard: boolean;
 };
@@ -68,7 +70,7 @@ export type Case = {
   request?: { seq: number; text: string; intent: string | null; at: number | null } | null;
   told?: { seq: number; tool: string | null; target: string | null; at: number | null; quote: string | null; paragraph: number | null; probability: number; error: boolean } | null;
   traced?: boolean;
-  elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; flagged: number }[];
+  elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; title?: string | null; flagged: number }[];
   elsewhere_total?: number;
   machine_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string }[];
 };
@@ -201,6 +203,8 @@ export const rangeLabel = ([from, to]: [number, number]) => {
 // How much a Call worth a look weighs when things are ranked by risk.
 export const RISK: Record<Sev, number> = { crit: 8, high: 4, med: 2, after: 1 };
 // A tool's name as a row has room for: an MCP tool as its server and its tool.
+/** A Call's session by its short name, as 기록's list gives it, else the prompt before the Call. */
+export const named = (c: Call | undefined) => c?.title ?? c?.prompt ?? undefined;
 export const toolName = (tool: string | null) => (tool ?? "").replace(/^mcp__/, "").replace(/__/g, " · ");
 
 // The Calls gathered by a key, each group with its Calls by severity and its risk (the sum of

@@ -258,7 +258,18 @@ pub fn Main() -> Element {
                                 Some(Ok(list)) => list.clone(),
                                 _ => Vec::new(),
                             };
-                            let read = super::case::case(&backend, &session, seq, &facts).await;
+                            let mut read = super::case::case(&backend, &session, seq, &facts).await;
+                            // The other sessions by their short names, as 기록's list gives them.
+                            if let (Some(rows), Load::Ready(list)) = (read["elsewhere"].as_array_mut(), &*state.sessions.peek()) {
+                                for row in rows {
+                                    let title = list
+                                        .iter()
+                                        .find(|s| row["session"].as_str() == Some(s.id.as_str()))
+                                        .map(|s| crate::layout::clip(s.title(), 60))
+                                        .filter(|t| !t.is_empty());
+                                    row["title"] = serde_json::json!(title);
+                                }
+                            }
                             // Only when that case is still the one open.
                             if case.peek().as_ref().is_some_and(|c| c["session"] == read["session"] && c["seq"] == read["seq"]) {
                                 case.set(Some(read));
