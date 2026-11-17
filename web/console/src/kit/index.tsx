@@ -192,8 +192,8 @@ export function Empty({ children = "없음" }: { children?: ReactNode }) {
 // ---------------------------------------------------------------- the table
 /** A sortable table over shadcn's Table; a row can be pressed. Its columns give way to the
  * width there is: one made wide (180px or more) or given no width holds text and takes a share of
- * what is left, as large as its width, its text cut short at the end; any other is as wide as
- * what it holds, up to its width. So the table never runs past its side. */
+ * what the others leave, as large as its width, its text cut short at the end; any other keeps
+ * its width. So the table never runs past its side. */
 export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense }: {
   columns: ColumnDef<T>[]; rows: T[]; onRow?: (row: T) => void; picked?: (row: T) => boolean; initialSort?: SortingState; dense?: boolean;
 }) {
@@ -203,9 +203,14 @@ export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense 
   const grows = (c: ColumnDef<T>) => { const w = widthOf(c); return w === undefined || w >= 180; };
   const shareOf = (c: ColumnDef<T>) => widthOf(c) ?? 260;
   const total = columns.filter(grows).reduce((a, c) => a + shareOf(c), 0) || 1;
-  const head = (c: ColumnDef<T>) => (grows(c) ? { width: `${(shareOf(c) / total) * 100}%` } : { width: 1 });
+  // The short columns keep their width; the text ones split what is left between them, so the
+  // widths add up to the table's in every browser.
+  const fixed = columns.filter((c) => !grows(c)).reduce((a, c) => a + (widthOf(c) ?? 0), 0);
+  const head = (c: ColumnDef<T>) => (grows(c)
+    ? { width: `calc((100% - ${fixed}px) * ${shareOf(c) / total})` }
+    : { width: widthOf(c) });
   return (
-    <Table>
+    <Table className="table-fixed">
       <TableHeader className="sticky top-0 z-10 bg-card">
         {table.getHeaderGroups().map((g) => (
           <TableRow key={g.id} className="hover:bg-transparent">
@@ -231,9 +236,7 @@ export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense 
             {r.getVisibleCells().map((c) => {
               const def = c.column.columnDef;
               const content = flexRender(def.cell, c.getContext());
-              return grows(def)
-                ? <TableCell key={c.id} className={cn("max-w-0 truncate", dense ? "py-1.5" : "py-2.5")}>{content}</TableCell>
-                : <TableCell key={c.id} className={cn("whitespace-nowrap", dense ? "py-1.5" : "py-2.5")}><div className="truncate" style={{ maxWidth: widthOf(def) }}>{content}</div></TableCell>;
+              return <TableCell key={c.id} className={cn("truncate", dense ? "py-1.5" : "py-2.5")}>{content}</TableCell>;
             })}
           </TableRow>
         ))}
