@@ -11,7 +11,7 @@ import {
  * agent wrote it first in this one, after another session took it in), or written by the agent
  * first with nowhere seen before. */
 export type From = "user" | "external" | "earlier" | "agent";
-export type Status = "out" | "blocked" | "normal" | "seen";
+export type Status = "out" | "blocked" | "seen";
 /** Why a Call that sent a value out got it out: the engine's mode (`shadow`, `record`, named as
  * the engine names them), the person's leave, no decision, the engine's leave; or that it went
  * where the value is used (`home`, `local`), which is no leak. */
@@ -103,11 +103,10 @@ export const CATEGORY: Record<Category, { label: string; icon: LucideIcon }> = {
   financial: { label: "금융정보", icon: CreditCard },
   device: { label: "기기 식별자", icon: Smartphone },
 };
-export const STATUSES: Status[] = ["out", "blocked", "normal", "seen"];
+export const STATUSES: Status[] = ["out", "blocked", "seen"];
 export const STATUS: Record<Status, { label: string; color: string; cls: string; icon: LucideIcon }> = {
   out: { label: "유출", color: "var(--deny)", cls: "bg-deny/15 text-deny", icon: Send },
   blocked: { label: "차단", color: "var(--review)", cls: "bg-review/15 text-review", icon: ShieldCheck },
-  normal: { label: "정상 전송", color: "var(--allow)", cls: "bg-allow/15 text-allow", icon: CheckCheck },
   seen: { label: "노출만", color: "var(--info)", cls: "bg-white/8 text-muted-foreground", icon: Eye },
 };
 export const CALL_VERDICT: Record<CallVerdict, { label: string; v: "allow" | "review" | "deny" }> = {
@@ -207,7 +206,7 @@ export type Value = {
 export const valueKey = (t: Trail) => `${t.kind}\u0000${t.text}`;
 /** A machine as a row names it: its host name when known, else its ID. */
 export const machineName = (t: { host?: string | null; client: string }) => t.host || t.client;
-const WORST: Status[] = ["out", "blocked", "normal", "seen"];
+const WORST: Status[] = ["out", "blocked", "seen"];
 
 /** The trails gathered by value (the same masked text of the same kind), the worst ended first,
  * then the latest. */
@@ -257,7 +256,7 @@ export function sources(trails: Trail[]): Source[] {
 
 /** How many of a list ended each way. */
 export const byStatus = (trails: Trail[]) => {
-  const n: Record<Status, number> = { out: 0, blocked: 0, normal: 0, seen: 0 };
+  const n: Record<Status, number> = { out: 0, blocked: 0, seen: 0 };
   for (const t of trails) n[t.status] += 1;
   return n;
 };
@@ -405,21 +404,21 @@ function demo(): Data {
     if (fate > 0.5 && fate <= 0.76 && k.category === "credential") {
       step();
       const home = pick(r, ["anthropic.com", "github.com", "openai.com"]);
-      mentions.push({ seq, at, where: "호출", call: true, out: true, held: false, why: "home", tool: "Bash", what: `curl -H "Authorization: Bearer ${text}" https://api.${home}/v1`, place: `api.${home}`, verdict: "allow" });
+      // Not a send: the app leaves a value's use where it belongs out of what it counts.
+      mentions.push({ seq, at, where: "호출", call: true, out: false, held: false, tool: "Bash", what: `curl -H "Authorization: Bearer ${text}" https://api.${home}/v1`, place: null, verdict: "allow" });
     }
     seqs.set(session, seq);
     const calls = mentions.filter((m) => m.call).length;
     const outRan = mentions.filter((m) => m.out && !m.held && !isNormal(m.why)).length;
     const outStopped = mentions.filter((m) => m.out && m.held).length;
-    const normal = mentions.filter((m) => m.out && !m.held && isNormal(m.why)).length;
     trails.push({
       id: `${session}|sha256:${i}`, session, title, kind: k.kind, category: k.category, text, from,
       source: from === "external" || from === "earlier" ? source : null, sourceTool: from === "external" || from === "earlier" ? tool : null, client,
       before: from === "earlier" ? { session: `${(0x51a3c0de + back * 0x9e3779b1).toString(16).slice(-8)}-${(4000 + back * 137).toString(16)}-4f1e`, title: SESSIONS[back][1], from: "external", at: start - 26 * hour } : null,
-      calls, outRan, outStopped, normal, status: outRan ? "out" : outStopped ? "blocked" : normal ? "normal" : "seen", last: at, mentions,
+      calls, outRan, outStopped, status: outRan ? "out" : outStopped ? "blocked" : "seen", last: at, mentions,
     });
   }
-  const rank = { out: 3, blocked: 2, normal: 1, seen: 0 };
+  const rank = { out: 3, blocked: 2, seen: 0 };
   trails.sort((a, b) => rank[b.status] - rank[a.status] || (b.last ?? 0) - (a.last ?? 0));
   return { now, loaded: now, error: null, store: "데모 데이터", demo: true, trails };
 }

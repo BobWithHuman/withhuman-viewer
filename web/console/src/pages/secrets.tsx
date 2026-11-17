@@ -26,7 +26,7 @@ import { SourceBars, parts } from "./secrets/sources";
 
 const DAY = 24 * 3600e3;
 const PERIODS: [string, string][] = [["1", "24시간"], ["7", "7일"], ["30", "30일"], ["all", "전체"]];
-const RANK: Record<Status, number> = { out: 3, blocked: 2, normal: 1, seen: 0 };
+const RANK: Record<Status, number> = { out: 3, blocked: 2, seen: 0 };
 /** What a figure pressed leaves on the page: every value, those put in a prompt, those a session
  * tried to send out, or those that came out of a document or a tool result. */
 type Focus = "all" | "prompt" | "tries" | "sources";
@@ -293,7 +293,10 @@ const sendsOf = (trails: Trail[]): Send[] => trails.flatMap((t) => t.mentions.fi
  * send_email`), a command line tool by its service, a shell command by its program, else the tool. */
 const toolOf = (s: Send) => {
   const d = targetOf(s.place);
-  if (d.server) return d.tool ? `${d.server} · ${d.tool}` : d.server;
+  // An MCP tool by its own name (`update_password`), its server shown by its logo.
+  const mcp = s.tool && /^mcp__(.+?)__(.+)$/.exec(s.tool);
+  if (mcp) return mcp[2];
+  if (d.server) return d.tool ?? d.server;
   // The program the app read off the command, past comments (`# …`), settings and wrappers.
   if (isShell(s.tool)) return s.program ?? toolName(s.tool);
   return d.tool ?? (s.tool ? toolName(s.tool) : null);
@@ -434,14 +437,10 @@ const valueColumns = (now: number): ColumnDef<Value>[] => [
       </span>
     );
   } },
-  { id: "from", header: "유입 경로", size: 280, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => {
-      const typed = v.froms.includes("user"), from = typed ? "user" : v.froms[0];
-      return (
-        <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
-          <span className="shrink-0 rounded bg-secondary px-1.5 text-[11.5px] leading-[19px] text-foreground/85">{FROM[from].label}</span>
-          {!typed && v.sources.length > 0 && <><SourceName name={v.sources[0]} />{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>}
-        </span>
-      );
+  // Where it came in, by kind alone; the documents and tools it came out of are in its sheet.
+  { id: "from", header: "유입 경로", size: 120, accessorFn: (v) => v.froms.join(" "), cell: ({ row: { original: v } }) => {
+      const from = v.froms.includes("user") ? "user" : v.froms[0];
+      return <span className="shrink-0 rounded bg-secondary px-1.5 text-[11.5px] leading-[19px] text-foreground/85">{FROM[from].label}</span>;
     } },
   { id: "spread", header: "영향 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (v) => v.last ?? 0, cell: ({ row: { original: v } }) => <When at={v.last} now={now} /> },
@@ -684,6 +683,14 @@ function ValueSheet({ v, all, now }: { v: Value; all: Trail[]; now: number }) {
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
         <Path trails={all} status={v.status} />
+        {/* Every document or tool it came out of, where there are more than the path names. */}
+        {v.sources.length > 1 && (
+          <Section title="유입 경로" count={v.sources.length}>
+            <div className="grid gap-1.5">
+              {v.sources.map((name) => <div key={name} className="flex min-w-0 items-center rounded-lg border bg-background px-3 py-2 text-[12.5px]"><SourceName name={name} /></div>)}
+            </div>
+          </Section>
+        )}
         {typedOrigins.length > 0 && (
           <Section title="입력 프롬프트" count={typedOrigins.length > 1 ? typedOrigins.length : undefined}>
             {typedOrigins.slice(0, 3).map((t) => <Origin key={t.id} t={t} />)}
