@@ -29,6 +29,10 @@ export interface Step {
 
 export interface Session {
   title: string;
+  /** The title is the first prompt, not an intent. */
+  quote?: boolean;
+  /** The other intents the session stated. */
+  others?: string[];
   device: string;
   person?: string;
   team?: string;

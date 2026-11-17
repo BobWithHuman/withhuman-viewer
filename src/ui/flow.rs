@@ -558,7 +558,14 @@ pub fn SessionDrop() -> Element {
             .filter(|s| {
                 let key = machine_of(s);
                 q.is_empty()
-                    || [s.title(), s.folder().as_str(), key.as_str(), name_of(&key).as_str(), s.id.as_str()]
+                    || [
+                        s.title(),
+                        s.prompt.as_deref().unwrap_or(""),
+                        s.folder().as_str(),
+                        key.as_str(),
+                        name_of(&key).as_str(),
+                        s.id.as_str(),
+                    ]
                         .iter()
                         .any(|t| t.to_lowercase().contains(&q))
             })
@@ -664,6 +671,7 @@ pub fn SessionDrop() -> Element {
                                 s.folder()
                             };
                             let when = day_time(s.last_at.or(s.created_at));
+                            let more = s.other_intents().len();
                             rsx! {
                                 button {
                                     key: "{id}",
@@ -675,7 +683,10 @@ pub fn SessionDrop() -> Element {
                                     },
                                     i { class: "dot {tone}" }
                                     span { class: "main",
-                                        span { class: "t", "{clip(s.title(), 60)}" }
+                                        span { class: "t",
+                                            "{clip(s.title(), 60)}"
+                                            if more > 0 { span { class: "more", "+{more}" } }
+                                        }
                                         span { class: "p", "{place}" }
                                     }
                                     span { class: "side",

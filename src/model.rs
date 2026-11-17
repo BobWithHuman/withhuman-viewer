@@ -34,6 +34,8 @@ pub struct Session {
     /// How the engine enforced the session's last decision: `record`, `shadow` or `enforce`.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub mode: Option<String>,
+    /// Each intent the agent stated, in order, with the Calls it made under it.
+    pub intents: Vec<(Option<String>, i64)>,
 }
 
 /// One Call as the security team's charts count it (`graph::CALL_FACTS`).
@@ -90,11 +92,45 @@ impl Session {
             .to_owned()
     }
 
+    /// The session's name: the intent it did the most under (the first, of those level), or,
+    /// with none stated, its first prompt.
     pub fn title(&self) -> &str {
-        self.prompt
-            .as_deref()
+        self.main_intent()
+            .or(self.prompt.as_deref())
             .or(self.intent.as_deref())
             .unwrap_or("")
+    }
+
+    /// The intents stated, each once in the order first stated, with all the Calls made under it.
+    fn stated(&self) -> Vec<(&str, i64)> {
+        let mut out: Vec<(&str, i64)> = Vec::new();
+        for (intent, calls) in &self.intents {
+            let Some(i) = intent.as_deref().map(short_intent).filter(|i| !i.is_empty()) else {
+                continue;
+            };
+            match out.iter_mut().find(|(t, _)| *t == i) {
+                Some((_, n)) => *n += calls,
+                None => out.push((i, *calls)),
+            }
+        }
+        out
+    }
+
+    fn main_intent(&self) -> Option<&str> {
+        let stated = self.stated();
+        let most = stated.iter().map(|(_, n)| *n).max()?;
+        stated.into_iter().find(|(_, n)| *n == most).map(|(i, _)| i)
+    }
+
+    /// The other intents the session stated beside the one it is named by, in order.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub fn other_intents(&self) -> Vec<&str> {
+        let main = self.main_intent();
+        self.stated()
+            .into_iter()
+            .map(|(i, _)| i)
+            .filter(|i| Some(*i) != main)
+            .collect()
     }
 
     pub fn flagged(&self) -> bool {
@@ -311,8 +347,40 @@ pub struct CallRow {
     pub ran: bool,
 }
 
+/// An intent as a name: its first sentence, without the agent's `(확신도: …)`.
+fn short_intent(intent: &str) -> &str {
+    let mut t = intent.trim();
+    if let Some(i) = t.find("(확신도") {
+        t = t[..i].trim_end();
+    }
+    if let Some(i) = t.find(". ") {
+        t = &t[..i];
+    }
+    t.trim_end_matches(['.', ' '])
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_session_is_named_by_the_intent_it_did_the_most_under() {
+        let s = super::Session {
+            prompt: Some("이거 봐줘".into()),
+            intents: vec![
+                (Some("폴더 구조 파악 (확신도: 높음)".into()), 2),
+                (Some("배포 스크립트 실행. 스테이징만.".into()), 5),
+                (None, 3),
+                (Some("폴더 구조 파악".into()), 3),
+                (Some("변경 기록 (확신도: 중간)".into()), 0),
+            ],
+            ..super::Session::default()
+        };
+        assert_eq!(s.title(), "폴더 구조 파악");
+        assert_eq!(s.other_intents(), ["배포 스크립트 실행", "변경 기록"]);
+        let none = super::Session { prompt: Some("이거 봐줘".into()), ..super::Session::default() };
+        assert_eq!(none.title(), "이거 봐줘");
+        assert!(none.other_intents().is_empty());
+    }
     use super::Paragraph;
 
     // The engine stores the classification as a probability; older fixtures as a bool.

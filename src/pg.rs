@@ -80,6 +80,13 @@ SELECT s.session_id AS id, s.version, s.created_at,
         ORDER BY "order" LIMIT 1) AS first_request,
        (SELECT intent FROM nodes WHERE session_id = s.session_id AND kind = 'Intent'
         ORDER BY "order" DESC LIMIT 1) AS intent,
+       -- Each intent stated and the Calls made under it, in order.
+       (SELECT json_agg(json_build_array(t.intent, t.calls) ORDER BY t.g) FROM (
+          SELECT g, max(intent) AS intent, count(*) FILTER (WHERE kind = 'Call') AS calls
+          FROM (SELECT kind, intent,
+                       count(*) FILTER (WHERE kind = 'Intent' AND intent IS NOT NULL) OVER (ORDER BY "order") AS g
+                FROM nodes WHERE session_id = s.session_id AND kind IN ('Intent', 'Call')) x
+          WHERE g > 0 GROUP BY g) t) AS intents,
        (SELECT cwd FROM nodes WHERE session_id = s.session_id AND cwd IS NOT NULL
         ORDER BY "order" LIMIT 1) AS cwd,
        (SELECT client_id FROM nodes WHERE session_id = s.session_id AND client_id IS NOT NULL
