@@ -82,7 +82,7 @@ SELECT s.session_id AS id, s.version, s.created_at,
        (SELECT intent FROM nodes WHERE session_id = s.session_id AND kind = 'Intent'
         ORDER BY "order" DESC LIMIT 1) AS intent,
        -- Each intent stated and the Calls made under it, in order.
-       (SELECT json_agg(json_build_array(t.intent, t.calls) ORDER BY t.g) FROM (
+       (SELECT coalesce(json_agg(json_build_array(t.intent, t.calls) ORDER BY t.g), '[]'::json) FROM (
           SELECT g, max(intent) AS intent, count(*) FILTER (WHERE kind = 'Call') AS calls
           FROM (SELECT kind, intent,
                        count(*) FILTER (WHERE kind = 'Intent' AND intent IS NOT NULL) OVER (ORDER BY "order") AS g
@@ -347,9 +347,15 @@ impl From<tokio_postgres::Error> for Fail {
 async fn rows_on(c: &Client, sql: &str, params: &[Param<'_>]) -> Result<Rows, Fail> {
     let wrapped = format!("SELECT coalesce(json_agg(q), '[]'::json)::text FROM ({sql}) q");
     let found = c.query_typed(&wrapped, params).await?;
-    let text: String = found.first().map(|r| r.get(0)).unwrap_or_else(|| "[]".into());
+    let text: String = found
+        .first()
+        .map(|r| r.get(0))
+        .unwrap_or_else(|| "[]".into());
     serde_json::from_str(&text).map_err(|e| {
-        Fail::Read(ApiError::new(500, format!("PostgreSQL의 답을 읽지 못했습니다: {e}")))
+        Fail::Read(ApiError::new(
+            500,
+            format!("PostgreSQL의 답을 읽지 못했습니다: {e}"),
+        ))
     })
 }
 
@@ -486,7 +492,8 @@ impl Postgres<'_> {
 
     /// The rows of `sql`, each a JSON object of its columns.
     async fn rows(&self, sql: &str, params: &[Param<'_>]) -> Result<Rows, ApiError> {
-        self.batch(|c| async move { rows_on(&c, sql, params).await }).await
+        self.batch(|c| async move { rows_on(&c, sql, params).await })
+            .await
     }
 
     /// How many sessions the store holds: the settings' test.
@@ -520,7 +527,10 @@ impl Postgres<'_> {
     /// Call seen since `since` (ms), when it is given.
     pub async fn sessions(&self, since: Option<i64>) -> Result<Value, ApiError> {
         let mut rows = self
-            .rows(&SESSIONS, &[(&IRREVERSIBLE, Type::TEXT), (&since, Type::INT8)])
+            .rows(
+                &SESSIONS,
+                &[(&IRREVERSIBLE, Type::TEXT), (&since, Type::INT8)],
+            )
             .await?;
         rows.sort_by_key(|r| std::cmp::Reverse(r.get("created_at").and_then(Value::as_i64)));
         for row in &mut rows {
@@ -532,7 +542,12 @@ impl Postgres<'_> {
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     /// Every Call's facts, or only those decided or seen since `since` (ms).
     pub async fn call_facts(&self, since: Option<i64>) -> Result<Value, ApiError> {
-        let mut rows = self.rows(&CALL_FACTS, &[(&IRREVERSIBLE, Type::TEXT), (&since, Type::INT8)]).await?;
+        let mut rows = self
+            .rows(
+                &CALL_FACTS,
+                &[(&IRREVERSIBLE, Type::TEXT), (&since, Type::INT8)],
+            )
+            .await?;
         for row in &mut rows {
             unescape(row, "prompt", 200);
             unescape(row, "cause", 300);
@@ -864,37 +879,61 @@ mod tests {
         s.neo4j_url = std::env::var("VIEWER_PG_URL").expect("VIEWER_PG_URL");
         s.password = std::env::var("VIEWER_PG_PASSWORD").unwrap_or_default();
         let pool = Pool::default();
-        let pg = Postgres { settings: &s, pool: &pool };
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let pg = Postgres {
+            settings: &s,
+            pool: &pool,
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let size = |v: &Value| v.as_array().map_or(0, Vec::len);
         let time = |what: &str, f: &dyn Fn() -> Result<Value, ApiError>| {
             let at = std::time::Instant::now();
             let got = f();
             let ms = at.elapsed().as_millis();
             match got {
-                Ok(v) => println!("{what:<28} {ms:>7} ms  {:>7} rows  {:>6} KB", size(&v), v.to_string().len() / 1024),
+                Ok(v) => println!(
+                    "{what:<28} {ms:>7} ms  {:>7} rows  {:>6} KB",
+                    size(&v),
+                    v.to_string().len() / 1024
+                ),
                 Err(e) => println!("{what:<28} {ms:>7} ms  failed: {}", e.error),
             }
         };
-        time("connect", &|| rt.block_on(pg.count_sessions()).map(|n| json!([n])));
-        time("one trip (SELECT 1)", &|| rt.block_on(pg.rows("SELECT 1 AS one", &[])).map(all));
+        time("connect", &|| {
+            rt.block_on(pg.count_sessions()).map(|n| json!([n]))
+        });
+        time("one trip (SELECT 1)", &|| {
+            rt.block_on(pg.rows("SELECT 1 AS one", &[])).map(all)
+        });
         time("sessions", &|| rt.block_on(pg.sessions(None)));
         // Every column worked out, but only its length sent.
         let counted = format!("SELECT sum(length(q::text)) AS n FROM ({}) q", *SESSIONS);
         let none: Option<i64> = None;
         time("sessions, server only", &|| {
-            rt.block_on(pg.rows(&counted, &[(&IRREVERSIBLE, Type::TEXT), (&none, Type::INT8)])).map(all)
+            rt.block_on(pg.rows(
+                &counted,
+                &[(&IRREVERSIBLE, Type::TEXT), (&none, Type::INT8)],
+            ))
+            .map(all)
         });
         let hour = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64 - 3600 * 1000);
-        time("sessions, last hour", &|| rt.block_on(pg.sessions(Some(hour))));
-        time("session IDs", &|| rt.block_on(pg.session_ids()).map(|v| json!(v)));
+        time("sessions, last hour", &|| {
+            rt.block_on(pg.sessions(Some(hour)))
+        });
+        time("session IDs", &|| {
+            rt.block_on(pg.session_ids()).map(|v| json!(v))
+        });
         time("call facts, all", &|| rt.block_on(pg.call_facts(None)));
         let day = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64 - 24 * 3600 * 1000);
-        time("call facts, last day", &|| rt.block_on(pg.call_facts(Some(day))));
+        time("call facts, last day", &|| {
+            rt.block_on(pg.call_facts(Some(day)))
+        });
         time("secrets", &|| rt.block_on(pg.secrets()));
         time("triage", &|| rt.block_on(pg.triage()));
         time("inventory", &|| rt.block_on(pg.inventory()));

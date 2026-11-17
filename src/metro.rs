@@ -263,6 +263,52 @@ pub struct Ask {
     pub agent: Option<String>,
     /// When the engine saw the request, in milliseconds.
     pub at: Option<i64>,
+    /// What of the turn before made the user write it, as the engine judged.
+    pub parent: Option<AskParent>,
+    /// The engine judged it written from nothing of the turn before (`none`): a new request.
+    pub fresh: bool,
+}
+
+/// A prompt's parent: the step of the turn before its writer built on, and how sure the engine
+/// is of it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AskParent {
+    pub from: ParentOf,
+    pub probability: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ParentOf {
+    /// The request of the turn before.
+    Request,
+    /// The agent's message with this number.
+    Message(i64),
+    /// A tool result, by the Call whose result it was and its own number.
+    Result { call: i64, result: i64 },
+}
+
+/// The parent the engine kept in a Request's trace (`request_parent`): `request`, `m<seq>`, or
+/// `g<seq>` or `g<seq>p<index>`; none for `none`, an unknown key, or a result whose Call is not
+/// in the session.
+fn ask_parent(model: &Model, trace: &Value) -> Option<AskParent> {
+    let parent = &trace["request_parent"];
+    let key = parent["key"].as_str()?;
+    let number = |rest: &str| rest.split('p').next()?.parse::<i64>().ok();
+    let from = if key == "request" {
+        ParentOf::Request
+    } else if let Some(rest) = key.strip_prefix('m') {
+        ParentOf::Message(number(rest)?)
+    } else {
+        let result = number(key.strip_prefix('g')?)?;
+        ParentOf::Result {
+            call: *model.call_of.get(&result)?,
+            result,
+        }
+    };
+    Some(AskParent {
+        from,
+        probability: parent["probability"].as_f64().unwrap_or(0.0),
+    })
 }
 
 /// Kept for the drawing, which no longer needs bands: a branch is its subagent.
@@ -1128,6 +1174,7 @@ impl Metro {
             match node.kind.as_str() {
                 "Request" => {
                     let prompt = text(&node.summary.prompt);
+                    let trace = parse_json(node.props.get("trace_json"));
                     items.push(Item::Ask(Ask {
                         seq: node.seq(),
                         x: 0.0,
@@ -1135,6 +1182,8 @@ impl Metro {
                         text: prompt,
                         intent: None,
                         at: node.props.get("observed_at").and_then(Value::as_i64),
+                        parent: ask_parent(model, &trace),
+                        fresh: trace["request_parent"]["key"] == "none",
                     }));
                 }
                 "Intent" => {

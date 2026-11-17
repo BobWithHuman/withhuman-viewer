@@ -67,6 +67,9 @@ fn attention(graph: &Value) -> Value {
 mod mcp;
 
 static FIXTURE: &str = include_str!("../mock/fixture.json");
+/// A made-up session of many turns, each later prompt joined to what it was written from, added
+/// to the recorded ones (`mock/make_dashboard_fixture.py --into-fixture` writes it).
+static TURNS: &str = include_str!("../mock/turns.json");
 
 pub struct Demo {
     data: Value,
@@ -86,7 +89,11 @@ impl Demo {
                 eprintln!("데모 데이터를 읽지 못했습니다 ({path}): {e}");
                 FIXTURE.to_owned()
             }),
-            Err(_) => FIXTURE.to_owned(),
+            Err(_) => {
+                let mut demo = Self::parse(FIXTURE);
+                demo.add(TURNS);
+                return demo;
+            }
         };
         Self::parse(&text)
     }
@@ -101,6 +108,22 @@ impl Demo {
             data,
             inventory: None,
             mcp: None,
+        }
+    }
+
+    /// Another fixture's sessions added, the newest first.
+    fn add(&mut self, text: &str) {
+        let Ok(more) = serde_json::from_str::<Value>(text) else {
+            return;
+        };
+        for key in ["graphs", "nodes", "calls"] {
+            if let (Some(to), Some(from)) = (self.data[key].as_object_mut(), more[key].as_object()) {
+                to.extend(from.clone());
+            }
+        }
+        if let (Some(to), Some(from)) = (self.data["sessions"].as_array_mut(), more["sessions"].as_array()) {
+            to.extend(from.iter().cloned());
+            to.sort_by_key(|s| std::cmp::Reverse(s["created_at"].as_i64()));
         }
     }
 

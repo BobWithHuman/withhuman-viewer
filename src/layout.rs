@@ -165,6 +165,11 @@ impl Model {
         self.group_of.get(&seq).copied()
     }
 
+    /// The SubGraph a SubGraph's Calls were traced to (`s<number>`), or none (`none`, unset).
+    pub fn subgraph_parent(&self, number: i64) -> Option<i64> {
+        self.subgraph_parent.get(&number)?.strip_prefix('s')?.parse().ok()
+    }
+
     /// The chain a Call was traced along: the Call, the result that caused it, the Call that
     /// result came from, and so on up to the prompt.
     pub fn chain(&self, seq: i64) -> Highlight {
