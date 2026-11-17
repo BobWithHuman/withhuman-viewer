@@ -43,3 +43,6 @@ button { cursor: pointer; }
 
 /* The search hit stepped to in a long text. */
 mark[data-find][data-on] { outline: 2px solid #fff; outline-offset: 1px; }
+
+/* Switching 순서 and 경로, the boxes kept slide to their places. */
+.react-flow__node { transition: transform 0.35s ease; }
