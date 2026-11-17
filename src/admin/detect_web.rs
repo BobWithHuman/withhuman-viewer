@@ -122,6 +122,10 @@ pub(super) fn program_of(command: &str) -> Option<&str> {
     // Options of a wrapper that take a value of their own.
     const VALUED: [&str; 8] = ["-u", "-g", "-n", "-s", "-k", "-C", "-I", "-p"];
     for part in segments(command) {
+        // A comment line says what the next does; it runs nothing.
+        if part.starts_with('#') {
+            continue;
+        }
         let words = words(part);
         let mut i = 0;
         let mut wrapped = false;
@@ -184,7 +188,7 @@ fn segments(command: &str) -> Vec<&str> {
             (Some(q), _) if c == q => quote = None,
             (Some(_), _) => {}
             (None, '\'' | '"') => quote = Some(c),
-            (None, ';' | '|' | '&') => {
+            (None, ';' | '|' | '&' | '\n') => {
                 out.push(&command[start..i]);
                 start = i + 1;
             }
@@ -575,6 +579,11 @@ mod tests {
             Some("git")
         );
         assert_eq!(program_of("echo 'a && b' | sh"), Some("echo"));
+        // Past a comment line.
+        assert_eq!(
+            program_of("# 테스트 돌리기\npython3 -m unittest"),
+            Some("python3")
+        );
         assert_eq!(of("Bash", "bash -c \"cd app && git push\""), "send");
         assert_eq!(of("mcp__slack__post_message", ""), "send");
         assert_eq!(of("mcp__github__delete_repository", ""), "delete");

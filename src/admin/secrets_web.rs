@@ -49,6 +49,10 @@ fn mention(m: &SecretMention, from: &str) -> Value {
         "why": (out && !held(m)).then(|| why_out(m, from)),
         "mode": m.mode,
         "tool": m.tool,
+        // A shell command's program, past comments, settings and wrappers.
+        "program": (m.tool.as_deref() == Some("Bash"))
+            .then(|| m.target.as_deref().and_then(super::detect_web::program_of))
+            .flatten(),
         "said": m.said,
         "what": call.then(|| m.target.clone().or_else(|| m.tool.clone())).flatten(),
         "place": out.then(|| destination(m)),

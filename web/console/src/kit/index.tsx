@@ -238,6 +238,17 @@ export const ago = (ms: number | null | undefined, now = Date.now()) => {
   if (d < day) return `${Math.round(d / h)}시간 전`;
   return `${Math.round(d / day)}일 전`;
 };
+/** Where a page's data came from, as its header shows it: a dot (green the store, yellow the
+ * demo), the address alone without the store's name, and when it was read. */
+export function SourceMeta({ label, demo, at }: { label: string; demo?: boolean; at?: number | null }) {
+  return (
+    <>
+      <span className="inline-flex min-w-0 items-center gap-1.5"><i className={cn("size-1.5 shrink-0 rounded-full", demo ? "bg-catch" : "bg-allow")} /><span className="max-w-72 truncate">{label.replace(/^[A-Za-z0-9]+ · /, "")}</span></span>
+      {at ? <span className="tnum">{clock(at)}</span> : null}
+    </>
+  );
+}
+
 export const clock = (ms: number | null | undefined) => {
   if (!ms) return "";
   const d = new Date(ms), z = (n: number) => String(n).padStart(2, "0");

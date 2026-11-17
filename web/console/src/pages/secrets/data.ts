@@ -37,6 +37,8 @@ export type Mention = {
   seq: number;
   /** The Call's tool, for a Call. */
   tool?: string | null;
+  /** A shell command's program, as the app read it off the command. */
+  program?: string | null;
   /** What a person typed, for a request: the value is masked in it as in `text`. */
   said?: string | null;
   at: number | null;
@@ -394,14 +396,16 @@ function demo(): Data {
         const ran = leaks && (j === sends - 1 || r() < 0.5);
         const verdict: CallVerdict = ran ? (r() < 0.6 ? "allow" : "approved") : r() < 0.7 ? "deny" : "asked";
         const why: Why | null = ran ? (verdict === "approved" ? "approved" : pick(r, ["allowed", "allowed", "shadow", "undecided"] as Why[])) : null;
-        mentions.push({ seq, at, where: "호출", call: true, out: true, held: !ran, why, what: command(text), place, verdict });
+        const what = command(text);
+        const tool = what.startsWith("mcp__") ? what : what.startsWith("https://") ? "WebFetch" : "Bash";
+        mentions.push({ seq, at, where: "호출", call: true, tool, out: true, held: !ran, why, what, place, verdict });
       }
     }
     // Some send the value only where it is used: a key to its own service.
     if (fate > 0.5 && fate <= 0.76 && k.category === "credential") {
       step();
       const home = pick(r, ["anthropic.com", "github.com", "openai.com"]);
-      mentions.push({ seq, at, where: "호출", call: true, out: true, held: false, why: "home", what: `curl -H "Authorization: Bearer ${text}" https://api.${home}/v1`, place: `api.${home}`, verdict: "allow" });
+      mentions.push({ seq, at, where: "호출", call: true, out: true, held: false, why: "home", tool: "Bash", what: `curl -H "Authorization: Bearer ${text}" https://api.${home}/v1`, place: `api.${home}`, verdict: "allow" });
     }
     seqs.set(session, seq);
     const calls = mentions.filter((m) => m.call).length;

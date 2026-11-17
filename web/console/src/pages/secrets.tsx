@@ -14,8 +14,9 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, ago, clock } from "@/kit";
+import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, SourceMeta, Stat, ago, clock } from "@/kit";
 import { cn } from "@/lib/utils";
+import { isShell } from "@/kit/code";
 import {
   CATEGORY, DEMO, FROM, STATUS, STATUSES, WHY, WHYS, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, valueKey,
   type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Source, type Status, type Trail, type Value, type Why,
@@ -137,8 +138,8 @@ export default function Page({ data }: { data: unknown | null }) {
   return (
     <div className="flex h-full flex-col">
       <PageHeader title="민감 정보" meta={<>
-        <Badge variant="secondary" className="gap-1.5 border-0 font-normal text-muted-foreground"><i className={cn("size-1.5 rounded-full", d.demo ? "bg-review" : "bg-allow")} />{d.store}</Badge>
-        {d.loaded ? <span className="tnum">{clock(d.loaded)}</span> : <span>불러오는 중</span>}
+        <SourceMeta label={d.store} demo={d.demo} at={d.loaded} />
+        {!d.loaded && <span>불러오는 중</span>}
         {d.error && <Badge variant="secondary" className="max-w-[420px] gap-1 border-0 bg-deny/15 text-deny" title={d.error}><ShieldAlert className="size-3" /><span className="truncate">{d.error}</span></Badge>}
       </>}>
         <ToggleGroup type="single" size="sm" variant="outline" spacing={0} value={period} onValueChange={(v) => v && setPeriod(v)}>
@@ -285,6 +286,67 @@ function Dest({ place }: { place: string }) {
   return <span className="text-muted-foreground" title={d.tool ? `도구 · ${d.tool}` : place}>확인 불가</span>;
 }
 
+/** A Call that sent a value out: where to, and the tool and target it ran with. */
+type Send = { place: string; tool?: string | null; what?: string | null; program?: string | null };
+const sendsOf = (trails: Trail[]): Send[] => trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place).map((m) => ({ place: m.place!, tool: m.tool, what: m.what, program: m.program })));
+/** The tool a value went through: an MCP tool as its server and the tool of it (`agentdojo ·
+ * send_email`), a command line tool by its service, a shell command by its program, else the tool. */
+const toolOf = (s: Send) => {
+  const d = targetOf(s.place);
+  if (d.server) return d.tool ? `${d.server} · ${d.tool}` : d.server;
+  // The program the app read off the command, past comments (`# …`), settings and wrappers.
+  if (isShell(s.tool)) return s.program ?? toolName(s.tool);
+  return d.tool ?? (s.tool ? toolName(s.tool) : null);
+};
+function UsedTool({ s }: { s: Send }) {
+  const d = targetOf(s.place), name = toolOf(s);
+  if (!name) return <span className="text-muted-foreground">–</span>;
+  const Icon = isShell(s.tool) ? SquareTerminal : Wrench;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5" title={name}>
+      {d.server ? <ServiceLogo name={d.server} size={14} /> : <Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
+      <Masked className="truncate">{name}</Masked>
+    </span>
+  );
+}
+/** Whom or where a value went, written out: a mail address, a channel, an account, a host. */
+function Whom({ target, wrap }: { target: string; wrap?: boolean }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5" title={target}>
+      <TargetIcon target={target} />
+      <span className={wrap ? "min-w-0 break-all" : "truncate"}>{target}</span>
+    </span>
+  );
+}
+/** The first of a list, the rest counted and named on hover. */
+function FirstOf({ list, show }: { list: string[]; show: (x: string) => ReactNode }) {
+  if (!list.length) return <span className="text-muted-foreground">–</span>;
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      {show(list[0])}
+      {list.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground" title={list.slice(1).join("\n")}>+{list.length - 1}</span>}
+    </span>
+  );
+}
+/** The tools values went through, each once. */
+const Tools = ({ sends }: { sends: Send[] }) => {
+  const byTool = new Map<string, Send>();
+  for (const s of sends) { const k = toolOf(s); if (k && !byTool.has(k)) byTool.set(k, s); }
+  return <FirstOf list={[...byTool.keys()]} show={(k) => <UsedTool s={byTool.get(k)!} />} />;
+};
+/** Whom values went to, each once. */
+const Whoms = ({ names }: { names: string[] }) => (
+  <FirstOf list={[...new Set(names.map((p) => targetOf(p).target).filter((x): x is string => !!x))]} show={(x) => <Whom target={x} />} />
+);
+/** The two columns of where a value went: the tool, and whom. */
+function sendColumns<T>(trails: (row: T) => Trail[]): ColumnDef<T>[] {
+  const places = (r: T) => [...new Set(sendsOf(trails(r)).map((s) => s.place))];
+  return [
+    { id: "tool", header: "사용된 도구", size: 190, accessorFn: (r) => sendsOf(trails(r)).map(toolOf).join(" "), cell: ({ row }) => <Tools sends={sendsOf(trails(row.original))} /> },
+    { id: "whom", header: "유출한 곳", size: 230, accessorFn: (r) => places(r).map((p) => targetOf(p).target ?? "").join(" "), cell: ({ row }) => <Whoms names={places(row.original)} /> },
+  ];
+}
+
 /** The first of where values were sent, the rest counted. */
 function Places({ names, empty }: { names: string[]; empty?: ReactNode }) {
   const list = dests(names);
@@ -342,15 +404,6 @@ function Whys({ whys }: { whys: Partial<Record<Why, number>> }) {
   );
 }
 
-/** How a value ended, with whom it was sent to when it left or was about to. */
-function Result({ status, places }: { status: Status; places: string[] }) {
-  return (
-    <span className="flex min-w-0 items-center gap-2"><StatusBadge s={status} />
-      {status !== "seen" && <Places names={places} />}
-    </span>
-  );
-}
-
 /** Where a value came in, as a cell names it: a person, the document or tool, or not known. */
 function OriginName({ origin }: { origin: string }) {
   if (origin === "user") return <span className="flex min-w-0 items-center gap-1.5"><MessageSquareText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">사용자 입력</span></span>;
@@ -366,24 +419,11 @@ function OriginName({ origin }: { origin: string }) {
 }
 const originOf = (t: Trail) => (fromOf(t) === "user" ? "user" : t.source ?? (fromOf(t) === "earlier" ? "earlier" : "agent"));
 
-/** A session's values from where they came in to whom they were sent, in a line: the first of
- * each end, the rest counted, and an arrow in how the sends ended. */
-function Route({ trails, places, ran }: { trails: Trail[]; places: string[]; ran: boolean }) {
-  const from = [...new Set(trails.map(originOf))].sort((a, b) => Number(a === "agent") - Number(b === "agent"));
-  const more = (n: number) => n > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{n - 1}</span>;
-  return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="flex min-w-0 max-w-[48%] shrink-0 items-center gap-1.5"><OriginName origin={from[0]} />{more(from.length)}</span>
-      <ArrowRight className="size-3.5 shrink-0" style={{ color: ran ? "var(--deny)" : "var(--review)" }} strokeWidth={2.2} />
-      <span className="flex min-w-0 items-center"><Places names={places} empty={<span className="text-muted-foreground">대상 모름</span>} /></span>
-    </span>
-  );
-}
-
 /** A value over every session it showed in: how it ended at its worst, where it was sent, the
  * Call that carried it, where it came from, and how far it spread. */
 const valueColumns = (now: number): ColumnDef<Value>[] => [
-  { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => <Result status={v.status} places={v.places} /> },
+  { id: "status", header: "결과", size: 92, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => <StatusBadge s={v.status} /> },
+  ...sendColumns<Value>((v) => v.trails),
   { id: "text", header: "값", size: 300, accessorFn: (v) => v.text, cell: ({ row: { original: v } }) => {
     const Icon = CATEGORY[v.category as Category]?.icon;
     return (
@@ -418,7 +458,8 @@ const valueColumns = (now: number): ColumnDef<Value>[] => [
 /** A value a person put in a prompt, once a session: how it ended, the value, the prompt, and
  * the machine. */
 const inputColumns = (now: number): ColumnDef<Trail>[] => [
-  { id: "status", header: "결과", size: 200, accessorFn: (t) => RANK[t.status], cell: ({ row: { original: t } }) => <Result status={t.status} places={placesOf(t)} /> },
+  { id: "status", header: "결과", size: 92, accessorFn: (t) => RANK[t.status], cell: ({ row: { original: t } }) => <StatusBadge s={t.status} /> },
+  ...sendColumns<Trail>((t) => [t]),
   { id: "text", header: "값", size: 250, accessorFn: (t) => t.text, cell: ({ row: { original: t } }) => {
     const Icon = CATEGORY[t.category as Category]?.icon;
     return (
@@ -469,7 +510,11 @@ function Sent({ ran, held }: { ran: number; held: number }) {
  * which values, and how its sends ended. */
 const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
   { id: "status", header: "결과", size: 200, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <span className="flex min-w-0 items-center gap-1.5"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /><Whys whys={a.whys} /></span> },
-  { id: "route", header: "출처 → 전송 대상", size: 340, accessorFn: (a) => `${a.trails.map(originOf).join(" ")} ${a.places.join(" ")}`, cell: ({ row: { original: a } }) => <Route trails={a.trails} places={a.places} ran={a.ran > 0} /> },
+  { id: "from", header: "출처", size: 200, accessorFn: (a) => a.trails.map(originOf).join(" "), cell: ({ row: { original: a } }) => {
+    const from = [...new Set(a.trails.map(originOf))].sort((x, y) => Number(x === "agent") - Number(y === "agent"));
+    return <FirstOf list={from} show={(o) => <OriginName origin={o} />} />;
+  } },
+  ...sendColumns<Attempt>((a) => a.trails),
   { id: "session", header: "세션", size: 220, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
   { id: "values", header: "값", size: 170, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
   { id: "sent", header: "전송", size: 124, accessorFn: (a) => a.ran * 1000 + a.held, cell: ({ row: { original: a } }) => <Sent ran={a.ran} held={a.held} /> },
@@ -502,7 +547,7 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
       </span>
     );
   } },
-  { id: "to", header: "전송 대상", size: 200, accessorFn: (s) => s.trails.flatMap(placesOf).join(" "), cell: ({ row: { original: s } }) => <Places names={s.trails.flatMap(placesOf)} empty={<span className="text-muted-foreground">–</span>} /> },
+  ...sendColumns<Source>((s) => s.trails),
   { id: "spread", header: "영향 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (s) => s.last ?? 0, cell: ({ row: { original: s } }) => <When at={s.last} now={now} /> },
 ];
@@ -583,17 +628,17 @@ function Path({ trails, status }: { trails: Trail[]; status: Status }) {
         <span className="relative h-0.5 w-full rounded-full" style={{ background: tone }}><ArrowRight className="absolute -top-[7px] -right-1.5 size-4" style={{ color: tone }} /></span>
       </div>
       <div className={end} style={status !== "seen" ? { borderColor: `color-mix(in oklab, ${tone} 55%, transparent)`, background: `color-mix(in oklab, ${tone} 8%, var(--background))` } : undefined}>
-        <span className="text-[11px] text-muted-foreground">전송 대상</span>
         {where ? (
           <>
-            <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium">
-              <Dest place={lead!.place!} />
-              {others > 0 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{others}</span>}
+            <span className="text-[11px] text-muted-foreground">유출한 곳</span>
+            <span className="flex min-w-0 items-start gap-1.5 text-[13px] font-medium">
+              {where.target ? <Whom target={where.target} wrap /> : <span className="font-normal text-muted-foreground">대상 없음</span>}
+              {others > 0 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground" title={[...new Set(sends.map((m) => m.place))].slice(1).join("\n")}>+{others}</span>}
             </span>
-            {/* What it went through, apart from where it went. */}
-            {(where.tool || lead!.tool) && <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground"><Wrench className="size-3 shrink-0" strokeWidth={1.9} /><Masked className="truncate">{where.tool ?? toolName(lead!.tool)}</Masked></span>}
+            <span className="mt-1 text-[11px] text-muted-foreground">사용된 도구</span>
+            <span className="flex min-w-0 items-center text-[12px]"><UsedTool s={{ place: lead!.place!, tool: lead!.tool, what: lead!.what, program: lead!.program }} /></span>
           </>
-        ) : <span className="text-[13px] text-muted-foreground">밖으로 안 나감</span>}
+        ) : <><span className="text-[11px] text-muted-foreground">유출한 곳</span><span className="text-[13px] text-muted-foreground">밖으로 안 나감</span></>}
       </div>
     </div>
   );

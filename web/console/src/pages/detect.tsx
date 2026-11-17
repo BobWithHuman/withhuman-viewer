@@ -8,23 +8,21 @@
 
 import { LoaderCircle, Settings, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Legend, PageHeader, Panel, VERDICT, Warn } from "@/kit";
+import { Legend, PageHeader, Panel, SourceMeta, VERDICT, Warn } from "@/kit";
 import { cn } from "@/lib/utils";
 import { send } from "../bridge";
 import { type RankBy, Ranking } from "./detect/breakdown";
-import { type Call, DIM, DIMS, type Data, type Dim, type Filter, MODE, type Period, VERDICTS, coverage, demo, named, passes, rangeLabel, span, within } from "./detect/data";
+import { type Call, DIM, DIMS, type Data, type Dim, type Filter, type Period, VERDICTS, demo, named, passes, rangeLabel, span, within } from "./detect/data";
 import { type Ask, type Told, Watch } from "./detect/list";
 import { Trend } from "./detect/trend";
 
 const PERIODS: [number, string][] = [[1, "24시간"], [7, "7일"], [30, "30일"], [0, "전체"]];
 /** How a figure moved against the stretch before, in percent; nothing when there is no before. */
 const moved = (now: number, before: number | null) => (before ? Math.round(((now - before) / before) * 100) : null);
-const hm = (ms: number) => { const d = new Date(ms), z = (n: number) => String(n).padStart(2, "0"); return `${z(d.getHours())}:${z(d.getMinutes())}`; };
 const FILL = "[&>[data-slot=card-content]]:flex [&>[data-slot=card-content]]:min-h-0 [&>[data-slot=card-content]]:flex-1 [&>[data-slot=card-content]]:flex-col";
 
 export default function Page({ data }: { data: unknown | null }) {
@@ -45,11 +43,8 @@ export default function Page({ data }: { data: unknown | null }) {
   const ranked = useMemo(() => inPeriod.filter((c) => passes(c, filter, rankBy)), [inPeriod, filter, rankBy]);
   const earlier = useMemo(() => (before === null ? null : d.calls.filter((c) => within(c, before, from) && passes(c, filter, "verdict"))), [d, before, from, filter]);
   const count = (list: Call[] | null, v: string) => (list ? list.filter((c) => c.verdict === v).length : null);
-  const machine = filter.machine === undefined ? null : d.machines.indexOf(filter.machine);
-  const cover = useMemo(() => coverage(d.cover, from, to, machine), [d, from, to, machine]);
   // The chart's stretch: all time starts at the first Call worth a look.
   const first = useMemo(() => d.calls.reduce((a, c) => (c.at !== null && c.at < a ? c.at : a), now), [d, now]);
-  const mode = MODE[cover.mode] ?? MODE.none;
   const blank = d.loading && !d.calls.length;
   const marks = d.triage ?? {}, blocked = d.blocked ?? [];
   // The machines to do something about: those with Calls nothing decided, set up yet never
@@ -76,9 +71,8 @@ export default function Page({ data }: { data: unknown | null }) {
       <PageHeader
         title="보안 현황"
         meta={<>
-          <Badge variant="secondary" className={`gap-1 border-0 font-semibold ${mode.cls}`}><i className="size-1.5 rounded-full bg-current" />{mode.label}</Badge>
           {d.failed && <Tooltip><TooltipTrigger asChild><span><Warn>불러오기 실패</Warn></span></TooltipTrigger><TooltipContent className="max-w-80 break-words">{d.failed}</TooltipContent></Tooltip>}
-          {d.refreshed && <span className="tnum">갱신 {hm(d.refreshed)}</span>}
+          <SourceMeta label={d.source} demo={d.demo} at={d.refreshed} />
           {d.loading && <span className="inline-flex items-center gap-1.5"><LoaderCircle className="size-3.5 animate-spin" />불러오는 중</span>}
           {chips.map((c) => (
             <span key={c.key} className="inline-flex h-6 max-w-72 items-center gap-1.5 rounded-full bg-primary/15 pr-1 pl-2.5 text-[12px] text-primary">
