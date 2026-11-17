@@ -265,26 +265,24 @@ function Spread({ sessions, clients }: { sessions: number; clients: number }) {
 
 /** Where a value was sent: whom, by its mark, with the MCP server that carried it; or, when the
  * Call named no one, 대상 모름 with the server or tool that sent it. */
-/** Where a value was sent, read the same way everywhere: the service (its logo and name), then
- * whom or where in it (`slack → #dev-alerts`, `git → origin`), or, with no one named, what it did
- * there (`agentdojo · update_password`); a host as itself. */
+/** Where a value was sent: a place or a person, never the tool that sent it. The service (its
+ * logo and name), and whom or where in it when the Call names one (`slack → #dev-alerts`,
+ * `git → origin`); a host as itself. The tool it went through shows on hover. */
 function Dest({ place }: { place: string }) {
   const d = targetOf(place);
-  const title = [d.server, d.tool].filter(Boolean).join(" · ") + (d.target ? `${d.server ? " → " : ""}${d.target}` : "");
+  const title = (d.target ? (d.server ? `${d.server} → ${d.target}` : d.target) : d.server ?? "") + (d.tool ? `\n도구 · ${d.tool}` : "");
   if (d.server) {
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5" title={title}>
         <ServiceLogo name={d.server} size={14} />
-        <span className="shrink-0 text-muted-foreground">{d.server}</span>
-        {d.target
-          ? <><ArrowRight className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} /><span className="truncate">{d.target}</span></>
-          : d.tool && <><span className="shrink-0 text-muted-foreground">·</span><Masked className="truncate">{d.tool}</Masked></>}
+        <span className={cn("shrink-0", d.target && "text-muted-foreground")}>{d.server}</span>
+        {d.target && <><ArrowRight className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} /><span className="truncate">{d.target}</span></>}
       </span>
     );
   }
-  if (d.target) return <span className="inline-flex min-w-0 items-center gap-1.5" title={d.target}><TargetIcon target={d.target} /><span className="truncate">{d.target}</span></span>;
-  if (d.tool) return <span className="inline-flex min-w-0 items-center gap-1.5" title={d.tool}><Wrench className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><Masked className="truncate">{d.tool}</Masked></span>;
-  return <span className="text-muted-foreground" title={place}>—</span>;
+  if (d.target) return <span className="inline-flex min-w-0 items-center gap-1.5" title={title}><TargetIcon target={d.target} /><span className="truncate">{d.target}</span></span>;
+  // Only the tool is known, which is not a place.
+  return <span className="text-muted-foreground" title={d.tool ? `도구 · ${d.tool}` : place}>확인 불가</span>;
 }
 
 /** The first of where values were sent, the rest counted. */
@@ -592,6 +590,8 @@ function Path({ trails, status }: { trails: Trail[]; status: Status }) {
               <Dest place={lead!.place!} />
               {others > 0 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{others}</span>}
             </span>
+            {/* What it went through, apart from where it went. */}
+            {(where.tool || lead!.tool) && <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground"><Wrench className="size-3 shrink-0" strokeWidth={1.9} /><Masked className="truncate">{where.tool ?? toolName(lead!.tool)}</Masked></span>}
           </>
         ) : <span className="text-[13px] text-muted-foreground">밖으로 안 나감</span>}
       </div>

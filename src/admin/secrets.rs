@@ -111,13 +111,11 @@ fn masked(recipient: &str) -> String {
 pub(super) fn destination(m: &SecretMention) -> String {
     let tool = m.tool.as_deref().unwrap_or("");
     if let Some(rest) = tool.strip_prefix("mcp__") {
-        let (server, action) = rest.split_once("__").unwrap_or((rest, ""));
-        // No one named (a password set, a record changed): the tool it went into.
+        // Where it went is the server, and whom in it when the Call names one; the tool it went
+        // through is not a place, and the page shows it apart.
+        let server = rest.split("__").next().unwrap_or(rest);
         return match m.recipient.as_deref().filter(|r| !r.trim().is_empty()) {
-            // Whom, by which server and with which of its tools: `#ops · slack:post_message (MCP)`.
-            Some(to) if !action.is_empty() => format!("{} · {server}:{action} (MCP)", masked(to)),
             Some(to) => format!("{} · {server} (MCP)", masked(to)),
-            None if !action.is_empty() => format!("{server}:{action} (MCP)"),
             None => format!("{server} (MCP)"),
         };
     }
@@ -781,7 +779,7 @@ mod tests {
         stopped.tool = Some("mcp__slack__post_message".into());
         stopped.decision = Some("DENY".into());
         assert_eq!(destination(&send), "paste.example");
-        assert_eq!(destination(&stopped), "slack:post_message (MCP)");
+        assert_eq!(destination(&stopped), "slack (MCP)");
         let list = trails(&[read, send, typed, stopped]);
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].status().1, "out", "the one that got out first");
