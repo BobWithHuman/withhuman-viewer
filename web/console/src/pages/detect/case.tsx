@@ -57,21 +57,20 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
   const others = group.calls.filter((c) => c !== call && c.session === call.session);
   // The other sessions the same cause reached, each with its Calls worth a look.
   const reached = group.sessions.filter((s) => s !== call.session).map((s) => group.calls.filter((c) => c.session === s));
-  const user = read?.user ?? call.user ?? null;
   const host = hostOf(call.target);
   // What the agent read is a source the team can distrust from here on.
   const source = told?.target || null;
   const distrusted = !!source && blocked.some((b) => b.source === source);
   const evidence = () => ask({
     do: "export", name: `withhuman-case-${call.session.slice(0, 8)}-${call.seq}.json`,
-    text: JSON.stringify({ exported_at: new Date().toISOString(), mark: mark ?? null, user, source_distrusted: distrusted, call, session_calls: group.calls, why: read }, null, 2),
+    text: JSON.stringify({ exported_at: new Date().toISOString(), mark: mark ?? null, source_distrusted: distrusted, call, session_calls: group.calls, why: read }, null, 2),
   });
   return (
     <>
       <SheetHeader className="gap-2 border-b pr-12">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={cn("rounded-md px-1.5 text-[12px] leading-[22px] font-semibold", SEV[call.sev].cls)}>{SEV[call.sev].label}</span>
-          <VerdictBadge v={call.verdict}>{call.verdict === "review" ? (call.ran ? "확인 요청 · 승인" : "확인 요청 · 반려") : undefined}</VerdictBadge>
+          <VerdictBadge v={call.verdict}>{call.verdict === "review" ? (call.ran ? "사용자 확인 · 승인" : "사용자 확인 · 반려") : undefined}</VerdictBadge>
           {call.hard && <Warn>되돌리기 어려움</Warn>}
           <span className="tnum ml-1 text-[12px] text-muted-foreground">{clock(call.at)} · {ago(call.at)}</span>
         </div>
@@ -80,12 +79,10 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
           <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={mark?.state ?? ""} onValueChange={(v) => ask({ do: "triage", sessions: group.sessions, state: v || null })}>
             {MARKS.map((m) => <ToggleGroupItem key={m} value={m} className={cn("px-2.5 text-[12.5px]", m === "attack" && "data-[state=on]:bg-deny/20 data-[state=on]:text-deny", m === "benign" && "data-[state=on]:bg-allow/20 data-[state=on]:text-allow", m === "reviewing" && "data-[state=on]:bg-review/20 data-[state=on]:text-review")}>{MARK[m].label}</ToggleGroupItem>)}
           </ToggleGroup>
-          {user && (
-            <Button variant="outline" size="sm" className={cn(armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
-              onClick={() => { if (armed) { ask({ do: "stop", email: user, session: call.session, seq: call.seq }); setArmed(false); } else setArmed(true); }}>
-              <OctagonX />{armed ? "한 번 더" : "멈춤"}
-            </Button>
-          )}
+          <Button variant="outline" size="sm" className={cn(armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
+            onClick={() => { if (armed) { ask({ do: "stop_device", device: call.machine, session: call.session, seq: call.seq }); setArmed(false); } else setArmed(true); }}>
+            <OctagonX />{armed ? "한 번 더" : "단말 멈춤"}
+          </Button>
           <Button variant="outline" size="sm" onClick={evidence}><Download />증거</Button>
           <Button size="sm" onClick={() => ask({ do: "open", session: call.session, seq: call.seq })}>기록<ArrowUpRight /></Button>
         </div>
@@ -94,11 +91,11 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
 
       <div className="grid shrink-0 grid-cols-2 gap-3 border-b p-5">
         <section className="grid content-start gap-1.5">
-          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground"><MessageSquareText className="size-3.5" />사용자가 시킨 말</h3>
+          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground"><MessageSquareText className="size-3.5" />사용자 요청</h3>
           <Box className="max-h-[132px] overflow-y-auto">{read?.request?.text ?? call.prompt ?? <span className="text-muted-foreground">프롬프트 없음</span>}</Box>
         </section>
         <section className="grid content-start gap-1.5">
-          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-catch"><FileText className="size-3.5" />읽은 글이 시킨 말{told && <span className="tnum ml-auto">{Math.round(told.probability * 100)}%</span>}</h3>
+          <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-catch"><FileText className="size-3.5" />유도 문구{told && <span className="tnum ml-auto">{Math.round(told.probability * 100)}%</span>}</h3>
           <Box tone={told?.quote ? "var(--catch)" : undefined} className="max-h-[132px] overflow-y-auto">
             {!read ? <span className="text-muted-foreground">불러오는 중</span>
               : told?.quote ? told.quote
@@ -138,7 +135,15 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
               {call.tool && <span className="mr-2 rounded-md bg-secondary px-1.5 py-0.5 font-sans text-[11px] text-muted-foreground">{toolName(call.tool)}</span>}
               {call.target ?? call.tool}
             </Box>
-            {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">보내려던 곳</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
+            {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">전송 대상</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
+            {call.leak && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                <span className="rounded bg-deny/15 px-1.5 leading-[20px] font-semibold text-deny">유출된 값</span>
+                {call.leak.kinds.map((k) => <span key={k} className="rounded bg-secondary px-1.5 leading-[20px]">{k}</span>)}
+                <span className="text-muted-foreground">→</span>
+                {call.leak.places.map((p) => <Mono key={p}>{p.replace(" (MCP)", "")}</Mono>)}
+              </div>
+            )}
           </Step>
 
           <Step n={3} icon={ShieldAlert} title="엔진 판정" last aside={call.rule ? <Mono>{call.rule}</Mono> : undefined}>
@@ -148,7 +153,6 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
 
         <div className="scroll flex min-h-0 flex-col gap-5 overflow-y-auto border-l p-5">
           <dl className="grid grid-cols-[64px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12.5px]">
-            <dt className="text-muted-foreground">사용자</dt><dd className="min-w-0 truncate">{user ?? <span className="text-muted-foreground">모름</span>}</dd>
             <dt className="text-muted-foreground">단말</dt><dd className="min-w-0 truncate"><Mono>{call.machine}</Mono></dd>
             <dt className="text-muted-foreground">폴더</dt><dd className="min-w-0 truncate"><Mono>{call.cwd ?? (call.folder || "–")}</Mono></dd>
             <dt className="text-muted-foreground">엔진</dt><dd>{(MODE[call.mode ?? "none"] ?? MODE.none).label}</dd>
@@ -196,18 +200,6 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
               ))}</Rows>
             )}
           </Side>
-
-          {!!read?.user_recent?.length && (
-            <Side title="이 사용자의 다른 탐지" count={read.user_recent.length}>
-              <Rows>{read.user_recent.slice(0, 8).map((r) => (
-                <button key={`${r.session}-${r.seq}`} onClick={() => ask({ do: "open", session: r.session, seq: r.seq })} className={rowCls}>
-                  <VerdictBadge v={r.verdict as Call["verdict"]} />
-                  <Mono className="min-w-0 flex-1 truncate">{r.target ?? toolName(r.tool)}</Mono>
-                  <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">{ago(r.at)}</span>
-                </button>
-              ))}</Rows>
-            </Side>
-          )}
 
           {!!read?.machine_recent?.length && (
             <Side title="이 단말의 최근 탐지" count={read.machine_recent.length}>

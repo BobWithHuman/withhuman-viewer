@@ -346,7 +346,7 @@ fn CheckExchange(model: Arc<Model>, exchange: Value) -> Element {
         }
         if !user_request.is_empty() {
             details {
-                summary { "user_request · 사용자 프롬프트 원문" }
+                summary { "user_request · 사용자 입력 원문" }
                 pre { "{user_request}" }
             }
         }
@@ -917,7 +917,7 @@ pub fn Story(
                     }
                 },
                 ("request", _) => rsx! { p { "사용자 요청의 다음 단계입니다." } },
-                ("none", _) => rsx! { p { "요청에도 도구 결과에도 이어지지 않습니다." } },
+                ("none", _) => rsx! { p { "요청에도 도구 응답에도 이어지지 않습니다." } },
                 _ => rsx! { p { class: "muted", "원인 추적 기록이 없습니다." } },
             }
         }

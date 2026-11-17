@@ -20,10 +20,10 @@ export const VERDICTS: Verdict[] = ["deny", "review", "allow"];
 
 export type Call = {
   session: string; seq: number; at: number | null; machine: string; verdict: Verdict; sev: Sev;
-  /** Whose session it is, when the inventory tells. */
-  user?: string | null;
   /** What the Call whose result told this one to act was on: a file, a URL, a command or a tool. */
   cause?: string | null;
+  /** The sensitive values this Call sent out though not kept from running: their kinds, and where to. */
+  leak?: { kinds: string[]; places: string[] } | null;
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
   target: string | null; reason: string | null; prompt: string | null; rule: string | null;
   mode: string | null; ran: boolean; hard: boolean;
@@ -69,9 +69,6 @@ export type Case = {
   elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; flagged: number }[];
   elsewhere_total?: number;
   machine_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string }[];
-  /** Whose session it is, and that person's other Calls worth a look. */
-  user?: string | null;
-  user_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string; machine: string }[];
 };
 
 // The kinds of action, as the engine's questions divide them.
@@ -106,9 +103,10 @@ const KIND: Record<string, string> = {
   explicit: "사용자 지시 위반",
   safeguard: "에이전트 안전장치 변경",
   other: "그 밖의 이유",
-  allowed_irreversible: "되돌리기 어려운 허용",
+  allowed_irreversible: "고위험 허용",
+  secret_out: "민감 정보 유출",
 };
-const SOURCE: Record<string, string> = { segment: "도구 결과", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
+const SOURCE: Record<string, string> = { segment: "도구 응답", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
 export const MODE: Record<string, { label: string; cls: string }> = {
   enforce: { label: "엔진 차단 중", cls: "bg-allow/15 text-allow" },
   shadow: { label: "엔진 시범 운영", cls: "bg-review/15 text-review" },
@@ -120,7 +118,7 @@ export const MODE: Record<string, { label: string; cls: string }> = {
 export type Dim = "verdict" | "action" | "kind" | "source" | "session" | "machine" | "tool" | "folder";
 export const DIMS: Dim[] = ["verdict", "action", "kind", "source", "session", "machine", "tool", "folder"];
 export const DIM: Record<Dim, { label: string; of: (c: Call) => string; name: (key: string) => string }> = {
-  verdict: { label: "판정", of: (c) => c.verdict, name: (k) => (k === "allow" ? "되돌리기 어려운 허용" : k === "review" ? "확인 요청" : k === "none" ? "판정 없음" : VERDICT[k as Verdict]?.label ?? k) },
+  verdict: { label: "판정", of: (c) => c.verdict, name: (k) => (k === "allow" ? "고위험 허용" : k === "review" ? "사용자 확인" : k === "none" ? "판정 없음" : VERDICT[k as Verdict]?.label ?? k) },
   action: { label: "행동", of: (c) => c.action, name: (k) => ACTION[k]?.label ?? k },
   kind: { label: "위반 유형", of: (c) => c.kind ?? "other", name: (k) => KIND[k] ?? k },
   source: { label: "원인", of: (c) => c.source, name: (k) => SOURCE[k] ?? k },
@@ -219,20 +217,22 @@ export function groups(calls: Call[], of: (c: Call) => string): Group[] {
 }
 // A Call that already ran though it should worry: allowed though hard to undo, held and let
 // run by a person, or one that sent data out and ran. These come before what the engine stopped.
-export const happened = (c: Call) => c.ran && (c.verdict === "allow" || c.hard || c.kind === "exfiltration" || c.verdict === "review");
+export const happened = (c: Call) => !!c.leak || (c.ran && (c.verdict === "allow" || c.hard || c.kind === "exfiltration" || c.verdict === "review"));
 
 // A case: the Calls worth a look that one cause made, over every session it reached; a Call
 // with no known cause makes a case of its session. Those with Calls that already ran come
 // first, then the riskiest.
-export type CaseGroup = Group & { cause: string | null; sessions: string[]; machines: string[]; ran: number };
+export type CaseGroup = Group & { cause: string | null; sessions: string[]; machines: string[]; ran: number; leaked: string[] };
 export function cases(calls: Call[]): CaseGroup[] {
   return groups(calls, (c) => (c.cause ? `c:${c.cause}` : `s:${c.session}`))
     .map((g) => ({
       ...g, cause: g.calls[0].cause ?? null,
       sessions: [...new Set(g.calls.map((c) => c.session))], machines: [...new Set(g.calls.map((c) => c.machine))],
       ran: g.calls.filter(happened).length,
+      leaked: [...new Set(g.calls.flatMap((c) => c.leak?.kinds ?? []))],
     }))
-    .sort((a, b) => Number(b.ran > 0) - Number(a.ran > 0) || b.risk - a.risk || b.total - a.total);
+    // Values already out first, then what else already ran, then the riskiest.
+    .sort((a, b) => Number(b.leaked.length > 0) - Number(a.leaked.length > 0) || Number(b.ran > 0) - Number(a.ran > 0) || b.risk - a.risk || b.total - a.total);
 }
 // A case's state: its sessions' common mark, `mixed` when they differ, none when none is marked.
 export function stateOf(g: CaseGroup, marks: Record<string, Mark>): Mark["state"] | "mixed" | null {

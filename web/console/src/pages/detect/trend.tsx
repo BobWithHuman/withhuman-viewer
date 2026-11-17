@@ -9,8 +9,8 @@ import { type Call, HOUR, VERDICTS, axis, bucketOf, moment, tick } from "./data"
 
 const CONFIG: ChartConfig = {
   deny: { label: "차단", color: VERDICT.deny.color },
-  review: { label: "확인 요청", color: VERDICT.review.color },
-  allow: { label: "되돌리기 어려운 허용", color: VERDICT.allow.color },
+  review: { label: "사용자 확인", color: VERDICT.review.color },
+  allow: { label: "고위험 허용", color: VERDICT.allow.color },
 };
 
 export function Trend({ calls, from, to, onRange }: {

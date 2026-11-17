@@ -3,17 +3,21 @@
 // masked: the engine keeps no more than that.
 
 import {
-  Bot, CreditCard, Eye, FileText, IdCard, KeyRound, MessageSquareText, Send, ShieldCheck, Smartphone, Wrench, type LucideIcon,
+  Bot, CreditCard, Eye, FileText, IdCard, KeyRound, MessageSquareText, Send, ShieldCheck, Smartphone, type LucideIcon,
 } from "lucide-react";
 
 export type From = "user" | "external" | "agent";
-export type Status = "out" | "blocked" | "used" | "seen";
+export type Status = "out" | "blocked" | "seen";
 export type Category = "credential" | "pii" | "financial" | "device";
 export type CallVerdict = "deny" | "approved" | "asked" | "allow";
 
 /** One place a value showed in its session; a Call says what it acted on and where it sent. */
 export type Mention = {
   seq: number;
+  /** The Call's tool, for a Call. */
+  tool?: string | null;
+  /** What a person typed, for a request: the value is masked in it as in `text`. */
+  said?: string | null;
   at: number | null;
   where: string;
   call: boolean;
@@ -36,8 +40,7 @@ export type Trail = {
   source: string | null;
   sourceTool: string | null;
   client: string;
-  /** Whose the session is and the machine's name, when the inventory tells. */
-  user?: string | null;
+  /** The machine's name, when the inventory tells. */
   host?: string | null;
   calls: number;
   outRan: number;
@@ -58,9 +61,9 @@ export type Data = {
 
 export const FROMS: From[] = ["user", "external", "agent"];
 export const FROM: Record<From, { label: string; icon: LucideIcon }> = {
-  user: { label: "사용자 프롬프트", icon: MessageSquareText },
-  external: { label: "도구 결과", icon: FileText },
-  agent: { label: "에이전트", icon: Bot },
+  user: { label: "사용자 입력", icon: MessageSquareText },
+  external: { label: "도구 응답", icon: FileText },
+  agent: { label: "출처 불명", icon: Bot },
 };
 export const CATEGORIES: Category[] = ["credential", "pii", "financial", "device"];
 export const CATEGORY: Record<Category, { label: string; icon: LucideIcon }> = {
@@ -69,17 +72,16 @@ export const CATEGORY: Record<Category, { label: string; icon: LucideIcon }> = {
   financial: { label: "금융정보", icon: CreditCard },
   device: { label: "기기 식별자", icon: Smartphone },
 };
-export const STATUSES: Status[] = ["out", "blocked", "used", "seen"];
+export const STATUSES: Status[] = ["out", "blocked", "seen"];
 export const STATUS: Record<Status, { label: string; color: string; cls: string; icon: LucideIcon }> = {
-  out: { label: "밖으로 나감", color: "var(--deny)", cls: "bg-deny/15 text-deny", icon: Send },
-  blocked: { label: "보내려다 막힘", color: "var(--review)", cls: "bg-review/15 text-review", icon: ShieldCheck },
-  used: { label: "호출에 씀", color: "var(--write)", cls: "bg-write/15 text-write", icon: Wrench },
-  seen: { label: "보이기만 함", color: "var(--info)", cls: "bg-white/8 text-muted-foreground", icon: Eye },
+  out: { label: "유출", color: "var(--deny)", cls: "bg-deny/15 text-deny", icon: Send },
+  blocked: { label: "차단", color: "var(--review)", cls: "bg-review/15 text-review", icon: ShieldCheck },
+  seen: { label: "노출만", color: "var(--info)", cls: "bg-white/8 text-muted-foreground", icon: Eye },
 };
 export const CALL_VERDICT: Record<CallVerdict, { label: string; v: "allow" | "review" | "deny" }> = {
   deny: { label: "차단", v: "deny" },
   approved: { label: "사용자 승인", v: "review" },
-  asked: { label: "확인 요청", v: "review" },
+  asked: { label: "사용자 확인", v: "review" },
   allow: { label: "허용", v: "allow" },
 };
 
@@ -162,11 +164,13 @@ export type Value = {
   places: string[]; carrier: string | null;
   /** Who wrote it first, and the documents or tool results it came out of. */
   froms: From[]; sources: string[];
-  sessions: number; clients: string[]; users: string[]; last: number | null;
+  sessions: number; clients: string[]; last: number | null;
 };
+/** A value's key: the same masked text of the same kind is the same value. */
+export const valueKey = (t: Trail) => `${t.kind}\u0000${t.text}`;
 /** A machine as a row names it: its host name when known, else its ID. */
 export const machineName = (t: { host?: string | null; client: string }) => t.host || t.client;
-const WORST: Status[] = ["out", "blocked", "used", "seen"];
+const WORST: Status[] = ["out", "blocked", "seen"];
 
 /** The trails gathered by value (the same masked text of the same kind), the worst ended first,
  * then the latest. */
@@ -175,14 +179,13 @@ export function values(trails: Trail[]): Value[] {
   for (const t of trails) {
     const key = `${t.kind}\u0000${t.text}`;
     let v = by.get(key);
-    if (!v) by.set(key, (v = { key, text: t.text, kind: t.kind, category: t.category, trails: [], status: "seen", places: [], carrier: null, froms: [], sources: [], sessions: 0, clients: [], users: [], last: null }));
+    if (!v) by.set(key, (v = { key, text: t.text, kind: t.kind, category: t.category, trails: [], status: "seen", places: [], carrier: null, froms: [], sources: [], sessions: 0, clients: [], last: null }));
     v.trails.push(t);
     if (WORST.indexOf(t.status) < WORST.indexOf(v.status)) v.status = t.status;
     for (const p of placesOf(t)) if (!v.places.includes(p)) v.places.push(p);
     if (!v.froms.includes(fromOf(t))) v.froms.push(fromOf(t));
     if (t.source && !v.sources.includes(t.source)) v.sources.push(t.source);
     if (!v.clients.includes(t.client)) v.clients.push(t.client);
-    if (t.user && !v.users.includes(t.user)) v.users.push(t.user);
     v.last = Math.max(v.last ?? 0, t.last ?? 0) || null;
   }
   for (const v of by.values()) {
@@ -217,7 +220,7 @@ export function sources(trails: Trail[]): Source[] {
 
 /** How many of a list ended each way. */
 export const byStatus = (trails: Trail[]) => {
-  const n: Record<Status, number> = { out: 0, blocked: 0, used: 0, seen: 0 };
+  const n: Record<Status, number> = { out: 0, blocked: 0, seen: 0 };
   for (const t of trails) n[t.status] += 1;
   return n;
 };
@@ -331,7 +334,7 @@ function demo(): Data {
       seq += 1 + Math.floor(r() * 4);
       at += Math.floor((0.3 + r() * 4) * 60e3);
     };
-    mentions.push({ seq, at, where: from === "user" ? "사용자 요청" : from === "external" ? "도구 결과" : "에이전트의 말", call: false, out: false, held: false, what: null, place: null, verdict: null });
+    mentions.push({ seq, at, where: from === "user" ? "사용자 요청" : from === "external" ? "도구 응답" : "에이전트의 말", call: false, out: false, held: false, what: null, place: null, verdict: null });
     // Most values are only seen; some go into Calls, and a few of those reach outside.
     const fate = r();
     const local = fate < 0.45 ? 0 : 1 + Math.floor(r() * 3);
@@ -340,7 +343,7 @@ function demo(): Data {
       mentions.push({ seq, at, where: "호출", call: true, out: false, held: false, what: pick(r, LOCAL), place: null, verdict: r() < 0.85 ? "allow" : "approved" });
       if (r() < 0.3) {
         step();
-        mentions.push({ seq, at, where: r() < 0.6 ? "도구 결과" : "에이전트의 말", call: false, out: false, held: false, what: null, place: null, verdict: null });
+        mentions.push({ seq, at, where: r() < 0.6 ? "도구 응답" : "에이전트의 말", call: false, out: false, held: false, what: null, place: null, verdict: null });
       }
     }
     if (fate > 0.76) {
@@ -360,10 +363,10 @@ function demo(): Data {
     trails.push({
       id: `${session}|sha256:${i}`, session, title, kind: k.kind, category: k.category, text, from,
       source: from === "external" ? source : null, sourceTool: from === "external" ? tool : null, client,
-      calls, outRan, outStopped, status: outRan ? "out" : outStopped ? "blocked" : calls ? "used" : "seen", last: at, mentions,
+      calls, outRan, outStopped, status: outRan ? "out" : outStopped ? "blocked" : "seen", last: at, mentions,
     });
   }
-  const rank = { out: 3, blocked: 2, used: 1, seen: 0 };
+  const rank = { out: 3, blocked: 2, seen: 0 };
   trails.sort((a, b) => rank[b.status] - rank[a.status] || (b.last ?? 0) - (a.last ?? 0));
   return { now, loaded: now, error: null, store: "데모 데이터", demo: true, trails };
 }
