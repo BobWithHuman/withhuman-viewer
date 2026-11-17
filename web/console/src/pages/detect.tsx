@@ -6,7 +6,7 @@
 // narrows the rest; what is applied shows as chips, each removable. The counting is done here,
 // over the Calls the app hands over once.
 
-import { Download, LoaderCircle, Settings, X } from "lucide-react";
+import { LoaderCircle, Settings, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,6 @@ import { type RankBy, Ranking } from "./detect/breakdown";
 import { type Call, DIM, DIMS, type Data, type Dim, type Filter, MODE, type Period, VERDICTS, coverage, demo, named, passes, rangeLabel, span, within } from "./detect/data";
 import { type Ask, type Told, Watch } from "./detect/list";
 import { Trend } from "./detect/trend";
-import { Tuning } from "./detect/tuning";
 
 const PERIODS: [number, string][] = [[1, "24시간"], [7, "7일"], [30, "30일"], [0, "전체"]];
 /** How a figure moved against the stretch before, in percent; nothing when there is no before. */
@@ -35,8 +34,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const [period, setPeriod] = useState<Period>({ days: 7, range: null });
   const [filter, setFilter] = useState<Filter>({});
   const [rankBy, setRankBy] = useState<RankBy>("machine");
-  // The side panel: what is riskiest, or what the decisions suggest changing.
-  const [side, setSide] = useState<"rank" | "tune">("rank");
   const ask: Ask = (message) => send("detect", message);
 
   const toggle = (dim: Dim, key: string) => setFilter((f) => ({ ...f, [dim]: f[dim] === key ? undefined : key }));
@@ -69,32 +66,6 @@ export default function Page({ data }: { data: unknown | null }) {
   }, [d, from, to]);
   // The sessions of the period the team marked an attack.
   const attacks = useMemo(() => new Set(inPeriod.filter((c) => marks[c.session]?.state === "attack").map((c) => c.session)).size, [inPeriod, marks]);
-  // The period as a report: its counts, the days, the gravest kinds, what the team decided
-  // and changed, and every Call worth a look.
-  const report = () => {
-    const days = new Map<string, Record<string, number>>();
-    for (const c of inPeriod) {
-      if (c.at === null) continue;
-      const day = new Date(c.at).toISOString().slice(0, 10), row = days.get(day) ?? { deny: 0, review: 0, allow: 0 };
-      row[c.verdict]++;
-      days.set(day, row);
-    }
-    const grave = inPeriod.filter((c) => c.kind === "exfiltration" || c.kind === "hijacked_goal");
-    ask({
-      do: "export", name: `withhuman-report-${new Date().toISOString().slice(0, 10)}.json`,
-      text: JSON.stringify({
-        exported_at: new Date().toISOString(), source: d.source,
-        period: { from: Number.isFinite(from) ? new Date(from).toISOString() : null, to: new Date(Math.min(to, now)).toISOString() },
-        counts: { deny: count(inPeriod, "deny"), review: count(inPeriod, "review"), allowed_hard_to_undo: count(inPeriod, "allow"), confirmed_attacks: attacks, marked_benign: new Set(inPeriod.filter((c) => marks[c.session]?.state === "benign").map((c) => c.session)).size },
-        by_day: [...days.entries()].sort().map(([day, n]) => ({ day, ...n })),
-        grave: { exfiltration: grave.filter((c) => c.kind === "exfiltration").length, hijacked_goal: grave.filter((c) => c.kind === "hijacked_goal").length, calls: grave },
-        decisions: Object.entries(marks).map(([session, m]) => ({ session, ...m })).sort((a, b) => b.at - a.at),
-        distrusted_sources: blocked,
-        calls: inPeriod,
-      }, null, 2),
-    });
-  };
-
   const chips: { key: string; label: string; value: string; drop: () => void }[] = [
     ...(period.range ? [{ key: "range", label: "기간", value: rangeLabel(period.range), drop: () => setPeriod((p) => ({ ...p, range: null })) }] : []),
     ...DIMS.filter((dim) => filter[dim] !== undefined).map((dim) => ({ key: dim, label: DIM[dim].label, value: dim === "session" ? named(d.calls.find((c) => c.session === filter.session)) ?? DIM.session.name(filter.session!) : DIM[dim].name(filter[dim]!), drop: () => setFilter((f) => ({ ...f, [dim]: undefined })) })),
@@ -124,7 +95,6 @@ export default function Page({ data }: { data: unknown | null }) {
         <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={period.range ? "" : String(period.days)} onValueChange={(v) => v && setPeriod({ days: Number(v), range: null })}>
           {PERIODS.map(([days, label]) => <ToggleGroupItem key={days} value={String(days)} className="px-3 text-[12.5px]">{label}</ToggleGroupItem>)}
         </ToggleGroup>
-        <Button variant="outline" size="sm" onClick={report}><Download />보고서</Button>
         <Tooltip>
           <TooltipTrigger asChild><Button variant="ghost" size="icon-sm" aria-label="연결 설정" onClick={() => ask({ do: "settings" })}><Settings /></Button></TooltipTrigger>
           <TooltipContent>연결 설정</TooltipContent>
@@ -168,26 +138,17 @@ export default function Page({ data }: { data: unknown | null }) {
             </Panel>
 
             <Panel className={`h-full ${FILL}`} pad={false}
-              title={
-                <ToggleGroup type="single" size="sm" value={side} onValueChange={(v) => v && setSide(v as typeof side)} className="-ml-1.5">
-                  <ToggleGroupItem value="rank" className="px-2 text-[13.5px] font-semibold text-muted-foreground data-[state=on]:text-foreground">위험 순위</ToggleGroupItem>
-                  <ToggleGroupItem value="tune" className="px-2 text-[13.5px] font-semibold text-muted-foreground data-[state=on]:text-foreground">조정 후보</ToggleGroupItem>
-                </ToggleGroup>
-              }
-              aside={side === "rank" && (
+              title="위험 순위"
+              aside={(
                 <ToggleGroup type="single" size="sm" value={rankBy} onValueChange={(v) => v && setRankBy(v as RankBy)}>
                   {([["machine", "단말"], ["session", "세션"], ["tool", "도구"]] as [RankBy, string][]).map(([v, l]) => <ToggleGroupItem key={v} value={v} className="px-2.5 text-[12.5px]">{l}</ToggleGroupItem>)}
                 </ToggleGroup>
               )}>
-              {side === "tune"
-                ? <div className="scroll min-h-0 flex-1 overflow-y-auto px-2 py-2"><Tuning calls={inPeriod} marks={marks} blocked={blocked} shared={d.shared} ask={ask} onPick={(dim, key) => toggle(dim, key)} /></div>
-                : <>
               <div className="scroll min-h-0 flex-1 overflow-y-auto px-2 py-2">
                 {blank
                   ? <div className="flex flex-col gap-2 px-2 py-1">{Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>
                   : <Ranking calls={ranked} by={rankBy} picked={filter[rankBy]} onPick={(key) => toggle(rankBy, key)} />}
               </div>
-                </>}
             </Panel>
           </div>
           <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} alerts={alerts} className="h-[clamp(420px,58vh,760px)] shrink-0" />

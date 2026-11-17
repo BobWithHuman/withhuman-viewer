@@ -369,29 +369,3 @@ export const hostOf = (target: string | null) => {
   const m = /https?:\/\/([^/\s:?'"]+)|@([A-Za-z0-9.-]+):/.exec(target ?? "");
   return m ? m[1] ?? m[2] : null;
 };
-
-// What the decisions suggest changing: how often a marked session was nothing wrong, the tools
-// stopped most, and the kinds of Calls held that people nearly always let run.
-export function tuning(calls: Call[], marks: Record<string, Mark>) {
-  const sessions = [...new Set(calls.map((c) => c.session))];
-  const marked = sessions.filter((s) => marks[s]);
-  const judged = marked.filter((s) => marks[s].state === "attack" || marks[s].state === "benign");
-  const benign = judged.filter((s) => marks[s].state === "benign").length;
-  const tools = new Map<string, number>();
-  for (const c of calls) if (c.verdict === "deny" && c.tool) tools.set(c.tool, (tools.get(c.tool) ?? 0) + 1);
-  const held = new Map<string, { n: number; ran: number }>();
-  for (const c of calls) {
-    if (c.verdict !== "review") continue;
-    const key = DIM.kind.of(c), row = held.get(key) ?? { n: 0, ran: 0 };
-    row.n++;
-    if (c.ran) row.ran++;
-    held.set(key, row);
-  }
-  return {
-    marked: judged.length, benign, attacks: judged.length - benign,
-    tools: [...tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
-    // Held at least five times and let run nine times in ten: a candidate to loosen.
-    loosen: [...held.entries()].map(([kind, r]) => ({ kind, ...r, share: r.ran / r.n })).filter((r) => r.n >= 5 && r.share >= 0.8).sort((a, b) => b.share - a.share || b.n - a.n),
-    held: [...held.entries()].map(([kind, r]) => ({ kind, ...r, share: r.ran / r.n })).sort((a, b) => b.n - a.n),
-  };
-}
