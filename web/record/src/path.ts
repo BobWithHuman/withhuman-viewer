@@ -11,7 +11,7 @@ export type Hop = { from: string; to: string; tie: Tie; label: string; p?: numbe
 
 export const TIE: Record<Tie, { color: string; label: string }> = {
   ask: { color: "#548cd0", label: "요청" },
-  cause: { color: "#f2a93b", label: "응답이 유도" },
+  cause: { color: "#f2a93b", label: "외부 지시" },
   result: { color: "#bcbcbc", label: "결과" },
   parent: { color: "#58c0a4", label: "이어 물음" },
 };

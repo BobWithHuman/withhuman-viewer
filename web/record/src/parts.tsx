@@ -3,6 +3,7 @@ import { Bot, CircleDot, FileText, Laptop, Layers, MessageSquareText, SquareTerm
 import type { ReactNode } from "react";
 import { siClaude, siGithub, siNotion, siPostgresql } from "simple-icons";
 import type { Kind, Step, Svc, Verdict } from "./data";
+import { Code } from "./code";
 import { isLong, LongText } from "./longtext";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
@@ -41,38 +42,37 @@ export const KIND_ICON: Record<Kind, ReactNode> = {
   answer: <MessageSquareText />, group: <Layers />,
 };
 export const VERDICT: Record<Verdict, [string, string]> = {
-  allow: ["허용", "bg-teal/15 text-teal"], review: ["확인", "bg-hold/15 text-hold"], rejected: ["확인 → 거절", "bg-hold/15 text-hold"], deny: ["막음", "bg-block/15 text-block"],
+  allow: ["허용", "bg-teal/15 text-teal"], review: ["승인 요청", "bg-hold/15 text-hold"], rejected: ["승인 거절", "bg-hold/15 text-hold"], deny: ["차단", "bg-block/15 text-block"],
+};
+/** What the header's chips pick out: the steps a tool response told, the refused, and those the person was asked about. */
+export type Only = "outside" | "deny" | "ask";
+export const ONLY: Record<Only, { label: string; is: (s: Step) => boolean }> = {
+  outside: { label: "외부 지시", is: (s) => !!s.catch },
+  deny: { label: "차단", is: (s) => s.verdict === "deny" },
+  ask: { label: "승인 요청", is: (s) => s.verdict === "review" || s.verdict === "rejected" },
 };
 export const flagged = (s: Step) => !!s.catch || (!!s.verdict && s.verdict !== "allow");
 
-/** A step's colour: refused red, held amber, caught yellow, otherwise teal. */
+/** A step's colour: refused red, held amber, caught yellow; anything else plain grey, so what
+ * was caught is what stands out. */
 export function tone(s: Step) {
   if (s.verdict === "deny") return "bg-block text-[#1d1d1d]";
   if (s.verdict === "rejected" || s.verdict === "review") return "bg-hold text-[#1d1d1d]";
   if (s.catch) return "bg-catch text-[#1d1d1d]";
-  return "bg-teal text-[#1d1d1d]";
+  return "bg-[#4a4a4a] text-[#e6e6e6]";
 }
 export function toneHex(s: Step) {
   if (s.verdict === "deny") return "#ef6b5e";
   if (s.verdict === "rejected" || s.verdict === "review") return "#f2a93b";
   if (s.catch) return "#f8d448";
-  return "#58c0a4";
+  return "#7a7a7a";
 }
 
 export function VerdictChip({ s }: { s: Step }) {
   if (s.verdict && s.verdict !== "allow") return <span className={cx("inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap", VERDICT[s.verdict][1])}><i className="size-1.5 rounded-full bg-current" />{VERDICT[s.verdict][0]}</span>;
-  if (s.catch) return <span className="inline-flex items-center gap-1 rounded-md bg-catch/15 px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap text-catch"><TriangleAlert className="size-3" />탐지 {s.catch.score}</span>;
+  if (s.catch) return <span className="inline-flex items-center gap-1 rounded-md bg-catch/15 px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap text-catch"><TriangleAlert className="size-3" />외부 지시 {s.catch.score}%</span>;
   if (s.verdict === "allow") return <span className="rounded-md bg-white/6 px-2 py-0.5 text-[12px] text-mut">허용</span>;
   return null;
-}
-
-export function Mono({ text, mark }: { text: string; mark?: string }) {
-  const parts = mark && text.includes(mark) ? text.split(mark) : [text];
-  return (
-    <pre className="m-0 rounded-md bg-box px-3 py-2 font-mono text-[11.5px] leading-[1.55] whitespace-pre-wrap text-[#e8e8e8]">
-      {parts.map((p, i) => <span key={i}>{p}{i < parts.length - 1 && <mark className="rounded-[3px] bg-block/25 px-0.5 text-[#ffb4ab]">{mark}</mark>}</span>)}
-    </pre>
-  );
 }
 
 /** Everything about one step: its text, the engine's numbers, and what it caught. */
@@ -81,9 +81,9 @@ export function DetailBody({ s }: { s: Step }) {
     <div className="space-y-3">
       {s.text && (isLong(s.text.body)
         ? <LongText label={s.text.label} text={s.text.body} mark={s.text.mark} />
-        : <div><div className="mb-1.5 text-[11.5px] text-mut">{s.text.label}</div><Mono text={s.text.body} mark={s.text.mark} /></div>)}
-      <dl className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1 text-[11.5px]">
-        {s.catch && <><dt className="text-mut">위험 점수</dt><dd className="m-0 flex items-center gap-1.5 text-fg"><TriangleAlert className="size-3.5 fill-catch text-[#282828]" />{s.catch.score}</dd></>}
+        : <div><div className="mb-1.5 text-[11.5px] text-mut">{s.text.label}</div><Code text={s.text.body} mark={s.text.mark} tool={s.detail.find(([k]) => k === "도구")?.[1] ?? s.type} /></div>)}
+      <dl className="grid grid-cols-[64px_1fr] gap-x-3 gap-y-1 text-[11.5px]">
+        {s.catch && <><dt className="text-mut">지시 확률</dt><dd className="m-0 flex items-center gap-1.5 text-fg"><TriangleAlert className="size-3.5 fill-catch text-[#282828]" />{s.catch.score}%</dd></>}
         {s.detail.map(([k, v], i) => (
           <div key={i} className="contents">
             <dt className="text-mut">{k}</dt>
@@ -93,10 +93,10 @@ export function DetailBody({ s }: { s: Step }) {
       </dl>
       {s.catch && (
         <div>
-          <div className="mb-1.5 text-[11.5px] text-mut">탐지</div>
+          <div className="mb-1.5 text-[11.5px] text-mut">지시한 곳</div>
           <div className="flex items-center rounded-md bg-box px-3 py-2">
             <div><div className="text-[12px] text-fg">{s.catch.name}</div><div className="font-mono text-[11px] text-mut">{s.catch.sub}</div></div>
-            <span className="ml-auto flex items-center gap-1.5 text-[12px] font-semibold"><TriangleAlert className="size-3.5 fill-catch text-[#242424]" />{s.catch.score}</span>
+            <span className="ml-auto flex items-center gap-1.5 text-[12px] font-semibold"><TriangleAlert className="size-3.5 fill-catch text-[#242424]" />{s.catch.score}%</span>
           </div>
         </div>
       )}

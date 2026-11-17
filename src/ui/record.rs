@@ -144,15 +144,15 @@ fn station_step(st: &Station) -> Value {
     let mcp = mcp_parts(&st.tool);
     let decision = st.decision.as_deref();
     let decided = match decision {
-        Some("DENY") => "막음",
-        Some("REVIEW") => "확인",
+        Some("DENY") => "차단",
+        Some("REVIEW") => "승인 요청",
         Some("ALLOW") => "허용",
         _ => "판정 없음",
     };
     let mut detail = vec![json!(["판정", decided]), json!(["도구", st.tool])];
     if let Some(src) = &st.source {
         detail.push(json!([
-            "원인",
+            "출처",
             format!(
                 "도구 응답 · 호출 #{} ({}%)",
                 src.by,
@@ -160,11 +160,11 @@ fn station_step(st: &Station) -> Value {
             )
         ]));
     } else if st.loose {
-        detail.push(json!(["원인", "찾지 못함"]));
+        detail.push(json!(["출처", "찾지 못함"]));
     } else if decision.is_none() {
-        detail.push(json!(["원인", "추적 없음"]));
+        detail.push(json!(["출처", "추적 없음"]));
     } else {
-        detail.push(json!(["원인", "사용자 요청"]));
+        detail.push(json!(["출처", "사용자 요청"]));
     }
     if st.irreversible {
         detail.push(json!(["되돌리기", "어려움"]));
@@ -180,7 +180,7 @@ fn station_step(st: &Station) -> Value {
     }
     let catch = st.source.as_ref().map(|src| {
         json!({
-            "name": if src.error { "도구 오류가 유도" } else { "도구 응답이 유도" },
+            "name": if src.error { "도구 오류" } else { "도구 응답" },
             "sub": src.quote.clone().unwrap_or_default(),
             "score": (src.probability * 100.0).round() as i64,
         })

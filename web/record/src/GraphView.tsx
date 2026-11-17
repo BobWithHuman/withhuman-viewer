@@ -1,12 +1,12 @@
 import {
-  type Edge, type EdgeProps, type Node, type NodeProps, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, getBezierPath, useReactFlow,
+  type Edge, type EdgeProps, type Node, type NodeProps, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, PanOnScrollMode, Position, ReactFlow, getBezierPath, useReactFlow,
 } from "@xyflow/react";
 import { ChevronRight, ListTree, MapPin, Plus, Route, Rows3, Scan, TriangleAlert, ZoomIn, ZoomOut } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { RecordData, Step } from "./data";
 import { isLong } from "./longtext";
 import { type Hop, PARENT_LABEL, TIE, wayBack } from "./path";
-import { DetailBody, KIND_ICON, LogoDisc, SvcLogo, Tip, VerdictChip, cx, flagged, tone } from "./parts";
+import { DetailBody, KIND_ICON, LogoDisc, ONLY, SvcLogo, Tip, VerdictChip, cx, flagged, tone, type Only } from "./parts";
 
 // 기록's graph: what the agent asked for and what came back, left to right. A step that was
 // caught or refused is drawn large with its verdict; a quiet one is a small dot. Seen two ways:
@@ -29,11 +29,10 @@ const bigStep = (s: Step) => flagged(s) || s.kind === "prompt";
 
 function StepNode({ data }: NodeProps<Node<D>>) {
   const { step: s, picked, dim, large } = data;
-  const pick = useContext(Pick);
   const big = (x: Step) => large || bigStep(x);
   const size = big(s) ? 64 : 22;
   return (
-    <div className={cx("relative transition-opacity duration-300", dim && "opacity-25")} style={{ width: size, height: size }} onClick={() => pick(s.id)}>
+    <div className={cx("relative transition-opacity duration-300", dim && "opacity-25")} style={{ width: size, height: size }}>
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
       <Handle id="t-src" type="source" position={Position.Top} />
@@ -59,7 +58,8 @@ function StepNode({ data }: NodeProps<Node<D>>) {
   );
 }
 /** A SubGraph on 순서: a box of its steps, each a row to pick. */
-type G = { n: number; ns: number[]; steps: Step[]; picked: string | null };
+type Match = ((s: Step) => boolean) | null;
+type G = { n: number; ns: number[]; steps: Step[]; picked: string | null; lit: Match };
 const ROW = 30, HEAD = 26, BOX = 236;
 function SgNode({ data }: NodeProps<Node<G>>) {
   const pick = useContext(Pick);
@@ -80,7 +80,7 @@ function SgNode({ data }: NodeProps<Node<G>>) {
       <div className="px-1 pb-1">
         {data.steps.map((s) => (
           <button key={s.id} onClick={(e) => { e.stopPropagation(); pick(s.id); }}
-            className={cx("flex w-full items-center gap-1.5 rounded-md px-1.5 text-left", data.picked === s.id ? "bg-pick/25 ring-1 ring-pick" : "hover:bg-white/6")}
+            className={cx("flex w-full items-center gap-1.5 rounded-md px-1.5 text-left transition-opacity", data.lit && !data.lit(s) && "opacity-30", data.picked === s.id ? "bg-pick/25 ring-1 ring-pick" : "hover:bg-white/6")}
             style={{ height: ROW }}>
             <span className={cx("grid size-[18px] shrink-0 place-items-center rounded [&_svg]:size-[11px] [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
             <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{s.quote ? `"${s.name}"` : s.name}</span>
@@ -105,7 +105,7 @@ const SG_TIE: Record<string, { color: string; label?: string; dashed?: boolean }
   request: { color: TIE.parent.color, label: PARENT_LABEL.request },
   answer: { color: "#6f6f6f" },
   untraced: { color: "#7a7a7a", label: "추적 없음", dashed: true },
-  loose: { color: "#ef6b5e", label: "원인 못 찾음", dashed: true },
+  loose: { color: "#ef6b5e", label: "출처 못 찾음", dashed: true },
 };
 
 /** The SubGraphs as boxes: the agent's steps that hang the same way from one SubGraph (the
@@ -151,7 +151,7 @@ function boxes(data: RecordData) {
  * joined from the step it hangs from (the prompt that asked, the Call whose result told it, the
  * answer or result a prompt was written from) to its first. Where each step sits, to bring it
  * into view. */
-function layoutTree(data: RecordData, picked: string | null) {
+function layoutTree(data: RecordData, picked: string | null, match: Match) {
   const order = new Map(data.steps.map((s, i) => [s.id, i]));
   const gs = boxes(data).sort((a, b) => (order.get(a.steps[0]) ?? 0) - (order.get(b.steps[0]) ?? 0));
   const byN = new Map(gs.map((g) => [g.n, g]));
@@ -175,7 +175,7 @@ function layoutTree(data: RecordData, picked: string | null) {
     const at = y;
     steps.forEach((s, i) => spots.set(s.id, { x: x + BOX / 2, y: at + HEAD + i * ROW + ROW / 2 }));
     y += HEAD + steps.length * ROW + 8 + GAP;
-    return { id: `g${g.n}`, type: "sg", position: { x, y: at }, data: { n: g.n, ns: g.ns, steps, picked }, draggable: false, selectable: false };
+    return { id: `g${g.n}`, type: "sg", position: { x, y: at }, data: { n: g.n, ns: g.ns, steps, picked, lit: match }, draggable: false, selectable: false };
   });
   /** The step of the parent box a box hangs from. */
   const from = (g: (typeof gs)[number]): string | undefined => {
@@ -188,14 +188,12 @@ function layoutTree(data: RecordData, picked: string | null) {
   };
   const edges: Edge[] = gs.filter(hangs).map((g) => {
     const tie = SG_TIE[g.via] ?? SG_TIE.ask;
-    const label = tie.label && `${tie.label}${g.p ? ` ${Math.round(g.p * 100)}%` : ""}`;
     const src = from(g) ?? byN.get(g.parent!)!.steps[0];
     const on = picked != null && (g.steps.includes(picked) || src === picked);
     return {
       id: `g${g.parent}>g${g.n}`, source: `g${g.parent}`, target: `g${g.n}`, sourceHandle: `o${src}`, targetHandle: `i${g.steps[0]}`,
-      type: "default", label,
-      labelStyle: { fill: tie.color, fontSize: 11, fontWeight: 600 }, labelBgStyle: { fill: "#282828" }, labelBgPadding: [4, 2] as [number, number],
-      style: { stroke: tie.color, strokeWidth: on ? 2.6 : 1.5, opacity: on ? 1 : 0.8, strokeDasharray: tie.dashed ? "5 4" : undefined },
+      type: "default",
+      style: { stroke: tie.color, strokeWidth: on ? 2.6 : 1.5, opacity: on ? 1 : match ? 0.3 : 0.8, strokeDasharray: tie.dashed ? "5 4" : undefined },
       markerEnd: { type: MarkerType.ArrowClosed, color: tie.color, width: 14, height: 14 }, zIndex: on ? 4 : 0,
     };
   });
@@ -283,14 +281,14 @@ function Card({ s, open, onToggle, onLocate, onWay, cardRef }: { s: Step; open: 
 
 /** Columns in order of the steps; a step on another lane (a subagent, a fork) sits above or below.
  * On 경로, the steps off the way are dimmed and only the way's links are drawn strong. */
-function layout(data: RecordData, picked: string | null, mode: Mode, way: { ids: string[]; hops: Hop[] }) {
+function layout(data: RecordData, picked: string | null, mode: Mode, way: { ids: string[]; hops: Hop[] }, match: Match) {
   const path = mode === "path" && way.ids.length > 0;
   const on = new Set(way.ids);
   const nodes: Node<D>[] = data.steps.map((s, i) => {
     const half = bigStep(s) ? 32 : 11;
     return {
       id: s.id, type: "step", position: { x: i * 210 - half, y: (s.lane ?? 0) * 150 - half },
-      data: { step: s, picked: picked === s.id, dim: path && !on.has(s.id) }, draggable: false, selectable: false,
+      data: { step: s, picked: picked === s.id, dim: (path && !on.has(s.id)) || (!!match && !match(s)) }, draggable: false, selectable: false,
     };
   });
   const arrow = (color: string, w = 15) => ({ type: MarkerType.ArrowClosed, color, width: w, height: w });
@@ -301,7 +299,7 @@ function layout(data: RecordData, picked: string | null, mode: Mode, way: { ids:
     const color = h ? TIE[h.tie].color : data.causes.some(([x, y]) => x === a && y === b) && !path ? TIE.cause.color : "#8a8a8a";
     return {
       id: k, source: a, target: b, type: "default",
-      style: { stroke: color, strokeWidth: h ? 2.6 : 1.6, opacity: path && !h ? 0.18 : 1 },
+      style: { stroke: color, strokeWidth: h ? 2.6 : 1.6, opacity: path && !h ? 0.18 : match ? 0.3 : 1 },
       markerEnd: arrow(color), zIndex: h ? 4 : 0,
     };
   });
@@ -315,7 +313,7 @@ function layout(data: RecordData, picked: string | null, mode: Mode, way: { ids:
   for (const a of arcs) {
     edges.push({
       id: `arc:${a.from}>${a.to}`, source: a.from, target: a.to, sourceHandle: "t-src", targetHandle: "t-tgt", type: "arc", zIndex: 5,
-      data: { label: a.label, color: a.color }, style: { stroke: a.color, strokeWidth: 2.2, opacity: 0.95 }, markerEnd: arrow(a.color, 14),
+      data: { label: a.label, color: a.color }, style: { stroke: a.color, strokeWidth: 2.2, opacity: match ? 0.3 : 0.95 }, markerEnd: arrow(a.color, 14),
     });
   }
   return { nodes, edges };
@@ -371,7 +369,7 @@ function HopMark({ h }: { h: Hop }) {
 const opening = (data: RecordData) =>
   [...data.steps].reverse().find((s) => s.kind === "call" && flagged(s))?.id ?? data.steps.find(flagged)?.id ?? null;
 
-export function GraphView({ data }: { data: RecordData }) {
+export function GraphView({ data, only, setOnly }: { data: RecordData; only: Only | null; setOnly: (o: Only | null) => void }) {
   const first = opening(data);
   const [picked, setPicked] = useState<string | null>(first);
   const [mode, setMode] = useState<Mode>("path");
@@ -379,6 +377,8 @@ export function GraphView({ data }: { data: RecordData }) {
   const [timeline, setTimeline] = useState(true);
   const rf = useReactFlow();
   const refs = useRef<Record<string, HTMLDivElement | null>>({});
+  /** A step to bring into view once it is drawn, instead of the whole. */
+  const goto = useRef<string | null>(null);
   useEffect(() => { setPicked(opening(data)); setOpen(null); }, [data]);
   useEffect(() => { if (picked) refs.current[picked]?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [picked]);
   useEffect(() => { if (open) refs.current[open]?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [open]);
@@ -389,6 +389,7 @@ export function GraphView({ data }: { data: RecordData }) {
   const sel = picked && !known.has(picked) ? opening(data) : picked;
   const wayKey = mode === "path" ? (sel ?? "") : "";
   useEffect(() => {
+    if (goto.current) return;
     // 순서 of many steps opens on the step picked at a size its name reads; of few, on the whole.
     const near = mode === "order" && data.steps.length > 12 && sel ? spotOf(sel) : undefined;
     requestAnimationFrame(() => near
@@ -396,12 +397,23 @@ export function GraphView({ data }: { data: RecordData }) {
       : rf.fitView({ padding: mode === "path" ? 0.3 : 0.18, maxZoom: 1, duration: 300 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, rf, mode, wayKey]);
+  // A header chip picked: 순서 with its steps alone lit and listed, the first in view.
+  useEffect(() => {
+    if (!only) return;
+    const first = data.steps.find(ONLY[only].is);
+    setMode("order");
+    setOpen(null);
+    if (first) { setPicked(first.id); goto.current = first.id; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [only]);
+  const match: Match = mode === "order" && only ? ONLY[only].is : null;
+  const go = (m: Mode) => { setMode(m); if (m === "path") setOnly(null); };
   const way = useMemo(() => wayBack(data, sel), [data, sel]);
   const tree = mode === "order" && (data.subgraphs?.length ?? 0) > 0;
   const { nodes, edges, spots } = useMemo(
     (): { nodes: Node[]; edges: Edge[]; spots?: Map<string, { x: number; y: number }> } =>
-      mode === "path" && way.ids.length ? layoutWay(data, open || sel, way) : tree ? layoutTree(data, sel) : layout(data, sel, mode, way),
-    [data, sel, open, mode, way, tree],
+      mode === "path" && way.ids.length ? layoutWay(data, open || sel, way) : tree ? layoutTree(data, sel, match) : layout(data, sel, mode, way, match),
+    [data, sel, open, mode, way, tree, match],
   );
   /** Where a step is drawn, to bring it into view. */
   const spotOf = (id: string) => {
@@ -411,12 +423,19 @@ export function GraphView({ data }: { data: RecordData }) {
     return n && { x: n.position.x + 32, y: n.position.y + 40 };
   };
   // On 경로 the timeline holds the way alone, the earliest first, each link named between.
-  const shown = mode === "path" && way.ids.length ? [...way.ids].reverse() : data.steps.map((s) => s.id);
+  const shown = mode === "path" && way.ids.length ? [...way.ids].reverse() : data.steps.filter((s) => !match || match(s)).map((s) => s.id);
   const byId = new Map(data.steps.map((s) => [s.id, s]));
   const locate = (id: string) => {
     const at = spotOf(id);
     if (at) rf.setCenter(at.x, at.y, { zoom: Math.max(rf.getZoom(), 0.9), duration: 500 });
   };
+  useEffect(() => {
+    const id = goto.current;
+    if (!id) return;
+    goto.current = null;
+    requestAnimationFrame(() => locate(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes]);
   // The arrow keys step: on 순서 through every step (← →) and from turn to turn (↑ ↓); on 경로
   // along the way, opening each step. Not while a text is being typed or a sheet is open.
   useEffect(() => {
@@ -440,10 +459,10 @@ export function GraphView({ data }: { data: RecordData }) {
         center(next);
         return;
       }
-      const steps = data.steps;
+      const steps = match ? data.steps.filter(match) : data.steps;
       const at = steps.findIndex((x) => x.id === sel);
       let i = at < 0 ? (by > 0 ? 0 : steps.length - 1) : at + by;
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (!match && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
         while (i >= 0 && i < steps.length && steps[i].kind !== "prompt") i += by;
       }
       if (i < 0 || i >= steps.length) return;
@@ -456,22 +475,26 @@ export function GraphView({ data }: { data: RecordData }) {
     return () => window.removeEventListener("keydown", onKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, way, sel, open, data, nodes, spots, rf]);
+  // A step clicked on the graph is picked: on 경로 it opens on the timeline, on 순서 its way is the one drawn.
+  const pick = (id: string) => { if (mode === "path" && way.ids.length) setOpen(id); else { setPicked(id); setOpen(null); } };
   const sess = data.session;
   const meta: [string, ReactNode][] = [
     ["단말", sess.device], ["사람", sess.person], ["에이전트", sess.agent && <span className="inline-flex items-center gap-1.5"><span className="grid size-4 place-items-center rounded bg-white"><SvcLogo s="claude" size={11} /></span>{sess.agent}</span>],
     ["모델", sess.model], ["작업 폴더", sess.folder && <code className="font-mono text-[11px]">{sess.folder}</code>], ["세션 ID", <code className="font-mono text-[11px]">{sess.id}</code>], ["시작", sess.start], ["엔진 모드", sess.mode],
   ];
   return (
-    <Pick.Provider value={(id) => { if (mode === "path" && way.ids.length) setOpen(id); else { setPicked(id); setOpen(null); } }}>
+    <Pick.Provider value={pick}>
       <div className="relative min-w-0 flex-1">
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.2} maxZoom={1.8} proOptions={{ hideAttribution: true }} nodesConnectable={false} />
+        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodeClick={(_, n) => n.type === "step" && pick(n.id)}
+          panOnScroll panOnScrollMode={PanOnScrollMode.Free} zoomOnScroll={false} zoomOnPinch minZoom={0.2} maxZoom={1.8} proOptions={{ hideAttribution: true }} nodesConnectable={false} />
         <ToolStrip timeline={timeline} setTimeline={setTimeline} />
-        <ModeSwitch mode={mode} setMode={setMode} />
+        <ModeSwitch mode={mode} setMode={go} />
         <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-panel/90 px-3 py-1 text-[12px] text-mut tabular-nums">
           {mode === "path" ? (way.ids.length ? `경로 ${way.ids.length}단계 · 턴 ${way.ids.filter((id) => byId.get(id)?.kind === "prompt").length}` : "도구를 누르면 경로")
-            : `마디 ${data.steps.length} · 원인 ${data.causes.length} · 이어 물음 ${data.parents?.length ?? 0}`}
+            : only && match ? `${ONLY[only].label} ${Math.max(0, shown.indexOf(sel ?? "")) + 1}/${shown.length}`
+            : `노드 ${data.steps.length} · 외부 지시 ${data.steps.filter((s) => s.catch).length} · 이어 물음 ${data.parents?.length ?? 0}`}
           <span className="ml-2.5 inline-flex gap-0.5 align-middle">
-            {(mode === "path" && way.ids.length ? ["←", "→"] : ["←", "→", "↑", "↓"]).map((k) => (
+            {(mode === "path" && way.ids.length || match ? ["←", "→"] : ["←", "→", "↑", "↓"]).map((k) => (
               <kbd key={k} className="grid size-[17px] place-items-center rounded border border-white/15 bg-white/5 font-sans text-[10.5px] text-fg/70">{k}</kbd>
             ))}
           </span>
@@ -479,7 +502,7 @@ export function GraphView({ data }: { data: RecordData }) {
       </div>
       {timeline && (
         <aside className="my-3 mr-3 flex min-h-0 w-[340px] shrink-0 min-[1500px]:w-[380px] flex-col rounded-xl bg-panel shadow-[0_12px_40px_rgba(0,0,0,.45)]">
-          <div className="flex h-10 shrink-0 items-center gap-2 px-3.5"><ListTree className="size-3.5" /><h2 className="text-[13px] font-semibold">{mode === "path" && way.ids.length ? "경로" : "타임라인"}</h2><span className="rounded-full bg-chip px-2 text-[11.5px] text-mut">{shown.length}</span></div>
+          <div className="flex h-10 shrink-0 items-center gap-2 px-3.5"><ListTree className="size-3.5" /><h2 className="text-[13px] font-semibold">{mode === "path" && way.ids.length ? "경로" : only && match ? ONLY[only].label : "타임라인"}</h2><span className="rounded-full bg-chip px-2 text-[11.5px] text-mut">{shown.length}</span></div>
           <dl className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1 px-3.5 pb-3 text-[11.5px]">
             {meta.filter(([, v]) => v).map(([k, v]) => <div key={k} className="contents"><dt className="text-mut">{k}</dt><dd className="m-0 truncate text-fg/85">{v}</dd></div>)}
           </dl>
@@ -495,7 +518,7 @@ export function GraphView({ data }: { data: RecordData }) {
                   <Card s={s} open={onPath ? open === id || (open === null && sel === id) : sel === id} cardRef={(el) => (refs.current[id] = el)}
                     onToggle={() => onPath ? setOpen(open === id ? "" : id) : setPicked(sel === id ? null : id)}
                     onLocate={() => { if (!onPath) setPicked(id); locate(id); }}
-                    onWay={onPath || s.kind === "prompt" && !data.parents?.some((p) => p.prompt === id) ? undefined : () => { setPicked(id); setOpen(null); setMode("path"); }} />
+                    onWay={onPath || s.kind === "prompt" && !data.parents?.some((p) => p.prompt === id) ? undefined : () => { setPicked(id); setOpen(null); go("path"); }} />
                 </div>
               );
             })}
