@@ -316,7 +316,15 @@ pub fn Main() -> Element {
                         if let Some(device) = m.get("device").and_then(Value::as_str).map(str::to_owned) {
                             let backend = backend.clone();
                             let by = std::env::var("USER").unwrap_or_else(|_| "security-admin".into());
-                            let why = call.map_or_else(|| "보안 현황에서 멈춤".to_owned(), |(s, n)| format!("사건 {s} #{n}"));
+                            // The reason given, kept with the case it was given from.
+                            let given = m.get("reason").and_then(Value::as_str).map(str::trim).filter(|r| !r.is_empty()).map(str::to_owned);
+                            let at = call.map(|(s, n)| format!("사건 {s} #{n}"));
+                            let why = match (given, at) {
+                                (Some(r), Some(at)) => format!("{r} · {at}"),
+                                (Some(r), None) => r,
+                                (None, Some(at)) => at,
+                                (None, None) => "보안 현황에서 멈춤".to_owned(),
+                            };
                             spawn(async move {
                                 saved.set(Some(match backend.stop_device(&device, true, &by, &why).await {
                                     Ok(()) => format!("단말 멈춤 · {device}"),

@@ -23,7 +23,7 @@ export type Ask = (message:
   | { do: "open" | "case"; session: string; seq: number }
   | { do: "triage"; sessions: string[]; state: string | null }
   | { do: "source"; source: string; on: boolean; session: string; seq: number }
-  | { do: "stop_device"; device: string; session: string; seq: number }
+  | { do: "stop_device"; device: string; reason?: string; session: string; seq: number }
   | { do: "inventory" }
   | { do: "export"; name: string; text: string }
   | { do: "settings" }) => void;
@@ -260,7 +260,7 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
 
       <Sheet open={!!picked} onOpenChange={(on) => !on && setPicked(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[min(1040px,92vw)] data-[side=right]:sm:max-w-[min(1040px,92vw)]" onOpenAutoFocus={(e) => e.preventDefault()}>
-          {call && group && <CaseView call={call} group={group} data={caseData} marks={marks} blocked={blocked} ask={ask} onCall={open} />}
+          {call && group && <CaseView call={call} group={group} data={caseData} marks={marks} blocked={blocked} saved={saved} ask={ask} onCall={open} />}
         </SheetContent>
       </Sheet>
     </Panel>

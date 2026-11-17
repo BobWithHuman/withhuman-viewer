@@ -361,10 +361,20 @@ impl Backend {
         if ok {
             triage::set_aside();
         }
-        match pg.triage().await {
+        let mut store = match pg.triage().await {
             Ok(v) if !v.is_null() => Store::from_engine(&v),
             _ => Store::from_engine(&found),
+        };
+        // What the engine would not take yet still shows, this Mac's over the engine's.
+        if !ok {
+            store.marks.extend(local.marks);
+            for b in local.sources {
+                if !store.sources.iter().any(|x| x.source == b.source) {
+                    store.sources.push(b);
+                }
+            }
         }
+        store
     }
 
     /// Marks sessions (`state` none takes the mark off): in the engine where it keeps marks,
@@ -377,19 +387,26 @@ impl Backend {
         state: Option<&str>,
         actor: &str,
     ) -> Result<(), String> {
-        if !shared {
-            let mut store = crate::admin::triage::load();
-            for s in sessions {
-                crate::admin::triage::mark(&mut store, s, state, actor, now_ms());
+        if shared {
+            let mut taken = true;
+            for chunk in sessions.chunks(500) {
+                taken &= self
+                    .admin(
+                        &["v1", "admin", "sessions", "mark"],
+                        json!({"session_ids": chunk, "state": state, "actor": actor}),
+                    )
+                    .await
+                    .is_ok();
             }
-            return Ok(());
+            if taken {
+                return Ok(());
+            }
         }
-        for chunk in sessions.chunks(500) {
-            self.admin(
-                &["v1", "admin", "sessions", "mark"],
-                json!({"session_ids": chunk, "state": state, "actor": actor}),
-            )
-            .await?;
+        // Where the engine keeps no marks or would not take them: on this Mac, handed over
+        // when it does.
+        let mut store = crate::admin::triage::load();
+        for s in sessions {
+            crate::admin::triage::mark(&mut store, s, state, actor, now_ms());
         }
         Ok(())
     }
@@ -475,9 +492,7 @@ impl Backend {
     /// One call of the engine's admin API (Collector's /v1/admin): a POST with the admin token.
     async fn admin(&self, path: &[&str], body: Value) -> Result<Value, String> {
         let settings = self.current();
-        let token = settings
-            .admin_token()
-            .ok_or("엔진 관리 토큰이 없습니다. 인벤토리의 '관리 API 연결'에서 넣어 주세요.")?;
+        let token = settings.admin_token().ok_or("엔진 관리 토큰이 없습니다.")?;
         let mut url = reqwest::Url::parse(&settings.engine_api)
             .map_err(|e| format!("엔진 관리 API 주소를 읽지 못했습니다: {e}"))?;
         url.path_segments_mut()

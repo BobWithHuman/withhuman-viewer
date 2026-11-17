@@ -6,7 +6,9 @@
 // it in 기록.
 
 import { ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageSquareText, OctagonX, SquareTerminal } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { AlertDialog } from "radix-ui";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -50,13 +52,55 @@ function Side({ title, count, children }: { title: string; count?: number; child
 const Rows = ({ children }: { children: ReactNode }) => <div className="flex flex-col overflow-hidden rounded-lg border">{children}</div>;
 const rowCls = "flex min-w-0 items-center gap-2 border-b px-2.5 py-2 text-left text-[12.5px] transition-colors last:border-b-0 hover:bg-accent/70";
 
-export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
-  call: Call; group: CaseGroup; data: Case | null | undefined; marks: Record<string, Mark>; blocked: Blocked[]; ask: Ask; onCall: (c: Call) => void;
+/** An action the engine carries out, asked first as the inventory's kill switch is: what it
+ * acts on, a reason where one is kept, and the button that does it. */
+function Confirm({ title, what, label, reason, onDo, children }: {
+  title: string; what: string; label: string; reason?: boolean; onDo: (reason: string) => void; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState("");
+  const go = () => { onDo(why.trim()); setOpen(false); setWhy(""); };
+  return (
+    <AlertDialog.Root open={open} onOpenChange={(o) => { setOpen(o); if (!o) setWhy(""); }}>
+      <AlertDialog.Trigger asChild>{children}</AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <AlertDialog.Content aria-describedby={undefined}
+          className="fixed top-1/2 left-1/2 z-50 flex w-[400px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border bg-popover p-5 shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-deny/15 text-deny"><OctagonX className="size-[18px]" /></span>
+            <div className="flex min-w-0 flex-col">
+              <AlertDialog.Title className="text-[15px] font-semibold">{title}</AlertDialog.Title>
+              <span className="truncate font-mono text-[12.5px] text-muted-foreground" title={what}>{what}</span>
+            </div>
+          </div>
+          {reason && (
+            <label className="flex flex-col gap-1.5 text-[12px] text-muted-foreground">사유
+              <Input autoFocus value={why} placeholder="유출 의심 · 조사 중" onChange={(e) => setWhy(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && why.trim()) go(); }} />
+            </label>
+          )}
+          <div className="flex justify-end gap-2">
+            <AlertDialog.Cancel asChild><Button variant="ghost">취소</Button></AlertDialog.Cancel>
+            <Button autoFocus={!reason} disabled={reason && !why.trim()} onClick={go} className="gap-1.5 bg-deny text-white hover:bg-deny/85"><OctagonX />{label}</Button>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
+export function CaseView({ call, group, data, marks, blocked, saved, ask, onCall }: {
+  call: Call; group: CaseGroup; data: Case | null | undefined; marks: Record<string, Mark>; blocked: Blocked[]; saved?: string | null; ask: Ask; onCall: (c: Call) => void;
 }) {
   // The mark shown is this Call's session's; setting one marks every session of the case.
   const mark = marks[call.session];
-  // The kill switch asks twice: the first press arms it.
-  const [armed, setArmed] = useState(false);
+  // The mark just pressed shows at once, until the one saved comes back.
+  const [pressed, setPressed] = useState<string | null | undefined>(undefined);
+  useEffect(() => setPressed(undefined), [mark?.state, call.session]);
+  const shown = pressed === undefined ? mark?.state ?? "" : pressed ?? "";
+  // What the last action said; a failure shows in red.
+  const failed = !!saved && saved.includes("실패");
   // The case the app read is this Call's once its session and number match.
   const read = data && data.session === call.session && data.seq === call.seq && !data.loading ? data : null;
   const told = read?.told ?? null;
@@ -82,13 +126,13 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
         </div>
         <div className="flex items-center gap-3">
           <SheetTitle className="min-w-0 flex-1 truncate text-[16px]">{DIM.kind.name(DIM.kind.of(call))}</SheetTitle>
-          <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={mark?.state ?? ""} onValueChange={(v) => ask({ do: "triage", sessions: group.sessions, state: v || null })}>
+          {saved && <span className={cn("max-w-[260px] truncate text-[12px]", failed ? "text-deny" : "text-muted-foreground")} title={saved}>{saved}</span>}
+          <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={shown} onValueChange={(v) => { setPressed(v || null); ask({ do: "triage", sessions: group.sessions, state: v || null }); }}>
             {MARKS.map((m) => <ToggleGroupItem key={m} value={m} className={cn("px-2.5 text-[12.5px]", m === "attack" && "data-[state=on]:bg-deny/20 data-[state=on]:text-deny", m === "benign" && "data-[state=on]:bg-allow/20 data-[state=on]:text-allow", m === "reviewing" && "data-[state=on]:bg-review/20 data-[state=on]:text-review")}>{MARK[m].label}</ToggleGroupItem>)}
           </ToggleGroup>
-          <Button variant="outline" size="sm" className={cn(armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
-            onClick={() => { if (armed) { ask({ do: "stop_device", device: call.machine, session: call.session, seq: call.seq }); setArmed(false); } else setArmed(true); }}>
-            <OctagonX />{armed ? "한 번 더" : "단말 멈춤"}
-          </Button>
+          <Confirm title="단말 멈춤" what={call.machine} label="멈추기" reason onDo={(reason) => ask({ do: "stop_device", device: call.machine, reason, session: call.session, seq: call.seq })}>
+            <Button variant="outline" size="sm" className="border-deny/50 text-deny hover:bg-deny/15 hover:text-deny"><OctagonX />단말 멈춤</Button>
+          </Confirm>
           <Button variant="outline" size="sm" onClick={evidence}><Download />증거</Button>
           <Button size="sm" onClick={() => ask({ do: "open", session: call.session, seq: call.seq })}>기록<ArrowUpRight /></Button>
         </div>
@@ -126,12 +170,17 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
                   <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
                 </button>
                 {told.paragraph != null && <span className="tnum text-[12px] text-muted-foreground">문단 {told.paragraph + 1}{told.error ? " · 도구 오류" : ""}</span>}
-                {source && (
-                  <Button variant="outline" size="sm" className={cn("justify-self-start", distrusted && "border-deny/60 bg-deny/12 text-deny hover:bg-deny/20 hover:text-deny")}
-                    onClick={() => ask({ do: "source", source, on: !distrusted, session: call.session, seq: call.seq })}>
-                    <Ban />{distrusted ? "출처 차단됨" : "출처 차단"}
-                  </Button>
-                )}
+                {source && (distrusted
+                  ? (
+                    <Button variant="outline" size="sm" className="justify-self-start border-deny/60 bg-deny/12 text-deny hover:bg-deny/20 hover:text-deny"
+                      onClick={() => ask({ do: "source", source, on: false, session: call.session, seq: call.seq })}>
+                      <Ban />출처 차단 풀기
+                    </Button>
+                  ) : (
+                    <Confirm title="출처 차단" what={source} label="차단" onDo={() => ask({ do: "source", source, on: true, session: call.session, seq: call.seq })}>
+                      <Button variant="outline" size="sm" className="justify-self-start"><Ban />출처 차단</Button>
+                    </Confirm>
+                  ))}
               </>
             )}
           </Step>
