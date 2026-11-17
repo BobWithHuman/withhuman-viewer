@@ -1,7 +1,7 @@
 // What 보안 현황 is given and how it counts: the Calls worth a look, the filter the page keeps,
 // the period's time axis, and the demo shown when the page is opened on its own.
 
-import { CreditCard, Ellipsis, FilePen, type LucideIcon, Send, Share2, SquareTerminal, Trash2, Workflow } from "lucide-react";
+import { BookOpen, CreditCard, Ellipsis, FilePen, type LucideIcon, Send, Share2, SquareTerminal, Trash2, Workflow } from "lucide-react";
 import { SEVERITY, VERDICT, type Verdict } from "@/kit";
 
 export const HOUR = 3_600_000;
@@ -25,6 +25,8 @@ export type Call = {
   /** The sensitive values this Call sent out though not kept from running: their kinds, and where to. */
   leak?: { kinds: string[]; places: string[] } | null;
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
+  /** A shell command's program, which the tools are told apart by. */
+  program?: string | null;
   target: string | null; reason: string | null; prompt: string | null; rule: string | null;
   mode: string | null; ran: boolean; hard: boolean;
 };
@@ -72,11 +74,12 @@ export type Case = {
 };
 
 // The kinds of action, as the engine's questions divide them.
-export const ACTIONS = ["file", "service", "send", "delete", "pay", "grant", "run", "other"];
+export const ACTIONS = ["read", "file", "service", "send", "delete", "pay", "grant", "run", "other"];
 export const ACTION: Record<string, { label: string; icon: LucideIcon }> = {
+  read: { label: "읽기·조회", icon: BookOpen },
   file: { label: "파일 수정", icon: FilePen },
   service: { label: "서비스 수정·위임", icon: Workflow },
-  send: { label: "메일·메시지 전송", icon: Send },
+  send: { label: "외부 전송", icon: Send },
   delete: { label: "삭제", icon: Trash2 },
   pay: { label: "송금·결제", icon: CreditCard },
   grant: { label: "권한 부여·공유", icon: Share2 },
@@ -124,7 +127,8 @@ export const DIM: Record<Dim, { label: string; of: (c: Call) => string; name: (k
   source: { label: "원인", of: (c) => c.source, name: (k) => SOURCE[k] ?? k },
   session: { label: "세션", of: (c) => c.session, name: (k) => k.slice(0, 8) },
   machine: { label: "단말", of: (c) => c.machine, name: (k) => k },
-  tool: { label: "도구", of: (c) => c.tool ?? "", name: (k) => k || "도구 없음" },
+  // A shell command goes by its program: `Bash · git`, `Bash · rm`.
+  tool: { label: "도구", of: (c) => (c.tool === "Bash" && c.program ? `Bash · ${c.program}` : c.tool ?? ""), name: (k) => k || "도구 없음" },
   folder: { label: "폴더", of: (c) => c.folder, name: (k) => k || "폴더 없음" },
 };
 
@@ -302,10 +306,12 @@ export function demo(now: number): Data {
   const flow: FlowCount[] = [];
   // The kind of action, read off the tool and target as the app does.
   const actionOf = (tool: string, target: string) =>
-    tool === "Edit" ? "file" : tool.includes("post_message") ? "send" : tool.includes("merge") ? "service"
-      : tool === "Bash" ? (/^rm |DROP TABLE| destroy| delete /.test(target) ? "delete" : /^(npm|python|chmod|pip|vercel|docker|terraform)|\| sh/.test(target) ? "run" : /slack chat send/.test(target) ? "send" : "other") : "other";
+    tool === "Edit" ? "file" : tool === "Read" || tool === "WebFetch" ? "read" : tool.includes("post_message") ? "send" : tool.includes("merge") ? "service"
+      : tool === "Bash" ? (/^rm |DROP TABLE| destroy| delete /.test(target) ? "delete" : /^(npm|python|pip)|\| sh/.test(target) ? "run"
+        : /^(scp|rsync)|^git push|slack chat send|curl .*(-d |--data|-F )/.test(target) ? "send" : /^(gh|vercel|docker|terraform|kubectl|aws)/.test(target) ? "service"
+        : /^(chmod|mkdir|cp|mv|git (add|commit))/.test(target) ? "file" : /^(cat|ls|grep|find|curl|psql|git (status|log|diff))/.test(target) ? "read" : "other") : "other";
   // What the plain allowed Calls of an hour are, out of 100.
-  const PLAIN: [string, number][] = [["other", 46], ["file", 24], ["run", 17], ["service", 5], ["send", 3], ["delete", 2], ["grant", 2], ["pay", 1]];
+  const PLAIN: [string, number][] = [["read", 40], ["file", 24], ["run", 17], ["other", 6], ["service", 5], ["send", 3], ["delete", 2], ["grant", 2], ["pay", 1]];
   const thisHour = now - (now % HOUR);
   const poisoned = new Date(now - 3 * DAY).setHours(13, 0, 0, 0);
   for (let back = 30 * 24; back >= 0; back--) {
@@ -342,7 +348,7 @@ export function demo(now: number): Data {
         calls.push({
           session: `s-${m}-${Math.floor(back / 5)}`, seq: 3 + Math.floor(rnd() * 180), at, machine, verdict: s.verdict,
           sev: s.verdict === "allow" ? "after" : wiped || (s.verdict === "deny" && (s.kind === "exfiltration" || s.kind === "hijacked_goal")) ? "crit" : s.verdict === "deny" ? "high" : "med",
-          kind: s.kind, action, source, tool: s.tool, folder: FOLDERS[(m + Math.floor(back / 40)) % FOLDERS.length],
+          kind: s.kind, action, source, tool: s.tool, program: s.tool === "Bash" ? target.split(/\s+/)[0] : null, folder: FOLDERS[(m + Math.floor(back / 40)) % FOLDERS.length],
           cwd: `/Users/${machine.replace(/^[a-z]+-/, "")}/work/${FOLDERS[(m + Math.floor(back / 40)) % FOLDERS.length]}`,
           target, reason: pick(s.reasons), prompt: spike && m === 0 ? PROMPTS[3] : pick(PROMPTS), rule: s.rule, mode,
           ran: s.verdict === "allow" || mode === "shadow" || (s.verdict === "review" && rnd() < 0.55), hard: s.verdict === "allow" || wiped,

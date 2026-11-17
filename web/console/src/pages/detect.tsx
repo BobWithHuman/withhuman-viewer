@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Legend, PageHeader, Panel, SplitBar, VERDICT, Warn } from "@/kit";
+import { Legend, PageHeader, Panel, VERDICT, Warn } from "@/kit";
 import { cn } from "@/lib/utils";
 import { send } from "../bridge";
 import { type RankBy, Ranking } from "./detect/breakdown";
@@ -183,23 +183,6 @@ export default function Page({ data }: { data: unknown | null }) {
               {side === "tune"
                 ? <div className="scroll min-h-0 flex-1 overflow-y-auto px-2 py-2"><Tuning calls={inPeriod} marks={marks} blocked={blocked} shared={d.shared} ask={ask} onPick={(dim, key) => toggle(dim, key)} /></div>
                 : <>
-              {rankBy === "machine" && cover.active > 0 && (
-                <div className="flex shrink-0 flex-col gap-2 border-b px-4 pb-3">
-                  <SplitBar height={6} parts={[
-                    { key: "blocking", label: "차단 모드", value: cover.blocking, color: "var(--allow)" },
-                    { key: "watching", label: "막지 않는 모드", value: cover.watching, color: "var(--review)" },
-                    { key: "none", label: "판정 없음", value: cover.active - cover.blocking - cover.watching, color: "var(--info)" },
-                  ]} />
-                  <div className="flex items-center gap-3">
-                    <Legend items={[
-                      { label: "차단 모드", color: "var(--allow)", value: cover.blocking },
-                      { label: "막지 않는 모드", color: "var(--review)", value: cover.watching },
-                      { label: "판정 없음", color: "var(--info)", value: cover.active - cover.blocking - cover.watching },
-                    ]} />
-                    {cover.undecided > 0 && <span className="ml-auto shrink-0"><Warn>판정 없는 호출 {cover.undecided}대</Warn></span>}
-                  </div>
-                </div>
-              )}
               <div className="scroll min-h-0 flex-1 overflow-y-auto px-2 py-2">
                 {blank
                   ? <div className="flex flex-col gap-2 px-2 py-1">{Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>
