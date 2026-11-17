@@ -5,7 +5,7 @@
 // as the engine keeps it, and a place it showed opens in 기록.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, ArrowUpRight, Bot, FileText, Globe, Hash, History, Laptop, Mail, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, UserRound, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Bot, FileText, Globe, Hash, History, Laptop, Mail, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, UserRound, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { send } from "@/bridge";
 import { Badge } from "@/components/ui/badge";
@@ -265,18 +265,26 @@ function Spread({ sessions, clients }: { sessions: number; clients: number }) {
 
 /** Where a value was sent: whom, by its mark, with the MCP server that carried it; or, when the
  * Call named no one, 대상 모름 with the server or tool that sent it. */
+/** Where a value was sent, read the same way everywhere: the service (its logo and name), then
+ * whom or where in it (`slack → #dev-alerts`, `git → origin`), or, with no one named, what it did
+ * there (`agentdojo · update_password`); a host as itself. */
 function Dest({ place }: { place: string }) {
   const d = targetOf(place);
-  const via = d.server && <span className="inline-flex shrink-0" title={`${d.server} (MCP)`}><ServiceLogo name={d.server} size={14} /></span>;
-  if (d.target) {
-    return <span className="inline-flex min-w-0 items-center gap-1.5" title={d.server ? `${d.target} · ${d.server} (MCP)` : d.target}><TargetIcon target={d.target} /><span className="truncate">{d.target}</span>{via}</span>;
+  const title = [d.server, d.tool].filter(Boolean).join(" · ") + (d.target ? `${d.server ? " → " : ""}${d.target}` : "");
+  if (d.server) {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5" title={title}>
+        <ServiceLogo name={d.server} size={14} />
+        <span className="shrink-0 text-muted-foreground">{d.server}</span>
+        {d.target
+          ? <><ArrowRight className="size-3 shrink-0 text-muted-foreground" strokeWidth={2} /><span className="truncate">{d.target}</span></>
+          : d.tool && <><span className="shrink-0 text-muted-foreground">·</span><Masked className="truncate">{d.tool}</Masked></>}
+      </span>
+    );
   }
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 text-muted-foreground" title={place}>
-      <span className="shrink-0">대상 모름</span>
-      {via}{(d.server ?? d.tool) && <Masked className="truncate text-[11.5px]">{d.server ?? d.tool}</Masked>}
-    </span>
-  );
+  if (d.target) return <span className="inline-flex min-w-0 items-center gap-1.5" title={d.target}><TargetIcon target={d.target} /><span className="truncate">{d.target}</span></span>;
+  if (d.tool) return <span className="inline-flex min-w-0 items-center gap-1.5" title={d.tool}><Wrench className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><Masked className="truncate">{d.tool}</Masked></span>;
+  return <span className="text-muted-foreground" title={place}>—</span>;
 }
 
 /** The first of where values were sent, the rest counted. */
@@ -293,13 +301,15 @@ function Places({ names, empty }: { names: string[]; empty?: ReactNode }) {
 
 const HOSTLIKE = /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/\S*)?$/i;
 /** Whom or where a value was sent to, apart from what carried it: "bob@x.com · slack (MCP)" is
- * bob@x.com by slack; "slack (MCP)" is no one named, by slack; a host is itself; anything else
+ * bob@x.com by slack; "slack:post_message (MCP)" is no one named, the value put into slack's post_message; a host is itself; anything else
  * is the tool that sent it, naming no one. */
 const targetOf = (place: string): { target: string | null; server: string | null; tool: string | null } => {
   // An MCP server, or a command line tool (`origin · git (CLI)`): whom or where, by which service.
   if (place.endsWith("(MCP)") || place.endsWith("(CLI)")) {
     const parts = place.replace(/ \((MCP|CLI)\)$/, "").split(" · ");
-    return parts.length > 1 ? { target: parts[0], server: parts[1], tool: null } : { target: null, server: parts[0], tool: null };
+    // The server, and the tool of it the value went into (`slack:post_message`).
+    const [server, tool] = parts[parts.length - 1].split(/:(.*)/s);
+    return { target: parts.length > 1 ? parts[0] : null, server, tool: tool || null };
   }
   if (HOSTLIKE.test(place)) return { target: place, server: null, tool: null };
   return { target: null, server: null, tool: place === "알 수 없음" ? null : place };
@@ -551,8 +561,6 @@ function Path({ trails, status }: { trails: Trail[]; status: Status }) {
   const lead = sends[0];
   const where = lead ? targetOf(lead.place!) : null;
   const others = new Set(sends.map((m) => m.place)).size - 1;
-  // The tool that sent it: an MCP tool by its server's logo and its name; else the tool, or the command's first word.
-  const tool = lead && toolName(lead.tool ?? lead.what?.trim().split(/\s+/)[0]).split(" · ").pop();
   const tone = status === "out" ? "var(--deny)" : status === "blocked" ? "var(--review)" : "var(--border)";
   const end = "flex min-w-0 flex-col gap-1 rounded-lg border bg-background px-3 py-2.5";
   return (
@@ -581,10 +589,9 @@ function Path({ trails, status }: { trails: Trail[]; status: Status }) {
         {where ? (
           <>
             <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium">
-              {where.target ? <><TargetIcon target={where.target} /><span className="truncate">{where.target}</span></> : <span className="text-muted-foreground">대상 모름</span>}
+              <Dest place={lead!.place!} />
               {others > 0 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{others}</span>}
             </span>
-            {tool && <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">{where.server && <ServiceLogo name={where.server} size={14} />}<Masked className="truncate">{tool}</Masked></span>}
           </>
         ) : <span className="text-[13px] text-muted-foreground">밖으로 안 나감</span>}
       </div>
