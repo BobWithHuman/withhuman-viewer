@@ -19,7 +19,7 @@ export type Why = "shadow" | "record" | "approved" | "undecided" | "allowed" | "
 export const WHY: Record<Why, { label: string; mono?: boolean; cls: string }> = {
   allowed: { label: "엔진 허용", cls: "bg-deny/15 text-deny" },
   undecided: { label: "판정 없음", cls: "bg-white/8 text-muted-foreground" },
-  approved: { label: "사용자 승인", cls: "bg-review/15 text-review" },
+  approved: { label: "사용자 승인", cls: "bg-chart-1/15 text-chart-1" },
   shadow: { label: "shadow", mono: true, cls: "bg-white/8 text-foreground/80" },
   record: { label: "record", mono: true, cls: "bg-white/8 text-foreground/80" },
   asked: { label: "사용자 지시", cls: "bg-allow/15 text-allow" },
