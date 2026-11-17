@@ -1,7 +1,7 @@
 import {
   type Edge, type EdgeProps, type Node, type NodeProps, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, PanOnScrollMode, Position, ReactFlow, getBezierPath, useReactFlow,
 } from "@xyflow/react";
-import { ChevronRight, ListTree, MapPin, Plus, Route, Rows3, Scan, TriangleAlert, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronRight, ListTree, Plus, Route, Rows3, Scan, TriangleAlert, ZoomIn, ZoomOut } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { RecordData, Step } from "./data";
 import { isLong } from "./longtext";
@@ -259,7 +259,7 @@ function ToolStrip({ timeline, setTimeline }: { timeline: boolean; setTimeline: 
   );
 }
 
-function Card({ s, open, onToggle, onLocate, onWay, cardRef }: { s: Step; open: boolean; onToggle: () => void; onLocate: () => void; onWay?: () => void; cardRef: (el: HTMLDivElement | null) => void }) {
+function Card({ s, open, onToggle, onWay, cardRef }: { s: Step; open: boolean; onToggle: () => void; onWay?: () => void; cardRef: (el: HTMLDivElement | null) => void }) {
   return (
     <div ref={cardRef} className="relative pl-7">
       <span className={cx("absolute top-2 left-0 grid size-5 place-items-center rounded-md [&_svg]:size-3 [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
@@ -271,7 +271,6 @@ function Card({ s, open, onToggle, onLocate, onWay, cardRef }: { s: Step; open: 
             <div className="text-[11px] text-mut tabular-nums">{s.type} <span className="mx-1 text-dim">|</span> {clock(s.at)}{s.text && isLong(s.text.body) && <><span className="mx-1 text-dim">|</span>{s.text.body.length.toLocaleString("ko-KR")}자</>}</div>
           </div>
           {onWay && <Tip label="경로"><button onClick={(e) => { e.stopPropagation(); onWay(); }} className="grid size-6 place-items-center rounded-md text-mut hover:bg-white/8 hover:text-fg"><Route className="size-3.5" /></button></Tip>}
-          <Tip label="그래프에서 찾기"><button onClick={(e) => { e.stopPropagation(); onLocate(); }} className="grid size-6 place-items-center rounded-md text-mut hover:bg-white/8 hover:text-fg"><MapPin className="size-3.5" /></button></Tip>
         </div>
         {open && <div className="px-3 pt-0.5 pb-3"><DetailBody s={s} /></div>}
       </div>
@@ -372,7 +371,7 @@ const opening = (data: RecordData) =>
 export function GraphView({ data, only, setOnly }: { data: RecordData; only: Only | null; setOnly: (o: Only | null) => void }) {
   const first = opening(data);
   const [picked, setPicked] = useState<string | null>(first);
-  const [mode, setMode] = useState<Mode>("path");
+  const [mode, setMode] = useState<Mode>("order");
   const [open, setOpen] = useState<string | null>(null);
   const [timeline, setTimeline] = useState(true);
   const rf = useReactFlow();
@@ -516,8 +515,13 @@ export function GraphView({ data, only, setOnly }: { data: RecordData; only: Onl
                 <div key={id} className="space-y-1">
                   {h && <HopMark h={h} />}
                   <Card s={s} open={onPath ? open === id || (open === null && sel === id) : sel === id} cardRef={(el) => (refs.current[id] = el)}
-                    onToggle={() => onPath ? setOpen(open === id ? "" : id) : setPicked(sel === id ? null : id)}
-                    onLocate={() => { if (!onPath) setPicked(id); locate(id); }}
+                    onToggle={() => {
+                      // Opening a card brings its step into view on the graph.
+                      const opening = onPath ? open !== id : sel !== id;
+                      if (onPath) setOpen(opening ? id : "");
+                      else setPicked(opening ? id : null);
+                      if (opening) locate(id);
+                    }}
                     onWay={onPath || s.kind === "prompt" && !data.parents?.some((p) => p.prompt === id) ? undefined : () => { setPicked(id); setOpen(null); go("path"); }} />
                 </div>
               );
