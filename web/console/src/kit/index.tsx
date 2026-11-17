@@ -8,7 +8,7 @@ import {
 import {
   type ColumnDef, type SortingState, flexRender, getCoreRowModel, getSortedRowModel, useReactTable,
 } from "@tanstack/react-table";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   siAtlassian, siClaude, siFigma, siGithub, siGoogledrive, siNotion, siPostgresql, siSentry,
 } from "simple-icons";
@@ -203,14 +203,25 @@ export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense 
   const grows = (c: ColumnDef<T>) => { const w = widthOf(c); return w === undefined || w >= 180; };
   const shareOf = (c: ColumnDef<T>) => widthOf(c) ?? 260;
   const total = columns.filter(grows).reduce((a, c) => a + shareOf(c), 0) || 1;
-  // The short columns keep their width; the text ones split what is left between them, so the
-  // widths add up to the table's in every browser.
+  // The short columns keep their width; the text ones split what is left between them, in
+  // pixels from the table's own width as it is now, so every browser lays them out alike.
   const fixed = columns.filter((c) => !grows(c)).reduce((a, c) => a + (widthOf(c) ?? 0), 0);
+  const ref = useRef<HTMLTableElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const box = ref.current?.parentElement;
+    if (!box) return;
+    const seen = new ResizeObserver(() => setWidth(box.clientWidth));
+    seen.observe(box);
+    setWidth(box.clientWidth);
+    return () => seen.disconnect();
+  }, []);
+  const left = Math.max(0, width - fixed);
   const head = (c: ColumnDef<T>) => (grows(c)
-    ? { width: `calc((100% - ${fixed}px) * ${shareOf(c) / total})` }
+    ? { width: width ? Math.max(72, Math.floor((left * shareOf(c)) / total)) : undefined }
     : { width: widthOf(c) });
   return (
-    <Table className="table-fixed">
+    <Table ref={ref} className="table-fixed">
       <TableHeader className="sticky top-0 z-10 bg-card">
         {table.getHeaderGroups().map((g) => (
           <TableRow key={g.id} className="hover:bg-transparent">

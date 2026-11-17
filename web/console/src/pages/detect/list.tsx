@@ -42,9 +42,9 @@ const When = ({ at }: { at: number | null }) => <span className="tnum text-[12px
 function Verdicts({ calls }: { calls: Call[] }) {
   const n = (v: string) => calls.filter((c) => c.verdict === v).length;
   return (
-    <span className="tnum flex items-center gap-2.5 text-[12px]">
+    <span className="tnum flex items-center gap-3 text-[12px]">
       {([["deny", "차단", "text-deny"], ["review", "확인", "text-review"], ["allow", "허용", "text-allow"]] as const).map(([v, label, cls]) => (
-        <span key={v} className={cn("inline-flex items-center gap-1", n(v) ? cls : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />{label} {n(v)}</span>
+        <span key={v} title={label} className={cn("inline-flex items-center gap-1", n(v) ? cls : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />{n(v)}</span>
       ))}
     </span>
   );
@@ -68,13 +68,13 @@ function Hits({ calls }: { calls: Call[] }) {
   const list = [...n.values()].sort((a, b) => b.n - a.n);
   return (
     <span className="flex min-w-0 items-center gap-1 overflow-hidden" title={list.map((x) => `${x.did.name} ${x.n}`).join(" · ")}>
-      {list.slice(0, 2).map(({ did, n: k }) => (
-        <span key={`${did.server}:${did.name}`} className="inline-flex max-w-40 min-w-0 shrink-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-foreground/85">
-          {did.server && <ServiceLogo name={did.server} size={12} />}
-          <span className="truncate">{did.name}</span>{k > 1 && <b className="tnum font-sans font-medium">{k}</b>}
+      {list.slice(0, 1).map(({ did, n: k }) => (
+        <span key={`${did.server}:${did.name}`} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-foreground/85">
+          {did.server && <span className="shrink-0"><ServiceLogo name={did.server} size={12} /></span>}
+          <span className="min-w-0 truncate">{did.name}</span>{k > 1 && <b className="tnum shrink-0 font-sans font-medium">{k}</b>}
         </span>
       ))}
-      {list.length > 2 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{list.length - 2}</span>}
+      {list.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{list.length - 1}</span>}
     </span>
   );
 }
@@ -125,22 +125,22 @@ const caseColumns = (marks: Record<string, Mark>, ran: boolean): ColumnDef<CaseG
   } },
   // What already ran in it, worst first: a value sent out, a held Call a person let run, one
   // allowed though risky. Only in the cases where something ran.
-  ...(ran ? [{ id: "why", header: "실행됨", size: 170, accessorFn: (g: CaseGroup) => whyRan(g).join(" "), cell: ({ row }: { row: { original: CaseGroup } }) => (
+  ...(ran ? [{ id: "why", header: "실행됨", size: 152, accessorFn: (g: CaseGroup) => whyRan(g).join(" "), cell: ({ row }: { row: { original: CaseGroup } }) => (
     <span className="flex min-w-0 items-center gap-1">
       {whyRan(row.original).map((w) => <span key={w} className={cn("shrink-0 rounded px-1.5 text-[11.5px] leading-[20px] font-semibold", RAN[w].cls)} title={w === "leak" ? row.original.leaked.join(", ") : undefined}>{RAN[w].label}</span>)}
     </span>
   ) } as ColumnDef<CaseGroup>] : []),
   { id: "sev", header: "심각도", size: 88, accessorFn: (g) => g.risk, cell: ({ row }) => <SevBadge s={worst(row.original)} /> },
   // What the person had it do: the session's short name.
-  { id: "work", header: "작업", accessorFn: (g) => named(first(g)) ?? "", cell: ({ row }) => {
+  { id: "work", header: "작업", size: 260, accessorFn: (g) => named(first(g)) ?? "", cell: ({ row }) => {
     const c = first(row.original), name = named(c);
     return <span className={cn("block truncate", !name && "text-muted-foreground")} title={c.prompt ?? undefined}>{name ?? NO_PROMPT}</span>;
   } },
-  { id: "cause", header: "원인", size: 190, accessorFn: (g) => g.calls.find((c) => c.cause)?.cause_name ?? "", cell: ({ row }) => <CauseChip c={row.original.calls.find((c) => c.cause) ?? row.original.calls[0]} /> },
-  { id: "machine", header: "단말", size: 160, accessorFn: (g) => g.machines[0] ?? "", cell: ({ row }) => <Machines list={row.original.machines} /> },
+  { id: "cause", header: "원인", size: 170, accessorFn: (g) => g.calls.find((c) => c.cause)?.cause_name ?? "", cell: ({ row }) => <CauseChip c={row.original.calls.find((c) => c.cause) ?? row.original.calls[0]} /> },
+  { id: "machine", header: "단말", size: 140, accessorFn: (g) => g.machines[0] ?? "", cell: ({ row }) => <Machines list={row.original.machines} /> },
   { id: "sessions", header: "세션", size: 64, accessorFn: (g) => g.sessions.length, cell: ({ row }) => <span className="tnum">{row.original.sessions.length}</span> },
-  { id: "hits", header: "걸린 호출", size: 220, accessorFn: (g) => didOf(first(g)).name, cell: ({ row }) => <Hits calls={row.original.calls} /> },
-  { id: "found", header: "탐지", size: 170, accessorFn: (g) => g.total, cell: ({ row }) => <Verdicts calls={row.original.calls} /> },
+  { id: "hits", header: "걸린 호출", size: 280, accessorFn: (g) => didOf(first(g)).name, cell: ({ row }) => <Hits calls={row.original.calls} /> },
+  { id: "found", header: "차단 · 확인 · 허용", size: 130, accessorFn: (g) => g.total, cell: ({ row }) => <Verdicts calls={row.original.calls} /> },
   { id: "at", header: "최근", size: 104, accessorFn: (g) => g.calls[0].at ?? 0, cell: ({ row }) => <When at={row.original.calls[0].at} /> },
 ];
 /** A source that told agents to act: the cases it made, over how many sessions and machines. */
@@ -180,8 +180,8 @@ const SOURCES: ColumnDef<Source>[] = [
   } },
   { id: "sessions", header: "세션", size: 64, accessorFn: (s) => s.sessions.length, cell: ({ row }) => <span className="tnum">{row.original.sessions.length}</span> },
   { id: "machine", header: "단말", size: 160, accessorFn: (s) => s.machines.length, cell: ({ row }) => <Machines list={row.original.machines} /> },
-  { id: "hits", header: "걸린 호출", size: 220, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Hits calls={row.original.cases.flatMap((g) => g.calls)} /> },
-  { id: "found", header: "탐지", size: 170, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Verdicts calls={row.original.cases.flatMap((g) => g.calls)} /> },
+  { id: "hits", header: "걸린 호출", size: 280, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Hits calls={row.original.cases.flatMap((g) => g.calls)} /> },
+  { id: "found", header: "차단 · 확인 · 허용", size: 130, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Verdicts calls={row.original.cases.flatMap((g) => g.calls)} /> },
   { id: "at", header: "최근", size: 104, accessorFn: (s) => s.at, cell: ({ row }) => <When at={row.original.at || null} /> },
 ];
 

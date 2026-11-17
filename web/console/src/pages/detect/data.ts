@@ -71,6 +71,8 @@ export const isOpen = (m: Mark | undefined) => !m || m.state === "reviewing";
 export type Case = {
   session: string; seq: number; loading?: boolean; error?: string;
   request?: { seq: number; text: string; intent: string | null; at: number | null } | null;
+  /** What the Call was on, whole (the list's is cut short). */
+  target?: string | null;
   told?: { seq: number; tool: string | null; target: string | null; at: number | null; quote: string | null; paragraph: number | null; probability: number; error: boolean } | null;
   traced?: boolean;
   elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; title?: string | null; flagged: number }[];

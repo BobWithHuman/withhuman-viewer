@@ -500,10 +500,10 @@ pub(crate) fn preview(props: Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// The fields a node's caption needs, read before its payload is cut short.
 /// How much of a prompt a node keeps: enough for a long request, pasted logs aside.
 const PROMPT_CHARS: usize = 4000;
 
+/// The fields a node's caption needs, read before its payload is cut short.
 pub(crate) fn summary(props: &Map<String, Value>) -> Map<String, Value> {
     let payload = props
         .get("payload_json")
