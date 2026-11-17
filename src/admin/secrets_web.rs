@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use super::main_page::NO_NAME;
 use super::secrets::{
     Trail, destination, held, in_call, kind_label, node_label, outward, source_of, source_tool,
+    why_out,
 };
 use crate::model::SecretMention;
 
@@ -45,6 +46,8 @@ fn mention(m: &SecretMention) -> Value {
         "call": call,
         "out": out,
         "held": out && held(m),
+        "why": (out && !held(m)).then(|| why_out(m)),
+        "mode": m.mode,
         "tool": m.tool,
         "said": m.said,
         "what": call.then(|| m.target.clone().or_else(|| m.tool.clone())).flatten(),
@@ -130,6 +133,8 @@ pub(super) fn page(
                 "calls": t.calls,
                 "outRan": t.out_ran,
                 "outStopped": t.out_stopped,
+                "normal": t.normal,
+                "why": t.why,
                 "status": t.status().1,
                 "last": t.last,
                 "mentions": t.mentions.iter().map(mention).collect::<Vec<_>>(),

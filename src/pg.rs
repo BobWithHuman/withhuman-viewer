@@ -179,7 +179,7 @@ static SECRETS: LazyLock<String> = LazyLock::new(|| {
         r#"
 SELECT m.session_id AS session, n.seq, n.kind AS node, m.slot,
        t.key, t.key_kind AS kind, t.category, coalesce(t.decoded, t.key) AS text,
-       n.decision, n.client_id AS client, coalesce(n.decided_at, n.observed_at) AS at,
+       n.decision, n.decision_mode AS mode, n.client_id AS client, coalesce(n.decided_at, n.observed_at) AS at,
        {tool} AS tool,
        coalesce({command}, {url}, {file_path}) AS target,
        CASE WHEN n.kind = 'Call' THEN {recipient} END AS recipient,

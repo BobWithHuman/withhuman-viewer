@@ -167,7 +167,11 @@ impl Model {
 
     /// The SubGraph a SubGraph's Calls were traced to (`s<number>`), or none (`none`, unset).
     pub fn subgraph_parent(&self, number: i64) -> Option<i64> {
-        self.subgraph_parent.get(&number)?.strip_prefix('s')?.parse().ok()
+        self.subgraph_parent
+            .get(&number)?
+            .strip_prefix('s')?
+            .parse()
+            .ok()
     }
 
     /// The chain a Call was traced along: the Call, the result that caused it, the Call that

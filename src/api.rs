@@ -85,7 +85,11 @@ impl Backend {
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok())
                     .unwrap_or_default();
                 let at = |row: &Value| row["last_at"].as_i64().or(row["created_at"].as_i64());
-                let since = kept.iter().filter_map(at).max().map(|t| t - SESSIONS_OVERLAP_MS);
+                let since = kept
+                    .iter()
+                    .filter_map(at)
+                    .max()
+                    .map(|t| t - SESSIONS_OVERLAP_MS);
                 // With what was kept, the IDs of all there are, to drop those gone since.
                 let (fresh, ids) = tokio::join!(pg.sessions(since), async {
                     match since {

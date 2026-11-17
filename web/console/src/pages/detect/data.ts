@@ -113,9 +113,9 @@ const KIND: Record<string, string> = {
 };
 const SOURCE: Record<string, string> = { segment: "도구 응답", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
 export const MODE: Record<string, { label: string; cls: string }> = {
-  enforce: { label: "엔진 차단 중", cls: "bg-allow/15 text-allow" },
-  shadow: { label: "엔진 시범 운영", cls: "bg-review/15 text-review" },
-  record: { label: "엔진 기록만", cls: "bg-review/15 text-review" },
+  enforce: { label: "enforce", cls: "bg-allow/15 text-allow font-mono" },
+  shadow: { label: "shadow", cls: "bg-review/15 text-review font-mono" },
+  record: { label: "record", cls: "bg-review/15 text-review font-mono" },
   none: { label: "판정 기록 없음", cls: "bg-white/8 text-muted-foreground" },
 };
 
