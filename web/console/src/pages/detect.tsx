@@ -59,8 +59,6 @@ export default function Page({ data }: { data: unknown | null }) {
       ...of(d.alerts?.new ?? [], "new"), ...of(d.alerts?.silent ?? [], "silent"),
     ];
   }, [d, from, to]);
-  // The sessions of the period the team marked an attack.
-  const attacks = useMemo(() => new Set(inPeriod.filter((c) => marks[c.session]?.state === "attack").map((c) => c.session)).size, [inPeriod, marks]);
   const chips: { key: string; label: string; value: string; drop: () => void }[] = [
     ...(period.range ? [{ key: "range", label: "기간", value: rangeLabel(period.range), drop: () => setPeriod((p) => ({ ...p, range: null })) }] : []),
     ...DIMS.filter((dim) => filter[dim] !== undefined).map((dim) => ({ key: dim, label: DIM[dim].label, value: dim === "session" ? named(d.calls.find((c) => c.session === filter.session)) ?? DIM.session.name(filter.session!) : DIM[dim].name(filter[dim]!), drop: () => setFilter((f) => ({ ...f, [dim]: undefined })) })),
@@ -111,10 +109,6 @@ export default function Page({ data }: { data: unknown | null }) {
                       </button>
                     );
                   })}
-                  <span className="flex items-baseline gap-1.5 px-1.5">
-                    <span className="text-[12.5px] text-muted-foreground">확인된 공격</span>
-                    <span className={cn("tnum text-[20px] leading-none font-semibold tracking-[-0.01em]", attacks ? "text-deny" : "text-muted-foreground")}>{attacks}</span>
-                  </span>
                 </div>
               }
             >
