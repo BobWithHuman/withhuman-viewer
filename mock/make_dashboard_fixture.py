@@ -7,6 +7,7 @@ Calls stopped, held and allowed for every kind of deviation, on several machines
 values that were only seen, used in a Call, stopped on their way out, or sent out.
 
     python3 mock/make_dashboard_fixture.py target/dashboard-fixture.json
+    python3 mock/make_dashboard_fixture.py --into-fixture   # the session of many turns as turns.json
     VIEWER_MOCK=1 VIEWER_FIXTURE=target/dashboard-fixture.json cargo admin
 
 Times are counted back from now, so make it again when the charts have drifted off their axes.
@@ -416,11 +417,14 @@ LONG_TURNS = [
 ]
 
 
+LONG_ID = "c0ffee00-1d2e-4a5b-8c7d-16a7e0de1234"
+
+
 def long_session(at):
     """The many-turn session: a todo CLI built over a day, an issue's hidden note the agent passed
     on and the user approved, and prompts written from test failures and the agent's answers."""
-    sid = "c0ffee00-1d2e-4a5b-8c7d-16a7e0de1234"
-    client, cwd, mode = "dev-mac-07", "/Users/dev/src/todo-cli", "enforce"
+    sid = LONG_ID
+    client, cwd, mode = "claude-code-mock", "/Users/dev/src/todo-cli", "enforce"  # dev-mac-07
     nodes, edges, details, rows = [], [], {}, []
     clock = [at]
     state = {"msg": None, "result": None, "told": None}
@@ -500,7 +504,32 @@ def long_session(at):
     return sid, graph, details, rows, row
 
 
+def put(base, made):
+    """Each made session into a fixture, in place of one of the same ID."""
+    for sid, graph, details, rows, row in made:
+        base["sessions"] = [s for s in base["sessions"] if s["id"] != sid]
+        base["graphs"][sid] = graph
+        base["nodes"][sid] = details
+        base["calls"][sid] = rows
+        base["sessions"].append(row)
+    base["sessions"].sort(key=lambda s: -s["created_at"])
+
+
+def into_fixture():
+    """The session of many turns as `turns.json`, which the app adds to its own demo
+    (`fixture.json`, left as recorded), the newest there."""
+    path = Path(__file__).parent / "turns.json"
+    recorded = json.loads((Path(__file__).parent / "fixture.json").read_text())
+    at = max(s["created_at"] for s in recorded["sessions"]) + HOUR
+    base = {"sessions": [], "graphs": {}, "nodes": {}, "calls": {}}
+    put(base, [long_session(at)])
+    path.write_text(json.dumps(base, ensure_ascii=False, indent=1) + "\n")
+    print(f"{path}: 세션 {len(base['sessions'])}개")
+
+
 def main():
+    if "--into-fixture" in sys.argv:
+        return into_fixture()
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "target/dashboard-fixture.json")
     base = json.loads((Path(__file__).parent / "fixture.json").read_text())
     rng = random.Random(20261112)
@@ -510,14 +539,9 @@ def main():
         scenario = rng.choices(SCENARIOS, weights=[s[0] for s in SCENARIOS])[0]
         machine = rng.choices(MACHINES, weights=[m[3] for m in MACHINES])[0]
         made.append(session(rng, scenario, machine, pick_time(rng, now - 20 * 60_000, 21)))
-    # The newest: the session of many turns, opened first.
+    # The session of many turns, three hours back (the app's own demo has it too).
     made.append(long_session(now - 3 * HOUR))
-    for sid, graph, details, rows, row in made:
-        base["graphs"][sid] = graph
-        base["nodes"][sid] = details
-        base["calls"][sid] = rows
-        base["sessions"].append(row)
-    base["sessions"].sort(key=lambda s: -s["created_at"])
+    put(base, made)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(base, ensure_ascii=False))
     print(f"{out}: 세션 {len(base['sessions'])}개")
