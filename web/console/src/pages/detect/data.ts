@@ -71,6 +71,8 @@ export const isOpen = (m: Mark | undefined) => !m || m.state === "reviewing";
 export type Case = {
   session: string; seq: number; loading?: boolean; error?: string;
   request?: { seq: number; text: string; intent: string | null; at: number | null } | null;
+  /** What the Call was on, whole (the list's is cut short). */
+  target?: string | null;
   told?: { seq: number; tool: string | null; target: string | null; at: number | null; quote: string | null; paragraph: number | null; probability: number; error: boolean } | null;
   traced?: boolean;
   elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; title?: string | null; flagged: number }[];
@@ -207,6 +209,14 @@ export const rangeLabel = ([from, to]: [number, number]) => {
 export const RISK: Record<Sev, number> = { crit: 8, high: 4, med: 2, after: 1 };
 // A tool's name as a row has room for: an MCP tool as its server and its tool.
 /** A Call's session by its short name, as 기록's list gives it, else the prompt before the Call. */
+/** What a Call did, by name: an MCP tool by its own name (its server by its logo), a shell
+ * command by its program, any other by its tool. */
+export const didOf = (c: Call): { name: string; server?: string } => {
+  const mcp = c.tool ? /^mcp__(.+?)__(.+)$/.exec(c.tool) : null;
+  if (mcp) return { name: mcp[2], server: mcp[1] };
+  if (c.program) return { name: c.program };
+  return { name: c.tool ? toolName(c.tool) : "–" };
+};
 export const named = (c: Call | undefined) => c?.title ?? c?.prompt ?? undefined;
 export const toolName = (tool: string | null) => (tool ?? "").replace(/^mcp__/, "").replace(/__/g, " · ");
 

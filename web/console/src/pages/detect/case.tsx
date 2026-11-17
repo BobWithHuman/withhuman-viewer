@@ -6,14 +6,16 @@
 // it in 기록.
 
 import { ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageSquareText, OctagonX, SquareTerminal } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { AlertDialog } from "radix-ui";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { VerdictBadge, Warn, ago, clock } from "@/kit";
+import { ServiceLogo, VerdictBadge, Warn, ago, clock } from "@/kit";
 import { Code } from "@/kit/code";
 import { cn } from "@/lib/utils";
-import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, hostOf, named, toolName } from "./data";
+import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, didOf, hostOf, named, toolName } from "./data";
 import type { Ask } from "./list";
 
 const Mono = ({ children, className }: { children: ReactNode; className?: string }) => <code className={cn("font-mono text-[12px]", className)}>{children}</code>;
@@ -50,17 +52,65 @@ function Side({ title, count, children }: { title: string; count?: number; child
 const Rows = ({ children }: { children: ReactNode }) => <div className="flex flex-col overflow-hidden rounded-lg border">{children}</div>;
 const rowCls = "flex min-w-0 items-center gap-2 border-b px-2.5 py-2 text-left text-[12.5px] transition-colors last:border-b-0 hover:bg-accent/70";
 
-export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
-  call: Call; group: CaseGroup; data: Case | null | undefined; marks: Record<string, Mark>; blocked: Blocked[]; ask: Ask; onCall: (c: Call) => void;
+/** An action the engine carries out, asked first as the inventory's kill switch is: what it
+ * acts on, a reason where one is kept, and the button that does it. */
+function Confirm({ title, what, label, reason, onDo, children }: {
+  title: string; what: string; label: string; reason?: boolean; onDo: (reason: string) => void; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState("");
+  const go = () => { onDo(why.trim()); setOpen(false); setWhy(""); };
+  return (
+    <AlertDialog.Root open={open} onOpenChange={(o) => { setOpen(o); if (!o) setWhy(""); }}>
+      <AlertDialog.Trigger asChild>{children}</AlertDialog.Trigger>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <AlertDialog.Content aria-describedby={undefined}
+          className="fixed top-1/2 left-1/2 z-50 flex w-[400px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border bg-popover p-5 shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-deny/15 text-deny"><OctagonX className="size-[18px]" /></span>
+            <div className="flex min-w-0 flex-col">
+              <AlertDialog.Title className="text-[15px] font-semibold">{title}</AlertDialog.Title>
+              <span className="truncate font-mono text-[12.5px] text-muted-foreground" title={what}>{what}</span>
+            </div>
+          </div>
+          {reason && (
+            <label className="flex flex-col gap-1.5 text-[12px] text-muted-foreground">사유
+              <Input autoFocus value={why} placeholder="유출 의심 · 조사 중" onChange={(e) => setWhy(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && why.trim()) go(); }} />
+            </label>
+          )}
+          <div className="flex justify-end gap-2">
+            <AlertDialog.Cancel asChild><Button variant="ghost">취소</Button></AlertDialog.Cancel>
+            <Button autoFocus={!reason} disabled={reason && !why.trim()} onClick={go} className="gap-1.5 bg-deny text-white hover:bg-deny/85"><OctagonX />{label}</Button>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
+export function CaseView({ call, group, data, marks, blocked, saved, ask, onCall }: {
+  call: Call; group: CaseGroup; data: Case | null | undefined; marks: Record<string, Mark>; blocked: Blocked[]; saved?: string | null; ask: Ask; onCall: (c: Call) => void;
 }) {
   // The mark shown is this Call's session's; setting one marks every session of the case.
   const mark = marks[call.session];
-  // The kill switch asks twice: the first press arms it.
-  const [armed, setArmed] = useState(false);
+  // The mark just pressed shows at once, until the one saved comes back.
+  const [pressed, setPressed] = useState<string | null | undefined>(undefined);
+  useEffect(() => setPressed(undefined), [mark?.state, call.session]);
+  const shown = pressed === undefined ? mark?.state ?? "" : pressed ?? "";
+  // What the last action said; a failure shows in red.
+  const failed = !!saved && saved.includes("실패");
   // The case the app read is this Call's once its session and number match.
   const read = data && data.session === call.session && data.seq === call.seq && !data.loading ? data : null;
   const told = read?.told ?? null;
-  const others = group.calls.filter((c) => c !== call && c.session === call.session);
+  // The session's Calls the engine caught, this one among them, and those of one kind picked.
+  const caught = group.calls.filter((c) => c.session === call.session);
+  const kinds = [...caught.reduce((m, c) => { const d = didOf(c), k = `${d.server ?? ""}:${d.name}`; const had = m.get(k); if (had) had.n += 1; else m.set(k, { key: k, did: d, n: 1 }); return m; }, new Map<string, { key: string; did: ReturnType<typeof didOf>; n: number }>()).values()].sort((a, b) => b.n - a.n);
+  const [only, setOnly] = useState<string | null>(null);
+  useEffect(() => setOnly(null), [call.session]);
+  const keyOf = (c: Call) => { const d = didOf(c); return `${d.server ?? ""}:${d.name}`; };
+  const listedCalls = only ? caught.filter((c) => keyOf(c) === only) : caught;
   // The other sessions the same cause reached, each with its Calls worth a look.
   const reached = group.sessions.filter((s) => s !== call.session).map((s) => group.calls.filter((c) => c.session === s));
   const host = hostOf(call.target);
@@ -82,13 +132,13 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
         </div>
         <div className="flex items-center gap-3">
           <SheetTitle className="min-w-0 flex-1 truncate text-[16px]">{DIM.kind.name(DIM.kind.of(call))}</SheetTitle>
-          <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={mark?.state ?? ""} onValueChange={(v) => ask({ do: "triage", sessions: group.sessions, state: v || null })}>
-            {MARKS.map((m) => <ToggleGroupItem key={m} value={m} className={cn("px-2.5 text-[12.5px]", m === "attack" && "data-[state=on]:bg-deny/20 data-[state=on]:text-deny", m === "benign" && "data-[state=on]:bg-allow/20 data-[state=on]:text-allow", m === "reviewing" && "data-[state=on]:bg-review/20 data-[state=on]:text-review")}>{MARK[m].label}</ToggleGroupItem>)}
+          {saved && <span className={cn("max-w-[260px] truncate text-[12px]", failed ? "text-deny" : "text-muted-foreground")} title={saved}>{saved}</span>}
+          <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={shown} onValueChange={(v) => { setPressed(v || null); ask({ do: "triage", sessions: group.sessions, state: v || null }); }}>
+            {MARKS.map((m) => <ToggleGroupItem key={m} value={m} className={cn("px-2.5 text-[12.5px]", m === "attack" && "data-[state=on]:bg-deny/20 data-[state=on]:text-deny", m === "benign" && "data-[state=on]:bg-allow/20 data-[state=on]:text-allow", m === "reviewing" && "data-[state=on]:bg-review/20 data-[state=on]:text-review", m === "closed" && "data-[state=on]:bg-white/15 data-[state=on]:text-foreground")}>{MARK[m].label}</ToggleGroupItem>)}
           </ToggleGroup>
-          <Button variant="outline" size="sm" className={cn(armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
-            onClick={() => { if (armed) { ask({ do: "stop_device", device: call.machine, session: call.session, seq: call.seq }); setArmed(false); } else setArmed(true); }}>
-            <OctagonX />{armed ? "한 번 더" : "단말 멈춤"}
-          </Button>
+          <Confirm title="단말 멈춤" what={call.machine} label="멈추기" reason onDo={(reason) => ask({ do: "stop_device", device: call.machine, reason, session: call.session, seq: call.seq })}>
+            <Button variant="outline" size="sm" className="border-deny/50 text-deny hover:bg-deny/15 hover:text-deny"><OctagonX />단말 멈춤</Button>
+          </Confirm>
           <Button variant="outline" size="sm" onClick={evidence}><Download />증거</Button>
           <Button size="sm" onClick={() => ask({ do: "open", session: call.session, seq: call.seq })}>기록<ArrowUpRight /></Button>
         </div>
@@ -126,12 +176,17 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
                   <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
                 </button>
                 {told.paragraph != null && <span className="tnum text-[12px] text-muted-foreground">문단 {told.paragraph + 1}{told.error ? " · 도구 오류" : ""}</span>}
-                {source && (
-                  <Button variant="outline" size="sm" className={cn("justify-self-start", distrusted && "border-deny/60 bg-deny/12 text-deny hover:bg-deny/20 hover:text-deny")}
-                    onClick={() => ask({ do: "source", source, on: !distrusted, session: call.session, seq: call.seq })}>
-                    <Ban />{distrusted ? "출처 차단됨" : "출처 차단"}
-                  </Button>
-                )}
+                {source && (distrusted
+                  ? (
+                    <Button variant="outline" size="sm" className="justify-self-start border-deny/60 bg-deny/12 text-deny hover:bg-deny/20 hover:text-deny"
+                      onClick={() => ask({ do: "source", source, on: false, session: call.session, seq: call.seq })}>
+                      <Ban />출처 차단 풀기
+                    </Button>
+                  ) : (
+                    <Confirm title="출처 차단" what={source} label="차단" onDo={() => ask({ do: "source", source, on: true, session: call.session, seq: call.seq })}>
+                      <Button variant="outline" size="sm" className="justify-self-start"><Ban />출처 차단</Button>
+                    </Confirm>
+                  ))}
               </>
             )}
           </Step>
@@ -139,7 +194,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
           <Step n={2} icon={SquareTerminal} title="하려던 행동" last tone={SEV[call.sev].color} aside={<>{ACTION[call.action]?.label}<span>{call.ran ? "실행됨" : "실행 안 됨"}</span></>}>
             <Box tone={SEV[call.sev].color} className="grid gap-1.5 whitespace-normal">
               {call.tool && <span className="justify-self-start rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{toolName(call.tool)}</span>}
-              <Code text={call.target ?? call.tool ?? ""} tool={call.target ? call.tool : null} />
+              <Code text={read?.target ?? call.target ?? call.tool ?? ""} tool={call.target ? call.tool : null} />
             </Box>
             {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">전송 대상</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
             {call.leak && (
@@ -163,16 +218,27 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
             {mark && <><dt className="text-muted-foreground">표시</dt><dd className="flex items-center gap-2"><span className={cn("rounded px-1.5 text-[11.5px] leading-[20px] font-semibold", MARK[mark.state].cls)}>{MARK[mark.state].label}</span><span className="tnum truncate text-[12px] text-muted-foreground">{mark.by} · {ago(mark.at)}</span></dd></>}
           </dl>
 
-          {others.length > 0 && (
-            <Side title="이 세션의 다른 탐지" count={others.length}>
-              <Rows>{others.map((c) => (
-                <button key={c.seq} onClick={() => onCall(c)} className={rowCls}>
-                  <span className={cn("shrink-0 rounded px-1.5 text-[11px] leading-[19px] font-semibold", SEV[c.sev].cls)}>{SEV[c.sev].label}</span>
-                  <Mono className="min-w-0 flex-1 truncate">{c.target ?? c.tool}</Mono>
-                </button>
-              ))}</Rows>
-            </Side>
-          )}
+          <Side title="걸린 호출" count={caught.length}>
+            {kinds.length > 1 && (
+              <div className="flex flex-wrap gap-1">
+                {kinds.map(({ key, did, n }) => (
+                  <button key={key} onClick={() => setOnly(only === key ? null : key)} aria-pressed={only === key}
+                    className={cn("inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent", only === key ? "border-ring bg-accent text-foreground" : "border-transparent bg-secondary text-foreground/85", only && only !== key && "opacity-50")}>
+                    {did.server && <span className="shrink-0"><ServiceLogo name={did.server} size={12} /></span>}
+                    <span className="min-w-0 truncate">{did.name}</span><b className="tnum shrink-0 font-sans font-medium">{n}</b>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Rows>{listedCalls.map((c, i) => (
+              <button key={`${c.seq}:${i}`} onClick={() => onCall(c)} className={cn(rowCls, c === call && "bg-accent")} aria-current={c === call}>
+                <VerdictBadge v={c.verdict} />
+                <span className="max-w-28 shrink-0 truncate rounded bg-secondary px-1.5 font-mono text-[11px] leading-[19px] text-foreground/85">{didOf(c).name}</span>
+                <Mono className="min-w-0 flex-1 truncate text-muted-foreground">{c.target ?? c.tool}</Mono>
+                <span className="tnum shrink-0 text-[11px] text-muted-foreground">{clock(c.at).split(" ").pop()}</span>
+              </button>
+            ))}</Rows>
+          </Side>
 
           {reached.length > 0 && (
             <Side title="같은 원인이 닿은 다른 세션" count={reached.length}>

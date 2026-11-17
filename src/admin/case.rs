@@ -29,6 +29,24 @@ pub async fn case(backend: &Backend, session: &str, seq: i64, facts: &[CallFact]
     laid_out(&graph, session, seq, facts)
 }
 
+/// A Call's command, file, URL or pattern from its payload, as long as the graph keeps it.
+fn whole_target(graph: &crate::model::GraphData, seq: i64) -> Option<String> {
+    let node = graph
+        .nodes
+        .iter()
+        .find(|n| n.kind == "Call" && n.props.get("seq").and_then(Value::as_i64) == Some(seq))?;
+    let payload = crate::graph::parse_json(node.props.get("payload_json")?);
+    let input = payload
+        .get("tool_input")
+        .filter(|t| t.is_object())
+        .unwrap_or(&payload);
+    ["command", "file_path", "url", "pattern"]
+        .iter()
+        .find_map(|k| input.get(*k).and_then(Value::as_str))
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+}
+
 /// The case from the session's graph once read.
 fn laid_out(graph: &crate::model::GraphData, session: &str, seq: i64, facts: &[CallFact]) -> Value {
     let mut out = json!({ "session": session, "seq": seq });
@@ -46,6 +64,8 @@ fn laid_out(graph: &crate::model::GraphData, session: &str, seq: i64, facts: &[C
         .rfind(|a| a.seq < seq && a.agent.is_none());
     out["request"] =
         json!(ask.map(|a| json!({ "seq": a.seq, "text": a.text, "intent": a.intent, "at": a.at })));
+    // What the Call was on, whole as the graph keeps it (the list's is cut short).
+    out["target"] = json!(whole_target(graph, seq));
     let Some(st) = station(seq) else {
         return out;
     };
@@ -132,6 +152,19 @@ fn laid_out(graph: &crate::model::GraphData, session: &str, seq: i64, facts: &[C
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Call's command comes whole from its payload, past where the list cuts it.
+    #[test]
+    fn the_whole_command_from_the_payload() {
+        let long = format!("cat > a.py << 'EOF'\n{}\nEOF", "x = 1\n".repeat(100));
+        let graph: crate::model::GraphData = serde_json::from_value(json!({
+            "nodes": [{"kind": "Call", "props": {"seq": 4, "payload_json": json!({"tool_name": "Bash", "tool_input": {"command": long}}).to_string()}, "summary": {}}],
+            "subgraphs": [], "edges": [], "tokens": [],
+        }))
+        .unwrap();
+        assert_eq!(whole_target(&graph, 4).as_deref(), Some(long.as_str()));
+        assert_eq!(whole_target(&graph, 5), None);
+    }
 
     /// In the demo, a session follows a README into sending `.env` out: the Call stopped is
     /// laid out with the request before it and the Call whose result told it.

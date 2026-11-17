@@ -16,14 +16,14 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DataTable, Panel, ServiceLogo, clock } from "@/kit";
 import { cn } from "@/lib/utils";
 import { CaseView } from "./case";
-import { CAUSE, type Blocked, type Call, type Case, type CaseGroup, DIM, type Group, MARK, type Mark, SEV, type Sev, SEVS, cases, happened, isOpen, named, stateOf, toolName, worst } from "./data";
+import { CAUSE, type Blocked, type Call, type Case, type CaseGroup, DIM, type Group, MARK, type Mark, SEV, type Sev, SEVS, cases, didOf, happened, isOpen, named, stateOf, toolName, worst } from "./data";
 
 /** What the page asks the app to do. */
 export type Ask = (message:
   | { do: "open" | "case"; session: string; seq: number }
   | { do: "triage"; sessions: string[]; state: string | null }
   | { do: "source"; source: string; on: boolean; session: string; seq: number }
-  | { do: "stop_device"; device: string; session: string; seq: number }
+  | { do: "stop_device"; device: string; reason?: string; session: string; seq: number }
   | { do: "inventory" }
   | { do: "export"; name: string; text: string }
   | { do: "settings" }) => void;
@@ -42,21 +42,13 @@ const When = ({ at }: { at: number | null }) => <span className="tnum text-[12px
 function Verdicts({ calls }: { calls: Call[] }) {
   const n = (v: string) => calls.filter((c) => c.verdict === v).length;
   return (
-    <span className="tnum flex items-center gap-2.5 text-[12px]">
+    <span className="tnum flex items-center gap-3 text-[12px]">
       {([["deny", "차단", "text-deny"], ["review", "확인", "text-review"], ["allow", "허용", "text-allow"]] as const).map(([v, label, cls]) => (
-        <span key={v} className={cn("inline-flex items-center gap-1", n(v) ? cls : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />{label} {n(v)}</span>
+        <span key={v} title={label} className={cn("inline-flex items-center gap-1", n(v) ? cls : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />{n(v)}</span>
       ))}
     </span>
   );
 }
-/** What a Call did, by name: an MCP tool by its own name (its server by its logo), a shell
- * command by its program, any other by its tool. */
-const didOf = (c: Call): { name: string; server?: string } => {
-  const mcp = c.tool ? /^mcp__(.+?)__(.+)$/.exec(c.tool) : null;
-  if (mcp) return { name: mcp[2], server: mcp[1] };
-  if (c.program) return { name: c.program };
-  return { name: c.tool ? toolName(c.tool) : "–" };
-};
 /** The Calls in a case that the engine caught, by what they did, the most first. */
 function Hits({ calls }: { calls: Call[] }) {
   const n = new Map<string, { did: ReturnType<typeof didOf>; n: number }>();
@@ -68,13 +60,13 @@ function Hits({ calls }: { calls: Call[] }) {
   const list = [...n.values()].sort((a, b) => b.n - a.n);
   return (
     <span className="flex min-w-0 items-center gap-1 overflow-hidden" title={list.map((x) => `${x.did.name} ${x.n}`).join(" · ")}>
-      {list.slice(0, 2).map(({ did, n: k }) => (
-        <span key={`${did.server}:${did.name}`} className="inline-flex max-w-40 min-w-0 shrink-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-foreground/85">
-          {did.server && <ServiceLogo name={did.server} size={12} />}
-          <span className="truncate">{did.name}</span>{k > 1 && <b className="tnum font-sans font-medium">{k}</b>}
+      {list.slice(0, 1).map(({ did, n: k }) => (
+        <span key={`${did.server}:${did.name}`} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-foreground/85">
+          {did.server && <span className="shrink-0"><ServiceLogo name={did.server} size={12} /></span>}
+          <span className="min-w-0 truncate">{did.name}</span>{k > 1 && <b className="tnum shrink-0 font-sans font-medium">{k}</b>}
         </span>
       ))}
-      {list.length > 2 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{list.length - 2}</span>}
+      {list.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{list.length - 1}</span>}
     </span>
   );
 }
@@ -125,22 +117,22 @@ const caseColumns = (marks: Record<string, Mark>, ran: boolean): ColumnDef<CaseG
   } },
   // What already ran in it, worst first: a value sent out, a held Call a person let run, one
   // allowed though risky. Only in the cases where something ran.
-  ...(ran ? [{ id: "why", header: "실행됨", size: 170, accessorFn: (g: CaseGroup) => whyRan(g).join(" "), cell: ({ row }: { row: { original: CaseGroup } }) => (
+  ...(ran ? [{ id: "why", header: "실행됨", size: 152, accessorFn: (g: CaseGroup) => whyRan(g).join(" "), cell: ({ row }: { row: { original: CaseGroup } }) => (
     <span className="flex min-w-0 items-center gap-1">
       {whyRan(row.original).map((w) => <span key={w} className={cn("shrink-0 rounded px-1.5 text-[11.5px] leading-[20px] font-semibold", RAN[w].cls)} title={w === "leak" ? row.original.leaked.join(", ") : undefined}>{RAN[w].label}</span>)}
     </span>
   ) } as ColumnDef<CaseGroup>] : []),
   { id: "sev", header: "심각도", size: 88, accessorFn: (g) => g.risk, cell: ({ row }) => <SevBadge s={worst(row.original)} /> },
   // What the person had it do: the session's short name.
-  { id: "work", header: "작업", accessorFn: (g) => named(first(g)) ?? "", cell: ({ row }) => {
+  { id: "work", header: "작업", size: 260, accessorFn: (g) => named(first(g)) ?? "", cell: ({ row }) => {
     const c = first(row.original), name = named(c);
     return <span className={cn("block truncate", !name && "text-muted-foreground")} title={c.prompt ?? undefined}>{name ?? NO_PROMPT}</span>;
   } },
-  { id: "cause", header: "원인", size: 190, accessorFn: (g) => g.calls.find((c) => c.cause)?.cause_name ?? "", cell: ({ row }) => <CauseChip c={row.original.calls.find((c) => c.cause) ?? row.original.calls[0]} /> },
-  { id: "machine", header: "단말", size: 160, accessorFn: (g) => g.machines[0] ?? "", cell: ({ row }) => <Machines list={row.original.machines} /> },
+  { id: "cause", header: "원인", size: 170, accessorFn: (g) => g.calls.find((c) => c.cause)?.cause_name ?? "", cell: ({ row }) => <CauseChip c={row.original.calls.find((c) => c.cause) ?? row.original.calls[0]} /> },
+  { id: "machine", header: "단말", size: 140, accessorFn: (g) => g.machines[0] ?? "", cell: ({ row }) => <Machines list={row.original.machines} /> },
   { id: "sessions", header: "세션", size: 64, accessorFn: (g) => g.sessions.length, cell: ({ row }) => <span className="tnum">{row.original.sessions.length}</span> },
-  { id: "hits", header: "걸린 호출", size: 220, accessorFn: (g) => didOf(first(g)).name, cell: ({ row }) => <Hits calls={row.original.calls} /> },
-  { id: "found", header: "탐지", size: 170, accessorFn: (g) => g.total, cell: ({ row }) => <Verdicts calls={row.original.calls} /> },
+  { id: "hits", header: "걸린 호출", size: 280, accessorFn: (g) => didOf(first(g)).name, cell: ({ row }) => <Hits calls={row.original.calls} /> },
+  { id: "found", header: "차단 · 확인 · 허용", size: 130, accessorFn: (g) => g.total, cell: ({ row }) => <Verdicts calls={row.original.calls} /> },
   { id: "at", header: "최근", size: 104, accessorFn: (g) => g.calls[0].at ?? 0, cell: ({ row }) => <When at={row.original.calls[0].at} /> },
 ];
 /** A source that told agents to act: the cases it made, over how many sessions and machines. */
@@ -180,8 +172,8 @@ const SOURCES: ColumnDef<Source>[] = [
   } },
   { id: "sessions", header: "세션", size: 64, accessorFn: (s) => s.sessions.length, cell: ({ row }) => <span className="tnum">{row.original.sessions.length}</span> },
   { id: "machine", header: "단말", size: 160, accessorFn: (s) => s.machines.length, cell: ({ row }) => <Machines list={row.original.machines} /> },
-  { id: "hits", header: "걸린 호출", size: 220, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Hits calls={row.original.cases.flatMap((g) => g.calls)} /> },
-  { id: "found", header: "탐지", size: 170, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Verdicts calls={row.original.cases.flatMap((g) => g.calls)} /> },
+  { id: "hits", header: "걸린 호출", size: 280, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Hits calls={row.original.cases.flatMap((g) => g.calls)} /> },
+  { id: "found", header: "차단 · 확인 · 허용", size: 130, accessorFn: (s) => s.cases.reduce((a, g) => a + g.total, 0), cell: ({ row }) => <Verdicts calls={row.original.cases.flatMap((g) => g.calls)} /> },
   { id: "at", header: "최근", size: 104, accessorFn: (s) => s.at, cell: ({ row }) => <When at={row.original.at || null} /> },
 ];
 
@@ -197,8 +189,9 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
   // The Call open, by its session and number: the page's data is sent again (when the case
   // arrives, a mark changes), and the Calls in it are new objects each time.
   const [picked, setPicked] = useState<{ session: string; seq: number } | null>(null);
-  // Whether the sessions already marked are listed too.
-  const [every, setEvery] = useState(false);
+  // Which cases are listed: those still to handle, those handled, or all. 미처리 pressed again
+  // turns to 처리됨, and back.
+  const [shownBy, setShownBy] = useState<"open" | "done" | "all">("open");
 
   const found = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -210,7 +203,10 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
   // The cases: the Calls one cause made, over every session it reached. One still to handle
   // has a session not marked yet, or being looked at.
   const allCases = useMemo(() => cases(newest), [newest]);
-  const listed = useMemo(() => (every ? allCases : allCases.filter((g) => g.sessions.some((s) => isOpen(marks[s])))), [allCases, every, marks]);
+  const listed = useMemo(() => {
+    const open = (g: CaseGroup) => g.sessions.some((s) => isOpen(marks[s]));
+    return shownBy === "all" ? allCases : allCases.filter((g) => open(g) === (shownBy === "open"));
+  }, [allCases, shownBy, marks]);
   // Those where something already ran, to answer for; those the engine stopped, to judge.
   const done = useMemo(() => listed.filter((g) => g.ran > 0), [listed]);
   const held = useMemo(() => listed.filter((g) => g.ran === 0), [listed]);
@@ -240,8 +236,9 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
       aside={<>
         {saved && <span className="max-w-[320px] truncate text-[12px]" title={saved}>{saved}</span>}
         {(
-          <ToggleGroup type="single" size="sm" value={every ? "all" : "open"} onValueChange={(v) => v && setEvery(v === "all")}>
-            <ToggleGroupItem value="open" className="px-2.5 text-[12.5px]">미처리</ToggleGroupItem>
+          <ToggleGroup type="single" size="sm" value={shownBy === "all" ? "all" : "mine"}
+            onValueChange={(v) => setShownBy(v === "all" ? "all" : v === "mine" ? "open" : shownBy === "open" ? "done" : "open")}>
+            <ToggleGroupItem value="mine" className="px-2.5 text-[12.5px]">{shownBy === "done" ? "처리됨" : "미처리"}</ToggleGroupItem>
             <ToggleGroupItem value="all" className="px-2.5 text-[12.5px]">전체</ToggleGroupItem>
           </ToggleGroup>
         )}
@@ -260,7 +257,7 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
 
       <Sheet open={!!picked} onOpenChange={(on) => !on && setPicked(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[min(1040px,92vw)] data-[side=right]:sm:max-w-[min(1040px,92vw)]" onOpenAutoFocus={(e) => e.preventDefault()}>
-          {call && group && <CaseView call={call} group={group} data={caseData} marks={marks} blocked={blocked} ask={ask} onCall={open} />}
+          {call && group && <CaseView call={call} group={group} data={caseData} marks={marks} blocked={blocked} saved={saved} ask={ask} onCall={open} />}
         </SheetContent>
       </Sheet>
     </Panel>
