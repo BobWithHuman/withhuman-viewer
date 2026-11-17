@@ -16,7 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DataTable, Panel, ServiceLogo, clock } from "@/kit";
 import { cn } from "@/lib/utils";
 import { CaseView } from "./case";
-import { CAUSE, type Blocked, type Call, type Case, type CaseGroup, DIM, type Group, MARK, type Mark, SEV, type Sev, SEVS, cases, happened, isOpen, named, stateOf, toolName, worst } from "./data";
+import { CAUSE, type Blocked, type Call, type Case, type CaseGroup, DIM, type Group, MARK, type Mark, SEV, type Sev, SEVS, cases, didOf, happened, isOpen, named, stateOf, toolName, worst } from "./data";
 
 /** What the page asks the app to do. */
 export type Ask = (message:
@@ -49,14 +49,6 @@ function Verdicts({ calls }: { calls: Call[] }) {
     </span>
   );
 }
-/** What a Call did, by name: an MCP tool by its own name (its server by its logo), a shell
- * command by its program, any other by its tool. */
-const didOf = (c: Call): { name: string; server?: string } => {
-  const mcp = c.tool ? /^mcp__(.+?)__(.+)$/.exec(c.tool) : null;
-  if (mcp) return { name: mcp[2], server: mcp[1] };
-  if (c.program) return { name: c.program };
-  return { name: c.tool ? toolName(c.tool) : "–" };
-};
 /** The Calls in a case that the engine caught, by what they did, the most first. */
 function Hits({ calls }: { calls: Call[] }) {
   const n = new Map<string, { did: ReturnType<typeof didOf>; n: number }>();

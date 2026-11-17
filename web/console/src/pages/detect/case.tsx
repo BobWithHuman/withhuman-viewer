@@ -12,10 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { VerdictBadge, Warn, ago, clock } from "@/kit";
+import { ServiceLogo, VerdictBadge, Warn, ago, clock } from "@/kit";
 import { Code } from "@/kit/code";
 import { cn } from "@/lib/utils";
-import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, hostOf, named, toolName } from "./data";
+import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, didOf, hostOf, named, toolName } from "./data";
 import type { Ask } from "./list";
 
 const Mono = ({ children, className }: { children: ReactNode; className?: string }) => <code className={cn("font-mono text-[12px]", className)}>{children}</code>;
@@ -104,7 +104,13 @@ export function CaseView({ call, group, data, marks, blocked, saved, ask, onCall
   // The case the app read is this Call's once its session and number match.
   const read = data && data.session === call.session && data.seq === call.seq && !data.loading ? data : null;
   const told = read?.told ?? null;
-  const others = group.calls.filter((c) => c !== call && c.session === call.session);
+  // The session's Calls the engine caught, this one among them, and those of one kind picked.
+  const caught = group.calls.filter((c) => c.session === call.session);
+  const kinds = [...caught.reduce((m, c) => { const d = didOf(c), k = `${d.server ?? ""}:${d.name}`; const had = m.get(k); if (had) had.n += 1; else m.set(k, { key: k, did: d, n: 1 }); return m; }, new Map<string, { key: string; did: ReturnType<typeof didOf>; n: number }>()).values()].sort((a, b) => b.n - a.n);
+  const [only, setOnly] = useState<string | null>(null);
+  useEffect(() => setOnly(null), [call.session]);
+  const keyOf = (c: Call) => { const d = didOf(c); return `${d.server ?? ""}:${d.name}`; };
+  const listedCalls = only ? caught.filter((c) => keyOf(c) === only) : caught;
   // The other sessions the same cause reached, each with its Calls worth a look.
   const reached = group.sessions.filter((s) => s !== call.session).map((s) => group.calls.filter((c) => c.session === s));
   const host = hostOf(call.target);
@@ -212,16 +218,27 @@ export function CaseView({ call, group, data, marks, blocked, saved, ask, onCall
             {mark && <><dt className="text-muted-foreground">표시</dt><dd className="flex items-center gap-2"><span className={cn("rounded px-1.5 text-[11.5px] leading-[20px] font-semibold", MARK[mark.state].cls)}>{MARK[mark.state].label}</span><span className="tnum truncate text-[12px] text-muted-foreground">{mark.by} · {ago(mark.at)}</span></dd></>}
           </dl>
 
-          {others.length > 0 && (
-            <Side title="이 세션의 다른 탐지" count={others.length}>
-              <Rows>{others.map((c) => (
-                <button key={c.seq} onClick={() => onCall(c)} className={rowCls}>
-                  <span className={cn("shrink-0 rounded px-1.5 text-[11px] leading-[19px] font-semibold", SEV[c.sev].cls)}>{SEV[c.sev].label}</span>
-                  <Mono className="min-w-0 flex-1 truncate">{c.target ?? c.tool}</Mono>
-                </button>
-              ))}</Rows>
-            </Side>
-          )}
+          <Side title="걸린 호출" count={caught.length}>
+            {kinds.length > 1 && (
+              <div className="flex flex-wrap gap-1">
+                {kinds.map(({ key, did, n }) => (
+                  <button key={key} onClick={() => setOnly(only === key ? null : key)} aria-pressed={only === key}
+                    className={cn("inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-accent", only === key ? "border-ring bg-accent text-foreground" : "border-transparent bg-secondary text-foreground/85", only && only !== key && "opacity-50")}>
+                    {did.server && <span className="shrink-0"><ServiceLogo name={did.server} size={12} /></span>}
+                    <span className="min-w-0 truncate">{did.name}</span><b className="tnum shrink-0 font-sans font-medium">{n}</b>
+                  </button>
+                ))}
+              </div>
+            )}
+            <Rows>{listedCalls.map((c, i) => (
+              <button key={`${c.seq}:${i}`} onClick={() => onCall(c)} className={cn(rowCls, c === call && "bg-accent")} aria-current={c === call}>
+                <VerdictBadge v={c.verdict} />
+                <span className="max-w-28 shrink-0 truncate rounded bg-secondary px-1.5 font-mono text-[11px] leading-[19px] text-foreground/85">{didOf(c).name}</span>
+                <Mono className="min-w-0 flex-1 truncate text-muted-foreground">{c.target ?? c.tool}</Mono>
+                <span className="tnum shrink-0 text-[11px] text-muted-foreground">{clock(c.at).split(" ").pop()}</span>
+              </button>
+            ))}</Rows>
+          </Side>
 
           {reached.length > 0 && (
             <Side title="같은 원인이 닿은 다른 세션" count={reached.length}>
