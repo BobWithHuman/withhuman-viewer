@@ -85,6 +85,7 @@ function SgNode({ data }: NodeProps<Node<G>>) {
             <span className={cx("grid size-[18px] shrink-0 place-items-center rounded [&_svg]:size-[11px] [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
             <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{s.quote ? `"${s.name}"` : s.name}</span>
             {s.verdict && s.verdict !== "allow" && <VerdictChip s={s} />}
+            {s.undecided && <span className="shrink-0 rounded-md bg-white/6 px-1.5 py-0.5 text-[11px] text-mut">판정 없음</span>}
             {s.catch && !s.verdict && <TriangleAlert className="size-3.5 shrink-0 fill-catch text-panel" />}
           </button>
         ))}
@@ -95,13 +96,15 @@ function SgNode({ data }: NodeProps<Node<G>>) {
 const nodeTypes = { step: StepNode, sg: SgNode };
 
 /** The tie a SubGraph hangs from, named as its link is. */
-const SG_TIE: Record<string, { color: string; label?: string }> = {
+const SG_TIE: Record<string, { color: string; label?: string; dashed?: boolean }> = {
   ask: { color: TIE.ask.color },
   cause: { color: TIE.cause.color, label: TIE.cause.label },
   message: { color: TIE.parent.color, label: PARENT_LABEL.message },
   result: { color: TIE.parent.color, label: PARENT_LABEL.result },
   request: { color: TIE.parent.color, label: PARENT_LABEL.request },
   answer: { color: "#6f6f6f" },
+  untraced: { color: "#7a7a7a", label: "추적 없음", dashed: true },
+  loose: { color: "#ef6b5e", label: "원인 못 찾음", dashed: true },
 };
 
 /** The SubGraphs as boxes: the agent's steps that hang the same way from one SubGraph (the
@@ -112,13 +115,16 @@ function boxes(data: RecordData) {
   const first = new Map(data.steps.map((s) => [s.id, s.kind]));
   const joins = (g: (typeof gs)[number]) =>
     g.parent != null && (g.via === "ask" || g.via === "answer") && first.get(g.steps[0]) !== "prompt";
-  // Each SubGraph's box, by the first SubGraph in it.
+  // Each SubGraph's box, by the first SubGraph in it: one joins the box of its siblings only
+  // when that box is the last made, so the boxes keep the order the steps were made in.
   const boxOf = new Map<number, number>();
   const shared = new Map<number, number>();
+  let last: number | undefined;
   for (const g of gs) {
-    const into = joins(g) ? shared.get(g.parent!) : undefined;
+    const into = joins(g) && shared.get(g.parent!) === last ? last : undefined;
     boxOf.set(g.n, into ?? g.n);
     if (joins(g) && into === undefined) shared.set(g.parent!, g.n);
+    last = boxOf.get(g.n);
   }
   const out = new Map<number, { n: number; ns: number[]; parent: number | null; via: string; p?: number | null; steps: string[] }>();
   for (const g of gs) {
@@ -188,7 +194,7 @@ function layoutTree(data: RecordData, picked: string | null) {
       id: `g${g.parent}>g${g.n}`, source: `g${g.parent}`, target: `g${g.n}`, sourceHandle: `o${src}`, targetHandle: `i${g.steps[0]}`,
       type: "default", label,
       labelStyle: { fill: tie.color, fontSize: 11, fontWeight: 600 }, labelBgStyle: { fill: "#282828" }, labelBgPadding: [4, 2] as [number, number],
-      style: { stroke: tie.color, strokeWidth: on ? 2.6 : 1.5, opacity: on ? 1 : 0.8 },
+      style: { stroke: tie.color, strokeWidth: on ? 2.6 : 1.5, opacity: on ? 1 : 0.8, strokeDasharray: tie.dashed ? "5 4" : undefined },
       markerEnd: { type: MarkerType.ArrowClosed, color: tie.color, width: 14, height: 14 }, zIndex: on ? 4 : 0,
     };
   });

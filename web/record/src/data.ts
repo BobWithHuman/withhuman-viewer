@@ -17,6 +17,8 @@ export interface Step {
   at?: number | string;
   svc?: Svc;
   verdict?: Verdict;
+  /** A Call the engine did not decide (nor trace). */
+  undecided?: boolean;
   /** What the engine caught here, and how sure. */
   catch?: { name: string; sub: string; score: number };
   /** For a fold of quiet steps: what is inside. */

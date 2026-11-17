@@ -161,6 +161,8 @@ fn station_step(st: &Station) -> Value {
         ]));
     } else if st.loose {
         detail.push(json!(["원인", "찾지 못함"]));
+    } else if decision.is_none() {
+        detail.push(json!(["원인", "추적 없음"]));
     } else {
         detail.push(json!(["원인", "사용자 요청"]));
     }
@@ -191,6 +193,7 @@ fn station_step(st: &Station) -> Value {
         "at": st.at,
         "svc": mcp.and_then(|(server, _)| logo_of(server)),
         "verdict": verdict(decision),
+        "undecided": decision.is_none(),
         "catch": catch,
         "lane": lane(st.line),
         "detail": detail,
@@ -316,6 +319,11 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
         }
     }
     let ask_in = |g: i64| m.asks.iter().position(|a| model.subgraph_of(a.seq) == Some(g));
+    let undecided: std::collections::HashSet<&str> = items
+        .iter()
+        .filter(|(_, _, s)| s["undecided"] == true)
+        .filter_map(|(_, _, s)| s["id"].as_str())
+        .collect();
     let subgraphs: Vec<Value> = steps_of
         .iter()
         .map(|(&g, ids)| {
@@ -345,6 +353,17 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
                             .filter(|&a| a < g)
                             .max(),
                         "answer",
+                        None,
+                    ),
+                    // A Call the engine did not trace (it decided none), or traced to nothing
+                    // that asked for it: its turn's, left untied.
+                    None if ids.iter().any(|id| id.starts_with('s')) => (
+                        m.asks
+                            .iter()
+                            .filter_map(|a| model.subgraph_of(a.seq))
+                            .filter(|&a| a < g)
+                            .max(),
+                        if ids.iter().any(|id| undecided.contains(id.as_str())) { "untraced" } else { "loose" },
                         None,
                     ),
                     None => (None, "none", None),
