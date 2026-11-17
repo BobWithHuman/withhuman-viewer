@@ -197,8 +197,9 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
   // The Call open, by its session and number: the page's data is sent again (when the case
   // arrives, a mark changes), and the Calls in it are new objects each time.
   const [picked, setPicked] = useState<{ session: string; seq: number } | null>(null);
-  // Whether the sessions already marked are listed too.
-  const [every, setEvery] = useState(false);
+  // Which cases are listed: those still to handle, those handled, or all. 미처리 pressed again
+  // turns to 처리됨, and back.
+  const [shownBy, setShownBy] = useState<"open" | "done" | "all">("open");
 
   const found = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -210,7 +211,10 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
   // The cases: the Calls one cause made, over every session it reached. One still to handle
   // has a session not marked yet, or being looked at.
   const allCases = useMemo(() => cases(newest), [newest]);
-  const listed = useMemo(() => (every ? allCases : allCases.filter((g) => g.sessions.some((s) => isOpen(marks[s])))), [allCases, every, marks]);
+  const listed = useMemo(() => {
+    const open = (g: CaseGroup) => g.sessions.some((s) => isOpen(marks[s]));
+    return shownBy === "all" ? allCases : allCases.filter((g) => open(g) === (shownBy === "open"));
+  }, [allCases, shownBy, marks]);
   // Those where something already ran, to answer for; those the engine stopped, to judge.
   const done = useMemo(() => listed.filter((g) => g.ran > 0), [listed]);
   const held = useMemo(() => listed.filter((g) => g.ran === 0), [listed]);
@@ -240,8 +244,9 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
       aside={<>
         {saved && <span className="max-w-[320px] truncate text-[12px]" title={saved}>{saved}</span>}
         {(
-          <ToggleGroup type="single" size="sm" value={every ? "all" : "open"} onValueChange={(v) => v && setEvery(v === "all")}>
-            <ToggleGroupItem value="open" className="px-2.5 text-[12.5px]">미처리</ToggleGroupItem>
+          <ToggleGroup type="single" size="sm" value={shownBy === "all" ? "all" : "mine"}
+            onValueChange={(v) => setShownBy(v === "all" ? "all" : v === "mine" ? "open" : shownBy === "open" ? "done" : "open")}>
+            <ToggleGroupItem value="mine" className="px-2.5 text-[12.5px]">{shownBy === "done" ? "처리됨" : "미처리"}</ToggleGroupItem>
             <ToggleGroupItem value="all" className="px-2.5 text-[12.5px]">전체</ToggleGroupItem>
           </ToggleGroup>
         )}
