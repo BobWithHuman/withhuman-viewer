@@ -34,6 +34,10 @@ pub struct Session {
     /// How the engine enforced the session's last decision: `record`, `shadow` or `enforce`.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub mode: Option<String>,
+    /// Each intent the agent stated, in order, with the Calls it made under it; none when the
+    /// store says null (a session that stated none, as an older viewer kept it).
+    #[serde(deserialize_with = "null_as_empty")]
+    pub intents: Vec<(Option<String>, i64)>,
 }
 
 /// One Call as the security team's charts count it (`graph::CALL_FACTS`).
@@ -90,11 +94,49 @@ impl Session {
             .to_owned()
     }
 
+    /// The session's name: the intent it did the most under (the first, of those level), or,
+    /// with none stated, its first prompt.
     pub fn title(&self) -> &str {
-        self.prompt
-            .as_deref()
+        self.main_intent()
+            .or(self.prompt.as_deref())
             .or(self.intent.as_deref())
             .unwrap_or("")
+    }
+
+    /// The intents stated, each once in the order first stated, with all the Calls made under it.
+    fn stated(&self) -> Vec<(&str, i64)> {
+        let mut out: Vec<(&str, i64)> = Vec::new();
+        for (intent, calls) in &self.intents {
+            let Some(i) = intent
+                .as_deref()
+                .map(short_intent)
+                .filter(|i| !i.is_empty())
+            else {
+                continue;
+            };
+            match out.iter_mut().find(|(t, _)| *t == i) {
+                Some((_, n)) => *n += calls,
+                None => out.push((i, *calls)),
+            }
+        }
+        out
+    }
+
+    fn main_intent(&self) -> Option<&str> {
+        let stated = self.stated();
+        let most = stated.iter().map(|(_, n)| *n).max()?;
+        stated.into_iter().find(|(_, n)| *n == most).map(|(i, _)| i)
+    }
+
+    /// The other intents the session stated beside the one it is named by, in order.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub fn other_intents(&self) -> Vec<&str> {
+        let main = self.main_intent();
+        self.stated()
+            .into_iter()
+            .map(|(i, _)| i)
+            .filter(|i| Some(*i) != main)
+            .collect()
     }
 
     pub fn flagged(&self) -> bool {
@@ -311,8 +353,55 @@ pub struct CallRow {
     pub ran: bool,
 }
 
+/// A list the store may hand over as null.
+fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
+/// An intent as a name: its first sentence, without the agent's `(확신도: …)`.
+pub fn short_intent(intent: &str) -> &str {
+    let mut t = intent.trim();
+    if let Some(i) = t.find("(확신도") {
+        t = t[..i].trim_end();
+    }
+    if let Some(i) = t.find(". ") {
+        t = &t[..i];
+    }
+    t.trim_end_matches(['.', ' '])
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_session_is_named_by_the_intent_it_did_the_most_under() {
+        let s = super::Session {
+            prompt: Some("이거 봐줘".into()),
+            intents: vec![
+                (Some("폴더 구조 파악 (확신도: 높음)".into()), 2),
+                (Some("배포 스크립트 실행. 스테이징만.".into()), 5),
+                (None, 3),
+                (Some("폴더 구조 파악".into()), 3),
+                (Some("변경 기록 (확신도: 중간)".into()), 0),
+            ],
+            ..super::Session::default()
+        };
+        assert_eq!(s.title(), "폴더 구조 파악");
+        assert_eq!(s.other_intents(), ["배포 스크립트 실행", "변경 기록"]);
+        let none = super::Session {
+            prompt: Some("이거 봐줘".into()),
+            ..super::Session::default()
+        };
+        assert_eq!(none.title(), "이거 봐줘");
+        assert!(none.other_intents().is_empty());
+        // A session that stated no intent comes with them null.
+        let read: super::Session = serde_json::from_str(r#"{"id": "s", "intents": null}"#).unwrap();
+        assert!(read.intents.is_empty());
+    }
     use super::Paragraph;
 
     // The engine stores the classification as a probability; older fixtures as a bool.
@@ -347,6 +436,25 @@ pub struct Inventory {
     pub shadow: Option<Vec<ShadowAgent>>,
     /// The machines the EDR lists; none while the engine is not connected to one.
     pub edr: Option<Vec<EdrDevice>>,
+    /// Each EDR scan that saw a coding agent running; none while the engine keeps no such record.
+    pub sightings: Option<Vec<EdrSighting>>,
+}
+
+/// An EDR scan that saw a coding agent running on a machine.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct EdrSighting {
+    /// The EDR's ID of the machine (`edr_devices.agent_id`).
+    pub agent_id: String,
+    /// The scan's time (ms).
+    pub running_at: i64,
+    /// `claude-code` or `codex`.
+    pub agent: String,
+    /// The machine's name then.
+    pub name: Option<String>,
+    /// The command line the agent ran with, where the EDR tells it (Linux); none elsewhere.
+    pub command: Option<String>,
 }
 
 /// An agent running where the hooks are not: a Claude Code or Codex project a machine's check
@@ -410,8 +518,11 @@ pub struct EdrDevice {
     pub status: Option<String>,
     pub serial: Option<String>,
     pub last_seen: Option<i64>,
-    /// An agent program (Claude Code, Codex) the EDR saw running on it, if any.
+    /// An agent program (Claude Code, Codex) the EDR saw on it, if any.
     pub agent: Option<String>,
+    /// When the EDR's latest process scan saw that agent running (ms); none when it was not
+    /// running at the scan, or the engine does not record it yet.
+    pub running_at: Option<i64>,
 }
 
 /// A project a machine's hooks were installed in.
@@ -535,7 +646,8 @@ pub struct McpTool {
     pub name: String,
     /// What the server tells the agent the tool does.
     pub description: String,
-    /// `read`, `write`, `delete` or `send` (out of the company).
+    /// What it does, in the engine's groups: `read`, `change`, `delete`, `send`, `transact`,
+    /// `execute`, `access`, `delegate`, or `unknown`.
     pub nature: String,
     pub calls: Vec<McpUse>,
 }

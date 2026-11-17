@@ -3,10 +3,13 @@
 // masked: the engine keeps no more than that.
 
 import {
-  Bot, CreditCard, Eye, FileText, IdCard, KeyRound, MessageSquareText, Send, ShieldCheck, Smartphone, type LucideIcon,
+  Bot, CreditCard, Eye, FileText, History, IdCard, KeyRound, MessageSquareText, Send, ShieldCheck, Smartphone, type LucideIcon,
 } from "lucide-react";
 
-export type From = "user" | "external" | "agent";
+/** Where a value came in: typed by a person, returned by a tool, in an earlier session (the
+ * agent wrote it first in this one, after another session took it in), or written by the agent
+ * first with nowhere seen before. */
+export type From = "user" | "external" | "earlier" | "agent";
 export type Status = "out" | "blocked" | "seen";
 export type Category = "credential" | "pii" | "financial" | "device";
 export type CallVerdict = "deny" | "approved" | "asked" | "allow";
@@ -48,6 +51,8 @@ export type Trail = {
   status: Status;
   last: number | null;
   mentions: Mention[];
+  /** For a value come in in an earlier session: that session, and how it came in there. */
+  before?: { session: string; title: string | null; from: string; at: number | null } | null;
 };
 
 export type Data = {
@@ -59,11 +64,12 @@ export type Data = {
   trails: Trail[];
 };
 
-export const FROMS: From[] = ["user", "external", "agent"];
+export const FROMS: From[] = ["user", "external", "earlier", "agent"];
 export const FROM: Record<From, { label: string; icon: LucideIcon }> = {
   user: { label: "사용자 입력", icon: MessageSquareText },
   external: { label: "도구 응답", icon: FileText },
-  agent: { label: "출처 불명", icon: Bot },
+  earlier: { label: "이전 세션", icon: History },
+  agent: { label: "에이전트 작성", icon: Bot },
 };
 export const CATEGORIES: Category[] = ["credential", "pii", "financial", "device"];
 export const CATEGORY: Record<Category, { label: string; icon: LucideIcon }> = {
@@ -86,7 +92,7 @@ export const CALL_VERDICT: Record<CallVerdict, { label: string; v: "allow" | "re
 };
 
 /** Who wrote a value first; anything the engine names otherwise is the agent's own. */
-export const fromOf = (t: Trail): From => (t.from === "user" || t.from === "external" ? t.from : "agent");
+export const fromOf = (t: Trail): From => (t.from === "user" || t.from === "external" || t.from === "earlier" ? t.from : "agent");
 export const categoryLabel = (c: string) => CATEGORY[c as Category]?.label ?? c;
 
 /** A path's or a URL's last part, as a row has room for; a command as it is. */
@@ -274,7 +280,8 @@ const FILES: [string, string][] = [
   ["cat ~/.aws/credentials", "Bash"],
 ];
 const SENDS: [string, (masked: string) => string][] = [
-  ["slack (MCP)", () => "mcp__slack__post_message"],
+  ["#dev-alerts · slack (MCP)", () => "mcp__slack__post_message"],
+  ["ops@vendor.example · gmail (MCP)", () => "mcp__gmail__send_email"],
   ["github (MCP)", () => "mcp__github__create_issue"],
   ["notion (MCP)", () => "mcp__notion__create_page"],
   ["sentry (MCP)", () => "mcp__sentry__create_comment"],
@@ -325,8 +332,9 @@ function demo(): Data {
     // The newer days are the busier ones.
     const start = now - Math.floor(r() ** 1.2 * 70 * 24 * hour) - 20 * 60e3;
     const roll = r();
-    const from: From = roll < 0.24 ? "user" : roll < 0.84 ? "external" : "agent";
+    const from: From = roll < 0.24 ? "user" : roll < 0.84 ? "external" : roll < 0.93 ? "earlier" : "agent";
     const [source, tool] = pick(r, FILES);
+    const back = (s + 1 + Math.floor(r() * (SESSIONS.length - 1))) % SESSIONS.length;
     let seq = (seqs.get(session) ?? 0) + 1 + Math.floor(r() * 6);
     let at = start;
     const mentions: Mention[] = [];
@@ -334,7 +342,7 @@ function demo(): Data {
       seq += 1 + Math.floor(r() * 4);
       at += Math.floor((0.3 + r() * 4) * 60e3);
     };
-    mentions.push({ seq, at, where: from === "user" ? "사용자 요청" : from === "external" ? "도구 응답" : "에이전트의 말", call: false, out: false, held: false, what: null, place: null, verdict: null });
+    mentions.push({ seq, at, where: from === "user" ? "사용자 요청" : from === "external" ? "도구 응답" : from === "earlier" ? "호출" : "에이전트의 말", call: false, out: false, held: false, what: null, place: null, verdict: null });
     // Most values are only seen; some go into Calls, and a few of those reach outside.
     const fate = r();
     const local = fate < 0.45 ? 0 : 1 + Math.floor(r() * 3);
@@ -362,7 +370,8 @@ function demo(): Data {
     const outStopped = mentions.filter((m) => m.out && m.held).length;
     trails.push({
       id: `${session}|sha256:${i}`, session, title, kind: k.kind, category: k.category, text, from,
-      source: from === "external" ? source : null, sourceTool: from === "external" ? tool : null, client,
+      source: from === "external" || from === "earlier" ? source : null, sourceTool: from === "external" || from === "earlier" ? tool : null, client,
+      before: from === "earlier" ? { session: `${(0x51a3c0de + back * 0x9e3779b1).toString(16).slice(-8)}-${(4000 + back * 137).toString(16)}-4f1e`, title: SESSIONS[back][1], from: "external", at: start - 26 * hour } : null,
       calls, outRan, outStopped, status: outRan ? "out" : outStopped ? "blocked" : "seen", last: at, mentions,
     });
   }

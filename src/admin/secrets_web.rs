@@ -68,18 +68,47 @@ impl Hosts {
     }
 }
 
+/// Where a value the agent wrote first in its session came in before, in another session: the
+/// latest session where a person typed it or a tool returned it before this one first showed it.
+/// None for a value that came in in its own session, or that no session shows coming in.
+pub(super) fn came_before<'a>(
+    t: &Trail,
+    all: impl IntoIterator<Item = &'a Trail>,
+) -> Option<&'a Trail> {
+    if t.from == "user" || t.from == "external" {
+        return None;
+    }
+    let first = t.mentions.first()?.at?;
+    let at = |x: &Trail| x.mentions.first().and_then(|m| m.at);
+    all.into_iter()
+        .filter(|x| x.key == t.key && x.session != t.session)
+        .filter(|x| x.from == "user" || x.from == "external")
+        .filter(|x| at(x).is_some_and(|a| a < first))
+        .max_by_key(|x| at(x))
+}
+
 /// The page's data: the trails, the worst first, each with its session's title and its
-/// machine's name.
+/// machine's name. A value the agent wrote first comes in from an earlier session (`earlier`)
+/// when one shows it coming in, with that session's source.
 pub(super) fn page(
     trails: &[Trail],
     titles: &HashMap<String, String>,
     hosts: &Hosts,
     head: &Head,
 ) -> String {
+    // The trails of each value, to look for where it came in before.
+    let mut by_key: HashMap<&str, Vec<&Trail>> = HashMap::new();
+    for t in trails {
+        by_key.entry(t.key.as_str()).or_default().push(t);
+    }
     let trails: Vec<Value> = trails
         .iter()
         .map(|t| {
-            let source = source_of(t);
+            let before = came_before(t, by_key.get(t.key.as_str()).into_iter().flatten().copied());
+            let source = source_of(before.unwrap_or(t));
+            let tool = source
+                .as_ref()
+                .and_then(|_| source_tool(before.unwrap_or(t)));
             json!({
                 "id": format!("{}|{}", t.session, t.key),
                 "session": t.session,
@@ -87,9 +116,15 @@ pub(super) fn page(
                 "kind": kind_label(&t.kind),
                 "category": t.category,
                 "text": t.text,
-                "from": t.from,
+                "from": if before.is_some() { "earlier" } else { t.from.as_str() },
                 "source": source,
-                "sourceTool": source.as_ref().and_then(|_| source_tool(t)),
+                "sourceTool": tool,
+                "before": before.map(|b| json!({
+                    "session": b.session,
+                    "title": titles.get(&b.session).filter(|s| !s.is_empty()),
+                    "from": b.from,
+                    "at": b.mentions.first().and_then(|m| m.at),
+                })),
                 "client": if t.client.is_empty() { NO_NAME } else { &t.client },
                 "host": hosts.0.get(&t.client),
                 "calls": t.calls,

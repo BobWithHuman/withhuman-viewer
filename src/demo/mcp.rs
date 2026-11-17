@@ -172,7 +172,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "add_issue_comment",
                 description: "Add a comment to an issue or a pull request.",
-                nature: "write",
+                nature: "change",
                 judged: "allow",
                 n: 9,
                 users: &[KIM],
@@ -181,7 +181,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "create_pull_request",
                 description: "Open a pull request from a branch.",
-                nature: "write",
+                nature: "change",
                 judged: "review",
                 n: 12,
                 users: &[KIM, LEE],
@@ -193,7 +193,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "merge_pull_request",
                 description: "Merge a pull request.",
-                nature: "write",
+                nature: "change",
                 judged: "deny",
                 n: 5,
                 users: &[LEE, KIM],
@@ -277,7 +277,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "create_issue",
                 description: "Create an issue in a project.",
-                nature: "write",
+                nature: "change",
                 judged: "allow",
                 n: 6,
                 users: &[LEE],
@@ -286,7 +286,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "transition_issue",
                 description: "Move an issue to another status.",
-                nature: "write",
+                nature: "change",
                 judged: "allow",
                 n: 4,
                 users: &[LEE],
@@ -384,7 +384,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "update_page",
                 description: "Change a page's content or properties.",
-                nature: "write",
+                nature: "change",
                 judged: "review",
                 n: 6,
                 users: &[CHOI],
@@ -393,7 +393,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "create_comment",
                 description: "Add a comment to a page.",
-                nature: "write",
+                nature: "change",
                 judged: "allow",
                 n: 3,
                 users: &[PARK],
@@ -484,7 +484,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "write_file",
                 description: "Create or overwrite a file under the allowed directories.",
-                nature: "write",
+                nature: "change",
                 judged: "allow",
                 n: 0,
                 users: &[],
@@ -493,7 +493,7 @@ fn made(now: i64) -> McpCatalog {
             Spec {
                 name: "move_file",
                 description: "Move or rename a file.",
-                nature: "write",
+                nature: "change",
                 judged: "allow",
                 n: 0,
                 users: &[],

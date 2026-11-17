@@ -1,18 +1,17 @@
 // The inventory as the app hands it over (`src/admin/inventory_web.rs`), and what the page works
-// out from it: which sessions are still going within the window the person picked and how each
-// machine stands.
+// out from it: which sessions are still going within the window picked and how each machine
+// stands.
 
 import { Eye, FileText, ShieldCheck, type LucideIcon } from "lucide-react";
 import { isOn, type Mcp } from "./mcp/types";
 
 export type Device = {
-  id: string; host: string | null; team: string | null; os: string | null; os_user: string | null;
-  agent: string | null; hook_version: string | null; user: string | null;
+  id: string; host: string | null; os: string | null;
+  agent: string | null; hook_version: string | null;
   registered_at: number | null; first_seen: number | null; last: number | null;
   sessions: number; permission_mode: string | null; engine_mode: string | null;
-  /** The hardware serial number, and the person the security team named as the owner (`user`
-   * is whoever's key the machine last presented). */
-  serial?: string | null; owner?: string | null;
+  /** The hardware serial number. */
+  serial?: string | null;
   /** The EDR's agent on the machine, when the engine matched one. */
   edr?: { id: string; status: string | null } | null;
   /** The security team stopped the machine: every tool call from it is refused. */
@@ -22,35 +21,64 @@ export type Device = {
 export type EdrOnly = { id: string; name: string; os: string | null; status: string | null; serial: string | null; last: number | null; agent: string | null };
 export const EDR_STATUS: Record<string, string> = { active: "연결됨", disconnected: "끊김", never_connected: "연결된 적 없음", pending: "대기" };
 export type Project = { device: string; project: string; agent: string | null; hook_version: string | null; installed_at: number | null };
-export type Shadow = { device: string | null; host: string | null; user: string | null; agent: string; project: string | null; last_seen: number | null };
-export type PersonRow = {
-  email: string; kind: string | null; devices: string[]; sessions: number;
-  active_keys: number; revoked_keys: number; stopped: boolean; last_used: number | null; denied: number;
+/** Shadow AI: a run of a coding agent the EDR's scans saw from `first` to `last_seen` (`scans`
+ * of them) on a machine with no Hooks session open then (`no_session`), or on one that never
+ * registered (`unregistered`); or a project a check found with no hooks (`project`). */
+export type Shadow = {
+  device: string | null; host: string | null; agent: string; project: string | null; last_seen: number | null;
+  first?: number | null; scans?: number;
+  /** The command line the agent ran with, where the EDR tells it (Linux). */
+  command?: string | null;
+  why?: "project" | "no_session" | "unregistered"; edr?: string | null;
 };
-export type Key = {
-  id: string; email: string; created_at: number | null; created_by: string | null; note: string | null;
-  last_used_at: number | null; revoked_at: number | null; revoked_by: string | null; revoke_reason: string | null;
-  first_denied_at: number | null; denied_count: number | null;
-};
-export type KeyEvent = { kind: string; actor: string | null; reason: string | null; email: string | null; key_id: string | null; at: number | null };
+/** What a shadow run's command line says of it: the prompt it was given, or the session it took
+ * up again (by its ID, or the latest), as a name for the run; none when it says neither. */
+export function runName(command: string | null | undefined): { prompt?: string; resume?: string | true } | null {
+  if (!command) return null;
+  // Words as a shell would split them, quotes kept together.
+  const words = [...command.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]);
+  const at = words.findIndex((w) => /(^|[\\/])(claude|codex)(\.exe)?$/.test(w) || /@anthropic-ai\/claude-code|@openai\/codex/.test(w));
+  // The program is the first word when no word names it (a native install runs from its version's path).
+  const args = words.slice(at >= 0 ? at + 1 : 1);
+  for (let i = 0; i < args.length; i++) {
+    const w = args[i];
+    if ((w === "--resume" || w === "-r") && args[i + 1] && !args[i + 1].startsWith("-")) return { resume: args[i + 1] };
+    if (w === "--continue" || w === "-c" || w === "resume") return { resume: args[i + 1] && !args[i + 1].startsWith("-") ? args[i + 1] : true };
+    if ((w === "-p" || w === "--print") && args[i + 1] && !args[i + 1].startsWith("-")) return { prompt: args[i + 1] };
+  }
+  // A prompt given as the first word that is not an option: `claude "fix it"`, `codex exec "fix it"`.
+  const rest = args.filter((w, i) => !w.startsWith("-") && !(i > 0 && /^--?(model|m|cwd|C|add-dir|profile|p)$/.test(args[i - 1])) && w !== "exec");
+  return rest.length ? { prompt: rest.join(" ") } : null;
+}
+
 export type Run = {
-  id: string; device: string | null; host: string | null; user: string | null;
+  id: string; device: string | null; host: string | null;
   title: string | null; folder: string | null; opens: boolean; source: string | null;
   permission_mode: string | null; model: string | null;
   created_at: number | null; last_seen_at: number | null; ended_at: number | null; end_reason: string | null;
 };
 /** The app's answer to the request with the same `req`. */
 export type Reply = {
-  req: number; ok: boolean; error?: string; done?: "issued" | "revoked" | "stopped" | "admin" | "owner" | "device_stopped" | "device_released";
-  email?: string; key_id?: string; key?: string; count?: number;
+  req: number; ok: boolean; error?: string; done?: "admin" | "device_stopped" | "device_released";
 };
-export type Tab = "devices" | "people" | "sessions" | "shadow" | "mcp";
+export type Tab = "sessions" | "shadow" | "mcp";
+export type SessionCalls = { n: number; review: number; deny: number; mode: string | null };
+/** How a machine stands: its calls and those blocked and held, the calls worth a look and those
+ * not yet marked, and the calls that sent sensitive values out or tried and were stopped. */
+export type Standing = {
+  calls: number; deny: number; review: number; worth: number; pending: number; out: number; stopped: number;
+  /** Its latest calls worth a look, the newest first. */
+  recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; decision: string | null; ran: boolean; leak: boolean }[];
+};
 export type Data = {
   status: "ready" | "loading" | "failed" | "none"; error: string | null; now: number;
   source: { label: string; demo: boolean }; admin: { api: string; has_token: boolean };
   actor: string; reply: Reply | null; shadow_known?: boolean;
-  devices?: Device[]; projects?: Project[]; shadow?: Shadow[]; people?: PersonRow[];
-  keys?: Key[]; events?: KeyEvent[]; sessions?: Run[];
+  devices?: Device[]; projects?: Project[]; shadow?: Shadow[]; sessions?: Run[];
+  /** Each session's calls (how many, held for the user, blocked) and the engine's mode at its latest. */
+  session_calls?: Record<string, SessionCalls>;
+  /** How each machine stands, by its ID. */
+  standing?: Record<string, Standing>;
   /** Whether the engine reads an EDR's machines, and those of them with no hooks. */
   edr_known?: boolean; edr_only?: EdrOnly[];
   /** The tab the lists open on. */
@@ -60,13 +88,6 @@ export type Data = {
 };
 
 // ---------------------------------------------------------------- words and colours
-export const PERM: Record<string, { label: string; color: string }> = {
-  bypassPermissions: { label: "확인 없이 실행", color: "var(--deny)" },
-  acceptEdits: { label: "편집 자동 수락", color: "var(--write)" },
-  plan: { label: "계획만", color: "var(--allow)" },
-  default: { label: "물어보고 실행", color: "var(--info)" },
-};
-export const PERM_KEYS = ["bypassPermissions", "acceptEdits", "plan", "default"];
 export const ENGINE: Record<string, { label: string; color: string; icon: LucideIcon }> = {
   enforce: { label: "차단", color: "var(--allow)", icon: ShieldCheck },
   shadow: { label: "시범 운영", color: "var(--review)", icon: Eye },
@@ -87,11 +108,11 @@ export const AGENT: Record<string, { label: string; color: string }> = {
 export const agentLabel = (a: string | null) => (a ? AGENT[a]?.label ?? a : "–");
 export const SOURCE: Record<string, string> = { startup: "새로 시작", resume: "이어 하기", clear: "지우고 시작", compact: "요약 뒤", fork: "갈라짐" };
 export const END: Record<string, string> = { prompt_input_exit: "종료", logout: "로그아웃", clear: "지움", resume: "이어 하기로" };
-export const EVENT: Record<string, string> = { issued: "키 발급", revoked: "회수", denied: "회수된 키 호출 거부" };
 
 // ---------------------------------------------------------------- what the page works out
 export const DAY = 24 * 60 * 60e3;
-export type Machine = Device & { name: string; state: State; running: boolean; shadow: number; projects: number };
+/** A machine the engine knows, or (`edrOnly`) one only the EDR lists, with no hooks on it. */
+export type Machine = Device & { name: string; state: State; running: boolean; shadow: number; projects: number; edrOnly?: boolean };
 
 export const hostOf = (d: { host: string | null; id: string }) => d.host ?? d.id;
 
@@ -101,7 +122,11 @@ export function derive(d: Data, windowMin: number) {
   const going = (r: Run) => !r.ended_at && r.last_seen_at != null && r.last_seen_at >= since;
   const sessions = [...(d.sessions ?? [])].sort((a, b) => Number(going(b)) - Number(going(a)) || (b.last_seen_at ?? b.created_at ?? 0) - (a.last_seen_at ?? a.created_at ?? 0));
   const live = new Set(sessions.filter(going).map((r) => r.device));
-  const shadow = d.shadow ?? [], projects = d.projects ?? [];
+  // A machine only the EDR lists goes by its EDR ID; the shadow AI seen on it is its own.
+  const edrOnly = d.edr_only ?? [];
+  const edrId = (id: string) => `edr:${id}`;
+  const shadow = (d.shadow ?? []).map((a) => (!a.device && a.edr && edrOnly.some((e) => e.id === a.edr) ? { ...a, device: edrId(a.edr) } : a));
+  const projects = d.projects ?? [];
   const count = <T,>(list: T[], key: (t: T) => string | null) => {
     const m = new Map<string, number>();
     for (const t of list) { const k = key(t); if (k) m.set(k, (m.get(k) ?? 0) + 1); }
@@ -115,6 +140,12 @@ export function derive(d: Data, windowMin: number) {
     return { ...x, name: hostOf(x), state, running, shadow: shadowOf.get(x.id) ?? 0, projects: projectsOf.get(x.id) ?? 0 };
   }).sort((a, b) => rank[a.state] - rank[b.state] || (b.last ?? 0) - (a.last ?? 0));
   const registered = machines.filter((m) => m.state !== "unregistered");
+  machines.push(...edrOnly.map((e): Machine => ({
+    id: edrId(e.id), host: e.name, os: e.os, agent: e.agent, hook_version: null,
+    registered_at: null, first_seen: null, last: e.last, sessions: 0, permission_mode: null, engine_mode: null,
+    serial: e.serial, edr: { id: e.id, status: e.status }, stopped: null,
+    name: e.name, state: "unregistered", running: false, shadow: shadowOf.get(edrId(e.id)) ?? 0, projects: 0, edrOnly: true,
+  })));
   const mcp = d.mcp ?? null;
   return {
     mcp,
@@ -123,8 +154,9 @@ export function derive(d: Data, windowMin: number) {
     now, going, sessions, machines, registered, shadow, projects,
     shadowKnown: d.shadow_known ?? false,
     edrKnown: d.edr_known ?? false, edrOnly: d.edr_only ?? [],
-    people: d.people ?? [], keys: d.keys ?? [], events: d.events ?? [],
-    unregistered: machines.length - registered.length,
+    sessionCalls: d.session_calls ?? {},
+    standing: d.standing ?? {},
+    unregistered: machines.filter((m) => !m.edrOnly).length - registered.length,
     runningSessions: sessions.filter(going).length,
     noId: sessions.filter((r) => !r.device).length,
   };

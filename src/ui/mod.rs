@@ -216,6 +216,9 @@ pub struct AppState {
     pub graph_of: Signal<Option<String>>,
     /// The setup, the main page, or the work.
     pub screen: Signal<Screen>,
+    /// The page last open before the work (the main page, or a rail's product such as
+    /// 인벤토리): the top bar's 메인 goes back to it.
+    pub page: Signal<Screen>,
     /// The sidebar is open (it folds away from its own button).
     pub sidebar: Signal<bool>,
     /// The graph or the comparison.
@@ -287,6 +290,10 @@ pub fn App() -> Element {
         } else {
             first_screen()
         }),
+        page: Signal::new(match first_screen() {
+            s @ (Screen::Home | Screen::Secrets | Screen::Inventory) => s,
+            _ => Screen::Home,
+        }),
         sidebar: Signal::new(true),
         mode: Signal::new(Mode::Graph),
         selected: Signal::new(Selection::None),
@@ -301,12 +308,20 @@ pub fn App() -> Element {
         fit: Signal::new(0),
     });
     // The session list, opened from the session's name in the top bar.
-    use_context_provider(|| flow::Picking(Signal::new(false)));
+    // VIEWER_PICK opens the session list at once, for a look at it.
+    use_context_provider(|| flow::Picking(Signal::new(std::env::var("VIEWER_PICK").is_ok())));
     use_loaders(backend.clone(), state);
     #[cfg(feature = "admin")]
     crate::admin::use_facts_loader(backend.clone(), state);
     use_menu(backend.clone(), state);
     use_window_place(state);
+    // The page open when the work opens is the one 메인 goes back to.
+    use_effect(move || {
+        let s = (state.screen)();
+        if matches!(s, Screen::Home) || s.is_product() {
+            state.page.set(s);
+        }
+    });
 
     // Dragging the line between the graph and the inspector sets the inspector's width.
     let mut dragging = use_signal(|| false);
@@ -557,7 +572,14 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
                         .last_session
                         .clone()
                         .filter(|id| list.iter().any(|s| &s.id == id));
-                    let pick = open.or(last).or_else(|| list.first().map(|s| s.id.clone()));
+                    // VIEWER_SESSION names one to open first by the start of its ID.
+                    let asked = std::env::var("VIEWER_SESSION").ok().and_then(|p| {
+                        list.iter().find(|s| s.id.starts_with(&p)).map(|s| s.id.clone())
+                    });
+                    let pick = open
+                        .or(asked)
+                        .or(last)
+                        .or_else(|| list.first().map(|s| s.id.clone()));
                     if *current.peek() != pick {
                         current.set(pick);
                     }
@@ -676,7 +698,7 @@ fn TopBar() -> Element {
             }
             span { class: "tb-logo", "W" }
             div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
-                button { class: "{seg(\"home\")}", onclick: move |_| go(Screen::Home, mode),
+                button { class: "{seg(\"home\")}", onclick: move |_| go((state.page)(), mode),
                     {line_icon(icons::HOUSE)}
                     "{HOME_LABEL}"
                 }
@@ -700,6 +722,7 @@ fn TopBar() -> Element {
             if screen == Screen::Work && mode == Mode::Graph {
                 div { class: "tb-session", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                     flow::SessionPick { class: "tb-pick" }
+                    if cfg!(feature = "admin") { flow::SessionDrop {} }
                 }
             }
             div { class: "tb-spacer" }

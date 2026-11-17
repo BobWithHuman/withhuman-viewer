@@ -1717,6 +1717,45 @@ button.primary { background: var(--c-accent); border-color: var(--c-accent); }
 .topbar .tb-pick .lb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .topbar .tb-pick .act { flex: none; display: flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px; border-radius: 5px; background: var(--af-btn); color: #f2f2f2; font-size: 11.5px; }
 .tb-icon[hidden] { display: none; }
+/* The security team's session list, dropped from the top bar. */
+.tb-session { position: relative; }
+.tb-drop-shade { position: fixed; inset: 0; z-index: 59; }
+.tb-drop { position: absolute; z-index: 60; top: 34px; left: 0; width: 720px; max-width: calc(100vw - 24px); max-height: min(560px, calc(100vh - 80px)); display: flex; flex-direction: column;
+  border: 1px solid #333; border-radius: 10px; background: #1e1e1e; box-shadow: 0 16px 40px rgb(0 0 0 / .5); overflow: hidden; user-select: text; }
+.tb-drop-find { flex: none; height: 34px; margin: 8px; padding: 0 10px; border: 1px solid #333; border-radius: 7px; background: #161616; color: #ededed; font-size: 12.5px; outline: none; }
+.tb-drop-find:focus { border-color: #3577f6; }
+.tb-drop-cols { flex: 1; min-height: 0; display: flex; border-top: 1px solid #2c2c2c; }
+.tb-drop-machines { flex: none; width: 260px; overflow-y: auto; padding: 6px; border-right: 1px solid #2c2c2c; background: #1a1a1a; }
+.tb-drop .tb-drop-machine { width: 100%; height: auto; display: flex; align-items: center; gap: 9px; padding: 7px 8px; border: 0; border-radius: 7px;
+  background: none; color: #e6e6e6; text-align: left; font-size: 12.5px; }
+.tb-drop .tb-drop-machine:hover:not(:disabled) { background: #2a2a2a; }
+.tb-drop .tb-drop-machine.on { background: #192d53; box-shadow: inset 0 0 0 1px #3577f6; }
+.tb-drop-machine .ico { flex: none; width: 15px; height: 15px; background: #9a9a9a;
+  -webkit-mask: var(--m) center / contain no-repeat; mask: var(--m) center / contain no-repeat; }
+.tb-drop-machine .ico.pc { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 5a2 2 0 0 1 2 2v8.5H4V7a2 2 0 0 1 2-2z'/%3E%3Cpath d='M2 19h20'/%3E%3C/svg%3E"); }
+.tb-drop-machine .ico.all { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='7' height='7' rx='1'/%3E%3Crect x='14' y='3' width='7' height='7' rx='1'/%3E%3Crect x='3' y='14' width='7' height='7' rx='1'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1'/%3E%3C/svg%3E"); }
+.tb-drop-machine .ico.none { --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3'/%3E%3Cpath d='M12 17h.01'/%3E%3C/svg%3E"); }
+.tb-drop-machine.on .ico { background: #8db4ff; }
+.tb-drop-machine .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tb-drop-machine .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.tb-drop-machine .p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8e8e8e; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tb-drop-machine .side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tb-drop-machine .n.red { color: #ff8b80; } .tb-drop-machine .n.amber { color: #f2c26b; }
+.tb-drop-list { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 6px; }
+.tb-drop-none { padding: 18px; text-align: center; color: #8e8e8e; font-size: 12.5px; }
+.tb-drop .tb-drop-row { width: 100%; height: auto; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-radius: 7px;
+  background: none; color: #e6e6e6; text-align: left; font-size: 12.5px; }
+.tb-drop .tb-drop-row:hover:not(:disabled) { background: #2a2a2a; }
+.tb-drop .tb-drop-row.on { background: #192d53; box-shadow: inset 0 0 0 1px #3577f6; }
+.tb-drop-row .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #5a5a5a; }
+.tb-drop-row .dot.red { background: #ff6b5e; } .tb-drop-row .dot.amber { background: #f2c26b; }
+.tb-drop-row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tb-drop-row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.tb-drop-row .p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8e8e8e; font-size: 11.5px; }
+.tb-drop-row .side { flex: none; display: flex; align-items: center; gap: 8px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tb-drop-row .t .more { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: #2e2e2e; color: #a0a0a0; font-size: 11px; font-weight: 600; }
+.tb-drop-row .n.red { color: #ff8b80; } .tb-drop-row .n.amber { color: #f2c26b; }
+.tb-drop-row .w { color: #8e8e8e; }
 .admin .home-stat:nth-child(5) .v { color: #ff9f5a; }
 .admin .home-stat:nth-child(6) .v { color: #c4c4c4; }
 .admin-mode { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px;
@@ -1972,6 +2011,10 @@ div.admin-hbar:hover { background: none; }
 .wh-record { position: relative; flex: 1; min-height: 0; min-width: 0; background: #282828; }
 .wh-record-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
 .wh-record-wait { position: absolute; inset: 0; display: grid; place-items: center; color: #8a8a8a; font-size: 13px; }
+.wh-record-fail { max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.wh-record-fail b { color: #ff8b80; font-size: 14px; font-weight: 600; }
+.wh-record-fail code { padding: 8px 12px; border-radius: 8px; background: #1e1e1e; color: #d8d8d8; font: 12px ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.wh-record-fail button { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: #3577f6; color: #fff; font-size: 12.5px; }
 
 /* The dashboards' page (web/console) in a frame filling its screen. */
 .wh-console { position: relative; flex: 1; min-height: 0; min-width: 0; height: 100%; background: #1f1f21; }

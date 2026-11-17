@@ -42,13 +42,34 @@ fn attention(graph: &Value) -> Value {
         .filter(|c| c.get("decision_mode").is_some_and(Value::is_string))
         .max_by_key(|c| c.get("decided_at").and_then(Value::as_i64))
         .and_then(|c| c.get("decision_mode").cloned());
-    json!({"risky": risky, "undecided": undecided, "from_result": from_result, "mode": mode})
+    // Each intent stated and the Calls made under it, as the database query gives them.
+    let mut nodes: Vec<&Value> = graph["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|n| n["kind"] == "Intent" || n["kind"] == "Call")
+        .collect();
+    nodes.sort_by_key(|n| n["props"]["order"].as_i64());
+    let mut intents: Vec<(Value, i64)> = Vec::new();
+    for n in nodes {
+        if n["kind"] == "Intent" {
+            if n["props"]["intent"].is_string() {
+                intents.push((n["props"]["intent"].clone(), 0));
+            }
+        } else if let Some((_, calls)) = intents.last_mut() {
+            *calls += 1;
+        }
+    }
+    json!({"risky": risky, "undecided": undecided, "from_result": from_result, "mode": mode, "intents": intents})
 }
 
 #[cfg_attr(not(feature = "admin"), allow(dead_code))]
 mod mcp;
 
 static FIXTURE: &str = include_str!("../mock/fixture.json");
+/// A made-up session of many turns, each later prompt joined to what it was written from, added
+/// to the recorded ones (`mock/make_dashboard_fixture.py --into-fixture` writes it).
+static TURNS: &str = include_str!("../mock/turns.json");
 
 pub struct Demo {
     data: Value,
@@ -68,7 +89,11 @@ impl Demo {
                 eprintln!("데모 데이터를 읽지 못했습니다 ({path}): {e}");
                 FIXTURE.to_owned()
             }),
-            Err(_) => FIXTURE.to_owned(),
+            Err(_) => {
+                let mut demo = Self::parse(FIXTURE);
+                demo.add(TURNS);
+                return demo;
+            }
         };
         Self::parse(&text)
     }
@@ -83,6 +108,22 @@ impl Demo {
             data,
             inventory: None,
             mcp: None,
+        }
+    }
+
+    /// Another fixture's sessions added, the newest first.
+    fn add(&mut self, text: &str) {
+        let Ok(more) = serde_json::from_str::<Value>(text) else {
+            return;
+        };
+        for key in ["graphs", "nodes", "calls"] {
+            if let (Some(to), Some(from)) = (self.data[key].as_object_mut(), more[key].as_object()) {
+                to.extend(from.clone());
+            }
+        }
+        if let (Some(to), Some(from)) = (self.data["sessions"].as_array_mut(), more["sessions"].as_array()) {
+            to.extend(from.iter().cloned());
+            to.sort_by_key(|s| std::cmp::Reverse(s["created_at"].as_i64()));
         }
     }
 
@@ -260,7 +301,6 @@ impl Demo {
     fn made_inventory(&self, now: i64) -> crate::model::Inventory {
         use crate::model::{
             ApiKey, Device, DeviceProject, EdrDevice, Inventory, KeyEvent, Person, SessionRun,
-            ShadowAgent,
         };
         const MIN: i64 = 60_000;
         const DAY: i64 = 24 * 60 * MIN;
@@ -429,8 +469,8 @@ impl Demo {
             },
         ];
         // The EDR lists every registered machine but one under its host name, and two machines the
-        // hooks are not on, one of which runs an agent. One machine's owner is not the person
-        // whose key it last presented.
+        // hooks are not on, one of which runs an agent. Its last scans saw Claude Code running on
+        // some of them; where no session of theirs was open then, that is shadow AI.
         let mut clients = clients;
         let mut edr = Vec::new();
         for (i, d) in clients
@@ -451,7 +491,8 @@ impl Demo {
                 status: Some(status.into()),
                 serial: d.serial.clone(),
                 last_seen: d.last_seen,
-                agent: None,
+                agent: (i % 2 == 0).then(|| "claude-code".into()),
+                running_at: (i % 2 == 0).then(|| now - (40 + 90 * i as i64) * MIN),
             });
         }
         if let Some(d) = clients.get_mut(2) {
@@ -465,6 +506,7 @@ impl Demo {
             serial: Some("C02F81KQ0D".into()),
             last_seen: Some(now - 2 * 60 * MIN),
             agent: Some("claude-code".into()),
+            running_at: Some(now - 2 * 60 * MIN),
         });
         edr.push(EdrDevice {
             agent_id: "008".into(),
@@ -474,6 +516,7 @@ impl Demo {
             serial: Some("PF3K9W2X".into()),
             last_seen: Some(now - 20 * MIN),
             agent: None,
+            running_at: None,
         });
         let project = |id: &str, path: &str, at: i64| DeviceProject {
             client_id: id.into(),
@@ -599,38 +642,6 @@ impl Demo {
             events.push(e);
         }
         events.sort_by_key(|e| std::cmp::Reverse(e.at));
-        // Projects the machines' checks found an agent in with no hooks.
-        let shadow =
-            |client: &str, user: &str, agent: &str, project: &str, seen: i64| ShadowAgent {
-                client_id: Some(client.into()),
-                user_email: Some(format!("{user}@example.com")),
-                agent: agent.into(),
-                project: Some(project.into()),
-                last_seen: Some(seen),
-            };
-        let shadow = vec![
-            shadow(
-                "personal-mock",
-                "dev.lee",
-                "codex",
-                "/Users/dev/src/scratch-codex",
-                now - 35 * MIN,
-            ),
-            shadow(
-                "platform/mac-21",
-                "ops.choi",
-                "codex",
-                "/Users/ops/src/oncall-scripts",
-                now - 5 * 60 * MIN,
-            ),
-            shadow(
-                "lab/7c1e9a2e-4f1b-4c55-9d0e-2b8f3a61c0d4",
-                "dev.park",
-                "claude-code",
-                "C:/work/legacy-batch",
-                now - 2 * DAY,
-            ),
-        ];
         Inventory {
             clients,
             projects,
@@ -638,62 +649,39 @@ impl Demo {
             keys,
             events,
             sessions,
-            shadow: Some(shadow),
+            // The engine has no check of the projects: shadow AI comes from the EDR's scans, hourly
+            // while an agent runs, a few runs a machine over the last days.
+            sightings: Some(
+                edr.iter()
+                    .filter_map(|e| Some((e, e.running_at?, e.agent.clone()?)))
+                    .flat_map(|(e, at, agent)| {
+                        [0, 1, 2, 26, 27, 74]
+                            .into_iter()
+                            .map(move |h| crate::model::EdrSighting {
+                                agent_id: e.agent_id.clone(),
+                                running_at: at - h * 60 * MIN,
+                                agent: agent.clone(),
+                                name: Some(e.name.clone()),
+                                // What the EDR tells of how it ran: a prompt given at the start,
+                                // a session taken up again, or (as on a Mac) nothing.
+                                command: match h {
+                                    0..=2 => Some(
+                                        "claude -p \"고객 목록을 CSV로 뽑아서 /tmp에 저장해줘\""
+                                            .into(),
+                                    ),
+                                    26 | 27 => Some(
+                                        "claude --resume 9f2c1a7e-5b3d-4e8a-a1c4-7d6e0f9b2c31"
+                                            .into(),
+                                    ),
+                                    _ => None,
+                                },
+                            })
+                    })
+                    .collect(),
+            ),
+            shadow: None,
             edr: Some(edr),
         }
-    }
-
-    /// The demo's key actions, so the pages can be tried: issue a key, revoke one, stop a person.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn issue_key(
-        &mut self,
-        now: i64,
-        email: &str,
-        actor: &str,
-        note: &str,
-    ) -> (String, String) {
-        let inventory = self.inventory.get_or_insert_with(Default::default);
-        let key_id = format!("k-{:04x}", (now / 1000) % 0xffff);
-        let secret = format!("whk_demo_{:x}", now);
-        if !inventory.users.iter().any(|u| u.email == email) {
-            inventory.users.push(crate::model::Person {
-                email: email.into(),
-                created_at: Some(now),
-                kind: Some("person".into()),
-            });
-        }
-        inventory.keys.push(crate::model::ApiKey {
-            key_id: key_id.clone(),
-            user_email: email.into(),
-            created_at: Some(now),
-            created_by: Some(actor.into()),
-            note: Some(note.into()).filter(|n: &String| !n.is_empty()),
-            ..Default::default()
-        });
-        inventory.events.insert(
-            0,
-            crate::model::KeyEvent {
-                kind: "issued".into(),
-                actor: Some(actor.into()),
-                user_email: Some(email.into()),
-                key_id: Some(key_id.clone()),
-                at: Some(now),
-                ..Default::default()
-            },
-        );
-        (key_id, secret)
-    }
-
-    /// Names a machine's owner, or takes the name off.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn assign_owner(&mut self, now: i64, client: &str, email: Option<&str>) -> bool {
-        let mut inv = self.inventory(now);
-        let Some(d) = inv.clients.iter_mut().find(|d| d.client_id == client) else {
-            return false;
-        };
-        d.owner_email = email.map(str::to_owned);
-        self.inventory = Some(inv);
-        true
     }
 
     /// Stops a machine, or lets it go again.
@@ -715,42 +703,6 @@ impl Demo {
         d.stop_reason = stopped.then(|| reason.to_owned());
         self.inventory = Some(inv);
         true
-    }
-
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub fn revoke(
-        &mut self,
-        now: i64,
-        key_id: Option<&str>,
-        email: Option<&str>,
-        actor: &str,
-        reason: &str,
-    ) -> usize {
-        let inventory = self.inventory.get_or_insert_with(Default::default);
-        let mut done = Vec::new();
-        for k in inventory.keys.iter_mut().filter(|k| k.revoked_at.is_none()) {
-            if key_id.is_some_and(|id| k.key_id == id) || email.is_some_and(|e| k.user_email == e) {
-                k.revoked_at = Some(now);
-                k.revoked_by = Some(actor.into());
-                k.revoke_reason = Some(reason.into());
-                done.push((k.key_id.clone(), k.user_email.clone()));
-            }
-        }
-        for (key, user) in &done {
-            inventory.events.insert(
-                0,
-                crate::model::KeyEvent {
-                    kind: "revoked".into(),
-                    actor: Some(actor.into()),
-                    reason: Some(reason.into()),
-                    user_email: Some(user.clone()),
-                    key_id: Some(key.clone()),
-                    at: Some(now),
-                    ..Default::default()
-                },
-            );
-        }
-        done.len()
     }
 
     pub fn graph(&self, session: &str) -> Result<Value, ApiError> {

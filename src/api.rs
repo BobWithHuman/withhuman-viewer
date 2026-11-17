@@ -73,12 +73,51 @@ impl Backend {
             Ok(self.demo.lock().expect("demo lock").sessions())
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres {
+                let pg = crate::pg::Postgres {
                     settings: &settings,
                     pool: &self.pg,
-                }
-                .sessions()
-                .await
+                };
+                // What was read is kept in a file beside the settings, and the next read asks only
+                // for the sessions begun or with a Call seen since a little before the latest kept.
+                let path = sessions_cache(&settings.neo4j_url);
+                let kept: Vec<Value> = std::fs::read(&path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                    .unwrap_or_default();
+                let at = |row: &Value| row["last_at"].as_i64().or(row["created_at"].as_i64());
+                let since = kept.iter().filter_map(at).max().map(|t| t - SESSIONS_OVERLAP_MS);
+                // With what was kept, the IDs of all there are, to drop those gone since.
+                let (fresh, ids) = tokio::join!(pg.sessions(since), async {
+                    match since {
+                        Some(_) => pg.session_ids().await.ok(),
+                        None => None,
+                    }
+                });
+                fresh.map(|fresh| {
+                    let mut all = match fresh {
+                        Value::Array(rows) => rows,
+                        _ => Vec::new(),
+                    };
+                    let read: std::collections::HashSet<String> = all
+                        .iter()
+                        .filter_map(|r| r["id"].as_str().map(str::to_owned))
+                        .collect();
+                    if since.is_some() {
+                        let there: Option<std::collections::HashSet<String>> =
+                            ids.map(|ids| ids.into_iter().collect());
+                        all.extend(kept.into_iter().filter(|r| {
+                            r["id"].as_str().is_some_and(|id| {
+                                !read.contains(id) && there.as_ref().is_none_or(|t| t.contains(id))
+                            })
+                        }));
+                    }
+                    all.sort_by_key(|r| std::cmp::Reverse(r["created_at"].as_i64()));
+                    all.truncate(SESSIONS_KEPT);
+                    if let Ok(text) = serde_json::to_vec(&all) {
+                        let _ = std::fs::write(&path, text);
+                    }
+                    Value::Array(all)
+                })
             } else {
                 Neo4j {
                     client: &self.client,
@@ -259,38 +298,6 @@ impl Backend {
         Ok(settings.public(&self.path))
     }
 
-    /// Issues a key to a person: its id, and the key itself, shown this once.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn issue_key(
-        &self,
-        email: &str,
-        actor: &str,
-        note: &str,
-    ) -> Result<(String, String), String> {
-        if self.current().demo {
-            return Ok(self.demo.lock().expect("demo lock").issue_key(
-                now_ms(),
-                email,
-                actor,
-                note,
-            ));
-        }
-        let answer = self
-            .admin(
-                &["v1", "admin", "users", email, "keys"],
-                json!({"actor": actor, "note": note}),
-            )
-            .await?;
-        let text = |k: &str| {
-            answer
-                .get(k)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
-        };
-        Ok((text("key_id"), text("key")))
-    }
-
     /// What the security team marked and distrusts: the engine's, where it keeps them for
     /// everyone, else this Mac's file. What the file held before the engine kept them is handed
     /// to the engine once.
@@ -418,38 +425,9 @@ impl Backend {
         .map(|_| ())
     }
 
-    /// Names the person a machine belongs to, or takes the name off (`email` none). The engine's
-    /// admin API keeps it (`POST /v1/admin/clients/{id}/owner`).
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn assign_owner(
-        &self,
-        client: &str,
-        email: Option<&str>,
-        actor: &str,
-    ) -> Result<(), String> {
-        if self.current().demo {
-            let found = self
-                .demo
-                .lock()
-                .expect("demo lock")
-                .assign_owner(now_ms(), client, email);
-            return if found {
-                Ok(())
-            } else {
-                Err("그런 기기가 없습니다.".into())
-            };
-        }
-        self.admin(
-            &["v1", "admin", "clients", client, "owner"],
-            json!({"owner": email, "actor": actor}),
-        )
-        .await
-        .map(|_| ())
-    }
-
     /// Stops a machine (every tool call from it is refused) or lets it go again. The engine's
     /// admin API keeps it (`POST /v1/admin/clients/{id}/stop`). The machine names itself, so
-    /// this holds only while its hooks keep sending its ID; a person is stopped by their keys.
+    /// this holds only while its hooks keep sending its ID.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn stop_device(
         &self,
@@ -478,39 +456,6 @@ impl Backend {
         )
         .await
         .map(|_| ())
-    }
-
-    /// Revokes one key, or every key of a person (the person's kill switch): how many were revoked.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn revoke(
-        &self,
-        key_id: Option<&str>,
-        email: Option<&str>,
-        actor: &str,
-        reason: &str,
-    ) -> Result<usize, String> {
-        if self.current().demo {
-            return Ok(self.demo.lock().expect("demo lock").revoke(
-                now_ms(),
-                key_id,
-                email,
-                actor,
-                reason,
-            ));
-        }
-        let body = json!({"actor": actor, "reason": reason});
-        let answer = match (key_id, email) {
-            (Some(id), _) => {
-                self.admin(&["v1", "admin", "keys", id, "revoke"], body)
-                    .await?
-            }
-            (None, Some(e)) => {
-                self.admin(&["v1", "admin", "users", e, "revoke"], body)
-                    .await?
-            }
-            (None, None) => return Ok(0),
-        };
-        Ok(answer.as_array().map_or(1, Vec::len))
     }
 
     /// The MCP servers the machines have set up and their tools' calls; none until the engine
@@ -611,6 +556,18 @@ impl Backend {
                 .await
             }
         };
+        if value.is_ok() && crate::pg::is_postgres(&settings) {
+            let path = sessions_cache(&settings.neo4j_url);
+            if let Some(mut kept) = std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Vec<Value>>(&bytes).ok())
+            {
+                kept.retain(|r| r["id"].as_str() != Some(session));
+                if let Ok(text) = serde_json::to_vec(&kept) {
+                    let _ = std::fs::write(&path, text);
+                }
+            }
+        }
         value
             .map(|v| v["deleted"].as_i64().unwrap_or(0))
             .map_err(|e| e.error)
@@ -792,6 +749,21 @@ fn clone_change(c: &Change) -> Change {
 const FACTS_OVERLAP_MS: i64 = 24 * 60 * 60 * 1000;
 /// As many Calls as one read of the store hands over.
 const FACTS_KEPT: usize = 50_000;
+
+/// How far before the latest session kept the next read of the sessions starts, for Calls
+/// decided after they were seen.
+const SESSIONS_OVERLAP_MS: i64 = 10 * 60 * 1000;
+/// As many sessions as one read of the store hands over.
+const SESSIONS_KEPT: usize = 5_000;
+
+/// The file a store's sessions are kept in between reads, named after the store's address.
+fn sessions_cache(url: &str) -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut hasher);
+    // The number is the rows' shape: a file of an older shape is left unread.
+    config_dir().join(format!("sessions1-{:016x}.json", hasher.finish()))
+}
 
 /// The file a store's Calls are kept in between reads, named after the store's address.
 fn facts_cache(url: &str) -> std::path::PathBuf {
