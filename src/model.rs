@@ -34,7 +34,9 @@ pub struct Session {
     /// How the engine enforced the session's last decision: `record`, `shadow` or `enforce`.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub mode: Option<String>,
-    /// Each intent the agent stated, in order, with the Calls it made under it.
+    /// Each intent the agent stated, in order, with the Calls it made under it; none when the
+    /// store says null (a session that stated none, as an older viewer kept it).
+    #[serde(deserialize_with = "null_as_empty")]
     pub intents: Vec<(Option<String>, i64)>,
 }
 
@@ -105,7 +107,11 @@ impl Session {
     fn stated(&self) -> Vec<(&str, i64)> {
         let mut out: Vec<(&str, i64)> = Vec::new();
         for (intent, calls) in &self.intents {
-            let Some(i) = intent.as_deref().map(short_intent).filter(|i| !i.is_empty()) else {
+            let Some(i) = intent
+                .as_deref()
+                .map(short_intent)
+                .filter(|i| !i.is_empty())
+            else {
                 continue;
             };
             match out.iter_mut().find(|(t, _)| *t == i) {
@@ -347,6 +353,15 @@ pub struct CallRow {
     pub ran: bool,
 }
 
+/// A list the store may hand over as null.
+fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
 /// An intent as a name: its first sentence, without the agent's `(확신도: …)`.
 pub fn short_intent(intent: &str) -> &str {
     let mut t = intent.trim();
@@ -377,9 +392,15 @@ mod tests {
         };
         assert_eq!(s.title(), "폴더 구조 파악");
         assert_eq!(s.other_intents(), ["배포 스크립트 실행", "변경 기록"]);
-        let none = super::Session { prompt: Some("이거 봐줘".into()), ..super::Session::default() };
+        let none = super::Session {
+            prompt: Some("이거 봐줘".into()),
+            ..super::Session::default()
+        };
         assert_eq!(none.title(), "이거 봐줘");
         assert!(none.other_intents().is_empty());
+        // A session that stated no intent comes with them null.
+        let read: super::Session = serde_json::from_str(r#"{"id": "s", "intents": null}"#).unwrap();
+        assert!(read.intents.is_empty());
     }
     use super::Paragraph;
 
