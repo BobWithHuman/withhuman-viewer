@@ -1,10 +1,11 @@
 import * as TT from "@radix-ui/react-tooltip";
 import { ReactFlowProvider } from "@xyflow/react";
 import { TriangleAlert } from "lucide-react";
-import { StrictMode, useSyncExternalStore } from "react";
+import { StrictMode, useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { DEMO, type RecordData } from "./data";
 import { GraphView } from "./GraphView";
+import { ONLY, cx, flagged, type Only } from "./parts";
 import "./index.css";
 
 // The page the app shows in 기록: it waits for the app to hand it a session
@@ -23,8 +24,18 @@ const useRecord = () => useSyncExternalStore((f) => { subs.add(f); return () => 
 
 function App() {
   const data = useRecord();
-  const caught = data.steps.filter((s) => s.catch).length;
-  const stopped = data.steps.filter((s) => s.verdict === "deny" || s.verdict === "rejected" || s.verdict === "review").length;
+  // A chip picked holds the graph and the timeline to its steps; picked again, lets go.
+  const [only, setOnly] = useState<Only | null>(null);
+  useEffect(() => setOnly(null), [data]);
+  const chip = (k: Only, cls: string) => {
+    const n = data.steps.filter(ONLY[k].is).length;
+    return n > 0 && (
+      <button key={k} onClick={() => setOnly(only === k ? null : k)}
+        className={cx("inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 text-[12px] font-semibold transition-colors", cls, only === k ? "ring-1 ring-current" : "opacity-90 hover:opacity-100")}>
+        {k === "outside" && <TriangleAlert className="size-3" />}{ONLY[k].label} {n}
+      </button>
+    );
+  };
   return (
     <TT.Provider>
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -37,12 +48,14 @@ function App() {
           </div>
           <div className="mt-1.5 flex items-center gap-2 text-[13px] text-mut">
             <span>{data.session.device}</span><span className="text-dim">|</span><span className="font-mono text-[12px]">세션 {data.session.id}</span>
-            {caught > 0 && <><span className="text-dim">|</span><span className="inline-flex items-center gap-1 rounded-md bg-catch/15 px-1.5 text-[12px] font-semibold text-catch"><TriangleAlert className="size-3" />원인 {caught}</span></>}
-            {stopped > 0 && <span className="inline-flex items-center gap-1 rounded-md bg-block/15 px-1.5 text-[12px] font-semibold text-block">막음·확인 {stopped}</span>}
+            {data.steps.some(flagged) && <span className="text-dim">|</span>}
+            {chip("outside", "bg-catch/15 text-catch")}
+            {chip("deny", "bg-block/15 text-block")}
+            {chip("ask", "bg-hold/15 text-hold")}
           </div>
         </header>
         <div className="mx-4 mb-4 flex min-h-0 flex-1 overflow-hidden rounded-xl bg-bg ring-1 ring-white/[.05]">
-          <ReactFlowProvider><GraphView data={data} /></ReactFlowProvider>
+          <ReactFlowProvider><GraphView data={data} only={only} setOnly={setOnly} /></ReactFlowProvider>
         </div>
       </div>
     </TT.Provider>

@@ -561,11 +561,10 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
             let mut current = state.current;
             match found {
                 Ok(list) => {
-                    // Keep the open session; else the last one opened, else the newest.
-                    let open = current
-                        .peek()
-                        .clone()
-                        .filter(|id| list.iter().any(|s| &s.id == id));
+                    // Keep the open session, even one the list leaves out (opened from another
+                    // page, a session with no start time); else the last one opened, else the
+                    // newest.
+                    let open = current.peek().clone();
                     let last = state
                         .prefs
                         .peek()
@@ -607,7 +606,10 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
             state.graph.set(Load::Loading);
             return;
         };
-        if !matches!(*state.graph.peek(), Load::Ready(_)) {
+        // Another session's graph is not shown while this one is read; the same one's stays.
+        if !matches!(*state.graph.peek(), Load::Ready(_))
+            || state.graph_of.peek().as_deref() != Some(id.as_str())
+        {
             state.graph.set(Load::Loading);
         }
         spawn(async move {

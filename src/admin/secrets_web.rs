@@ -36,7 +36,7 @@ fn verdict(m: &SecretMention) -> Option<&'static str> {
 }
 
 /// One place a value showed in its session. Only a Call says what it acted on and where it sent.
-fn mention(m: &SecretMention) -> Value {
+fn mention(m: &SecretMention, from: &str) -> Value {
     let call = in_call(m);
     let out = call && outward(m);
     json!({
@@ -46,7 +46,7 @@ fn mention(m: &SecretMention) -> Value {
         "call": call,
         "out": out,
         "held": out && held(m),
-        "why": (out && !held(m)).then(|| why_out(m)),
+        "why": (out && !held(m)).then(|| why_out(m, from)),
         "mode": m.mode,
         "tool": m.tool,
         "said": m.said,
@@ -137,7 +137,7 @@ pub(super) fn page(
                 "why": t.why,
                 "status": t.status().1,
                 "last": t.last,
-                "mentions": t.mentions.iter().map(mention).collect::<Vec<_>>(),
+                "mentions": t.mentions.iter().map(|m| mention(m, &t.from)).collect::<Vec<_>>(),
             })
         })
         .collect();

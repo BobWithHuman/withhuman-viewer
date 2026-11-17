@@ -76,12 +76,10 @@ export default function Page({ data }: { data: unknown | null }) {
       <PageHeader
         title="보안 현황"
         meta={<>
-          <span className="inline-flex items-center gap-1.5"><i className={`size-1.5 rounded-full ${d.demo ? "bg-review" : "bg-allow"}`} /><span className="max-w-64 truncate">{d.source}</span></span>
           <Badge variant="secondary" className={`gap-1 border-0 font-semibold ${mode.cls}`}><i className="size-1.5 rounded-full bg-current" />{mode.label}</Badge>
           {d.failed && <Tooltip><TooltipTrigger asChild><span><Warn>불러오기 실패</Warn></span></TooltipTrigger><TooltipContent className="max-w-80 break-words">{d.failed}</TooltipContent></Tooltip>}
           {d.refreshed && <span className="tnum">갱신 {hm(d.refreshed)}</span>}
           {d.loading && <span className="inline-flex items-center gap-1.5"><LoaderCircle className="size-3.5 animate-spin" />불러오는 중</span>}
-          {d.shared !== undefined && <Badge variant="secondary" className="border-0 font-normal text-muted-foreground">{d.shared ? "처리 기록 · 팀 공유" : "처리 기록 · 이 Mac"}</Badge>}
           {chips.map((c) => (
             <span key={c.key} className="inline-flex h-6 max-w-72 items-center gap-1.5 rounded-full bg-primary/15 pr-1 pl-2.5 text-[12px] text-primary">
               <span className="shrink-0 opacity-75">{c.label}</span>

@@ -5,12 +5,13 @@
 // machine's latest. The team marks it an attack or fine, saves its evidence as a file, or opens
 // it in 기록.
 
-import { ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageSquareText, OctagonX, ShieldAlert, SquareTerminal } from "lucide-react";
+import { ArrowUpRight, Ban, Download, FileText, Globe, Hand, LoaderCircle, MessageSquareText, OctagonX, SquareTerminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { VerdictBadge, Warn, ago, clock } from "@/kit";
+import { Code } from "@/kit/code";
 import { cn } from "@/lib/utils";
 import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, hostOf, named, toolName } from "./data";
 import type { Ask } from "./list";
@@ -30,6 +31,11 @@ function Step({ n, icon: Icon, title, tone, aside, last, children }: { n: number
     </section>
   );
 }
+/** An engine rule by what it found. */
+const RULE: Record<string, string> = {
+  "intent::match": "의도 일치", "intent::mismatch": "의도 밖", "intent::review": "의도 확인", "intent::hijack": "목표 탈취",
+  "trace::unresolved": "원인 못 찾음", "causal::instruction": "외부 지시",
+};
 const Box = ({ children, tone, className }: { children: ReactNode; tone?: string; className?: string }) => (
   <div className={cn("rounded-lg border bg-background px-3 py-2.5 text-[13px] leading-relaxed break-words whitespace-pre-wrap", className)} style={tone ? { borderColor: `color-mix(in oklab, ${tone} 55%, transparent)`, background: `color-mix(in oklab, ${tone} 9%, var(--background))` } : undefined}>{children}</div>
 );
@@ -106,7 +112,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.5fr)_minmax(280px,1fr)]">
         <div className="scroll min-h-0 overflow-y-auto p-5">
-          {read?.request?.intent && <div className="mb-4 flex items-center gap-2 text-[12px] text-muted-foreground"><span className="rounded bg-secondary px-1.5 leading-[20px]">의도</span><span className="min-w-0 truncate">{read.request.intent}</span></div>}
+          {read?.request?.intent && <div className="mb-4 flex items-start gap-2 text-[12px] text-muted-foreground"><span className="shrink-0 rounded bg-secondary px-1.5 leading-[20px] whitespace-nowrap">의도</span><span className="min-w-0 pt-px leading-[18px] break-words">{read.request.intent}</span></div>}
           <Step n={1} icon={FileText} title="읽은 것" tone={told ? "var(--catch)" : undefined}
             aside={!read ? <LoaderCircle className="size-3.5 animate-spin" /> : told ? <span className="tnum font-medium text-catch">{Math.round(told.probability * 100)}%</span> : undefined}>
             {!read && <Box className="text-muted-foreground">불러오는 중</Box>}
@@ -130,25 +136,22 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
             )}
           </Step>
 
-          <Step n={2} icon={SquareTerminal} title="하려던 행동" tone={SEV[call.sev].color} aside={<>{ACTION[call.action]?.label}<span>{call.ran ? "실행됨" : "실행 안 됨"}</span></>}>
-            <Box tone={SEV[call.sev].color} className="font-mono text-[12px]">
-              {call.tool && <span className="mr-2 rounded-md bg-secondary px-1.5 py-0.5 font-sans text-[11px] text-muted-foreground">{toolName(call.tool)}</span>}
-              {call.target ?? call.tool}
+          <Step n={2} icon={SquareTerminal} title="하려던 행동" last tone={SEV[call.sev].color} aside={<>{ACTION[call.action]?.label}<span>{call.ran ? "실행됨" : "실행 안 됨"}</span></>}>
+            <Box tone={SEV[call.sev].color} className="grid gap-1.5 whitespace-normal">
+              {call.tool && <span className="justify-self-start rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{toolName(call.tool)}</span>}
+              <Code text={call.target ?? call.tool ?? ""} tool={call.target ? call.tool : null} />
             </Box>
             {host && <div className="flex items-center gap-2 text-[12.5px]"><span className="text-muted-foreground">전송 대상</span><Globe className="size-3.5 text-muted-foreground" /><Mono>{host}</Mono></div>}
             {call.leak && (
               <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
                 <span className="rounded bg-deny/15 px-1.5 leading-[20px] font-semibold text-deny">유출된 값</span>
-                {call.leak.kinds.map((k) => <span key={k} className="rounded bg-secondary px-1.5 leading-[20px]">{k}</span>)}
+                {call.leak.kinds.map((k) => <span key={k} className="shrink-0 rounded bg-secondary px-1.5 leading-[20px] whitespace-nowrap">{k}</span>)}
                 <span className="text-muted-foreground">→</span>
                 {call.leak.places.map((p) => <Mono key={p}>{p.replace(" (MCP)", "")}</Mono>)}
               </div>
             )}
           </Step>
 
-          <Step n={3} icon={ShieldAlert} title="엔진 판정" last aside={call.rule ? <Mono>{call.rule}</Mono> : undefined}>
-            <Box>{call.reason ?? <span className="text-muted-foreground">이유 없음</span>}</Box>
-          </Step>
         </div>
 
         <div className="scroll flex min-h-0 flex-col gap-5 overflow-y-auto border-l p-5">
@@ -156,6 +159,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
             <dt className="text-muted-foreground">단말</dt><dd className="min-w-0 truncate"><Mono>{call.machine}</Mono></dd>
             <dt className="text-muted-foreground">폴더</dt><dd className="min-w-0 truncate"><Mono>{call.cwd ?? (call.folder || "–")}</Mono></dd>
             <dt className="text-muted-foreground">엔진</dt><dd>{(MODE[call.mode ?? "none"] ?? MODE.none).label}</dd>
+            {call.rule && <><dt className="text-muted-foreground">규칙</dt><dd className="min-w-0 truncate" title={call.rule}>{RULE[call.rule] ?? <Mono>{call.rule}</Mono>}</dd></>}
             {mark && <><dt className="text-muted-foreground">표시</dt><dd className="flex items-center gap-2"><span className={cn("rounded px-1.5 text-[11.5px] leading-[20px] font-semibold", MARK[mark.state].cls)}>{MARK[mark.state].label}</span><span className="tnum truncate text-[12px] text-muted-foreground">{mark.by} · {ago(mark.at)}</span></dd></>}
           </dl>
 
