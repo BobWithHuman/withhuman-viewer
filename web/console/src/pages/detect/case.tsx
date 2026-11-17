@@ -106,7 +106,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.5fr)_minmax(280px,1fr)]">
         <div className="scroll min-h-0 overflow-y-auto p-5">
-          {read?.request?.intent && <div className="mb-4 flex items-center gap-2 text-[12px] text-muted-foreground"><span className="rounded bg-secondary px-1.5 leading-[20px]">의도</span><span className="min-w-0 truncate">{read.request.intent}</span></div>}
+          {read?.request?.intent && <div className="mb-4 flex items-start gap-2 text-[12px] text-muted-foreground"><span className="shrink-0 rounded bg-secondary px-1.5 leading-[20px] whitespace-nowrap">의도</span><span className="min-w-0 pt-px leading-[18px] break-words">{read.request.intent}</span></div>}
           <Step n={1} icon={FileText} title="읽은 것" tone={told ? "var(--catch)" : undefined}
             aside={!read ? <LoaderCircle className="size-3.5 animate-spin" /> : told ? <span className="tnum font-medium text-catch">{Math.round(told.probability * 100)}%</span> : undefined}>
             {!read && <Box className="text-muted-foreground">불러오는 중</Box>}
@@ -139,7 +139,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
             {call.leak && (
               <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
                 <span className="rounded bg-deny/15 px-1.5 leading-[20px] font-semibold text-deny">유출된 값</span>
-                {call.leak.kinds.map((k) => <span key={k} className="rounded bg-secondary px-1.5 leading-[20px]">{k}</span>)}
+                {call.leak.kinds.map((k) => <span key={k} className="shrink-0 rounded bg-secondary px-1.5 leading-[20px] whitespace-nowrap">{k}</span>)}
                 <span className="text-muted-foreground">→</span>
                 {call.leak.places.map((p) => <Mono key={p}>{p.replace(" (MCP)", "")}</Mono>)}
               </div>
