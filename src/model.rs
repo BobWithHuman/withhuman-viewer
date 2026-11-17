@@ -347,6 +347,25 @@ pub struct Inventory {
     pub shadow: Option<Vec<ShadowAgent>>,
     /// The machines the EDR lists; none while the engine is not connected to one.
     pub edr: Option<Vec<EdrDevice>>,
+    /// Each EDR scan that saw a coding agent running; none while the engine keeps no such record.
+    pub sightings: Option<Vec<EdrSighting>>,
+}
+
+/// An EDR scan that saw a coding agent running on a machine.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default)]
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+pub struct EdrSighting {
+    /// The EDR's ID of the machine (`edr_devices.agent_id`).
+    pub agent_id: String,
+    /// The scan's time (ms).
+    pub running_at: i64,
+    /// `claude-code` or `codex`.
+    pub agent: String,
+    /// The machine's name then.
+    pub name: Option<String>,
+    /// The command line the agent ran with, where the EDR tells it (Linux); none elsewhere.
+    pub command: Option<String>,
 }
 
 /// An agent running where the hooks are not: a Claude Code or Codex project a machine's check
@@ -410,8 +429,11 @@ pub struct EdrDevice {
     pub status: Option<String>,
     pub serial: Option<String>,
     pub last_seen: Option<i64>,
-    /// An agent program (Claude Code, Codex) the EDR saw running on it, if any.
+    /// An agent program (Claude Code, Codex) the EDR saw on it, if any.
     pub agent: Option<String>,
+    /// When the EDR's latest process scan saw that agent running (ms); none when it was not
+    /// running at the scan, or the engine does not record it yet.
+    pub running_at: Option<i64>,
 }
 
 /// A project a machine's hooks were installed in.
@@ -535,7 +557,8 @@ pub struct McpTool {
     pub name: String,
     /// What the server tells the agent the tool does.
     pub description: String,
-    /// `read`, `write`, `delete` or `send` (out of the company).
+    /// What it does, in the engine's groups: `read`, `change`, `delete`, `send`, `transact`,
+    /// `execute`, `access`, `delegate`, or `unknown`.
     pub nature: String,
     pub calls: Vec<McpUse>,
 }

@@ -259,38 +259,6 @@ impl Backend {
         Ok(settings.public(&self.path))
     }
 
-    /// Issues a key to a person: its id, and the key itself, shown this once.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn issue_key(
-        &self,
-        email: &str,
-        actor: &str,
-        note: &str,
-    ) -> Result<(String, String), String> {
-        if self.current().demo {
-            return Ok(self.demo.lock().expect("demo lock").issue_key(
-                now_ms(),
-                email,
-                actor,
-                note,
-            ));
-        }
-        let answer = self
-            .admin(
-                &["v1", "admin", "users", email, "keys"],
-                json!({"actor": actor, "note": note}),
-            )
-            .await?;
-        let text = |k: &str| {
-            answer
-                .get(k)
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
-        };
-        Ok((text("key_id"), text("key")))
-    }
-
     /// What the security team marked and distrusts: the engine's, where it keeps them for
     /// everyone, else this Mac's file. What the file held before the engine kept them is handed
     /// to the engine once.
@@ -418,38 +386,9 @@ impl Backend {
         .map(|_| ())
     }
 
-    /// Names the person a machine belongs to, or takes the name off (`email` none). The engine's
-    /// admin API keeps it (`POST /v1/admin/clients/{id}/owner`).
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn assign_owner(
-        &self,
-        client: &str,
-        email: Option<&str>,
-        actor: &str,
-    ) -> Result<(), String> {
-        if self.current().demo {
-            let found = self
-                .demo
-                .lock()
-                .expect("demo lock")
-                .assign_owner(now_ms(), client, email);
-            return if found {
-                Ok(())
-            } else {
-                Err("그런 기기가 없습니다.".into())
-            };
-        }
-        self.admin(
-            &["v1", "admin", "clients", client, "owner"],
-            json!({"owner": email, "actor": actor}),
-        )
-        .await
-        .map(|_| ())
-    }
-
     /// Stops a machine (every tool call from it is refused) or lets it go again. The engine's
     /// admin API keeps it (`POST /v1/admin/clients/{id}/stop`). The machine names itself, so
-    /// this holds only while its hooks keep sending its ID; a person is stopped by their keys.
+    /// this holds only while its hooks keep sending its ID.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn stop_device(
         &self,
@@ -478,39 +417,6 @@ impl Backend {
         )
         .await
         .map(|_| ())
-    }
-
-    /// Revokes one key, or every key of a person (the person's kill switch): how many were revoked.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
-    pub async fn revoke(
-        &self,
-        key_id: Option<&str>,
-        email: Option<&str>,
-        actor: &str,
-        reason: &str,
-    ) -> Result<usize, String> {
-        if self.current().demo {
-            return Ok(self.demo.lock().expect("demo lock").revoke(
-                now_ms(),
-                key_id,
-                email,
-                actor,
-                reason,
-            ));
-        }
-        let body = json!({"actor": actor, "reason": reason});
-        let answer = match (key_id, email) {
-            (Some(id), _) => {
-                self.admin(&["v1", "admin", "keys", id, "revoke"], body)
-                    .await?
-            }
-            (None, Some(e)) => {
-                self.admin(&["v1", "admin", "users", e, "revoke"], body)
-                    .await?
-            }
-            (None, None) => return Ok(0),
-        };
-        Ok(answer.as_array().map_or(1, Vec::len))
     }
 
     /// The MCP servers the machines have set up and their tools' calls; none until the engine

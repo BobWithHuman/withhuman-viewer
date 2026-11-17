@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use super::main_page::DAY_MS;
-use crate::model::{McpCatalog, McpTool, McpUse};
+use crate::model::{CallFact, McpCatalog, McpInstall, McpServer, McpTool, McpUse};
 
 /// The days the tab counts and draws a tool's use over.
 const SPAN: usize = 30;
@@ -58,6 +58,86 @@ fn tool(t: &McpTool, now: i64) -> Value {
             "at": u.at, "user": u.user, "client": u.client, "target": u.target, "decision": u.decision, "ran": u.ran,
         })).collect::<Vec<_>>(),
     })
+}
+
+/// What a tool does, in the engine's groups (withhuman-core's `category.rs`), from the registry's
+/// action for its name: `read` (it reads, searches, computes or plans), `change` (it creates or
+/// updates), `delete`, `send`, `transact`, `execute` (it runs or browses), `access` or
+/// `delegate`; none when the registry cannot tell.
+fn nature(tool: &str) -> Option<&'static str> {
+    Some(match super::mcp_tools::action(tool)? {
+        "read" | "search" | "compute" | "plan" => "read",
+        "create" | "update" => "change",
+        "delete" => "delete",
+        "send" => "send",
+        "transact" => "transact",
+        "execute" | "browse" => "execute",
+        "access" => "access",
+        "delegate" => "delegate",
+        _ => return None,
+    })
+}
+
+/// The MCP servers the machines called tools of, as the engine's calls show them: each server
+/// with the machines that called it (since their first call) and the tools called, each with
+/// what the registry says it does and its calls. A tool the registry cannot tell is `unknown`.
+/// What a server offers but was never called, and where it runs, the calls do not show.
+pub(super) fn called(facts: &[CallFact]) -> McpCatalog {
+    let mut servers: BTreeMap<&str, BTreeMap<&str, Vec<McpUse>>> = BTreeMap::new();
+    for f in facts {
+        let (Some((server, op)), Some(at)) =
+            (f.tool.as_deref().and_then(crate::metro::mcp_parts), f.at)
+        else {
+            continue;
+        };
+        servers
+            .entry(server)
+            .or_default()
+            .entry(op)
+            .or_default()
+            .push(McpUse {
+                at,
+                user: String::new(),
+                client: f.client.clone().unwrap_or_default(),
+                target: f.target.clone().unwrap_or_default(),
+                decision: f.decision.clone().unwrap_or_else(|| "ALLOW".into()),
+                ran: f.ran,
+            });
+    }
+    McpCatalog {
+        servers: servers
+            .into_iter()
+            .map(|(name, tools)| {
+                let mut first: BTreeMap<&str, i64> = BTreeMap::new();
+                for u in tools.values().flatten().filter(|u| !u.client.is_empty()) {
+                    let at = first.entry(u.client.as_str()).or_insert(u.at);
+                    *at = (*at).min(u.at);
+                }
+                McpServer {
+                    name: name.into(),
+                    transport: String::new(),
+                    endpoint: String::new(),
+                    installs: first
+                        .into_iter()
+                        .map(|(client, at)| McpInstall {
+                            user: String::new(),
+                            client: client.into(),
+                            at,
+                        })
+                        .collect(),
+                    tools: tools
+                        .into_iter()
+                        .map(|(op, calls)| McpTool {
+                            name: op.into(),
+                            description: String::new(),
+                            nature: nature(op).unwrap_or("unknown").into(),
+                            calls,
+                        })
+                        .collect(),
+                }
+            })
+            .collect(),
+    }
 }
 
 /// The tab's JSON as of `now`.
@@ -187,5 +267,57 @@ mod tests {
             json!({ "allow": 1, "review": 0, "deny": 0 })
         );
         assert_eq!(page["days"][SPAN - 2]["review"], 1);
+    }
+
+    #[test]
+    fn the_servers_called_are_told_from_the_calls() {
+        let call = |tool: &str, client: &str, at: i64, decision: Option<&str>| CallFact {
+            tool: Some(tool.into()),
+            client: Some(client.into()),
+            at: Some(at),
+            decision: decision.map(str::to_owned),
+            ..CallFact::default()
+        };
+        let facts = [
+            call("mcp__slack__post_message", "a", NOW - 5, Some("DENY")),
+            call("mcp__slack__post_message", "b", NOW - 9, None),
+            call("mcp__slack__search_messages", "a", NOW - 3, Some("ALLOW")),
+            call("mcp__bank__send_money", "a", NOW - 2, Some("REVIEW")),
+            call("mcp__x__zzqq", "a", NOW - 1, None),
+            call("Bash", "a", NOW - 1, None),
+        ];
+        let c = called(&facts);
+        let names: Vec<&str> = c.servers.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["bank", "slack", "x"]);
+        let slack = &c.servers[1];
+        assert_eq!(
+            slack
+                .installs
+                .iter()
+                .map(|i| (i.client.as_str(), i.at))
+                .collect::<Vec<_>>(),
+            [("a", NOW - 5), ("b", NOW - 9)]
+        );
+        let nature =
+            |s: &McpServer, t: &str| s.tools.iter().find(|x| x.name == t).unwrap().nature.clone();
+        assert_eq!(nature(slack, "post_message"), "send");
+        assert_eq!(nature(slack, "search_messages"), "read");
+        assert_eq!(
+            nature(&c.servers[0], "send_money"),
+            "send",
+            "the registry's action for it"
+        );
+        assert_eq!(nature(&c.servers[2], "zzqq"), "unknown");
+        assert_eq!(
+            slack
+                .tools
+                .iter()
+                .find(|x| x.name == "post_message")
+                .unwrap()
+                .calls[1]
+                .decision,
+            "ALLOW",
+            "none decided reads as allowed"
+        );
     }
 }
