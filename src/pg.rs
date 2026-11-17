@@ -16,7 +16,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
-use tokio_postgres::types::ToSql;
+use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::{Client, Config};
 
 use crate::graph::{ApiError, Rows, call_row, check_idle, clip, preview, summary};
@@ -271,11 +271,17 @@ const SESSION_TABLES: [&str; 8] = [
 ];
 const EDGE_TABLES: [&str; 3] = ["token_mentions", "file_refs", "cause_edges"];
 
-/// The connection kept open between reads, made again when the settings change or it closes.
+/// The connections kept open between reads, made again when the settings change or one closes.
+/// A read takes one no other read is using, so a long one (every Call's facts) does not hold up
+/// a short one (a session's graph); a read finding all of them busy opens another, up to
+/// [`CONNECTIONS`], and past that waits on the least busy.
 #[derive(Default)]
 pub struct Pool {
-    slot: Mutex<Option<(String, Arc<Client>)>>,
+    slot: Mutex<Option<(String, Vec<Arc<Client>>)>>,
 }
+
+/// How many connections the app keeps open to the store at most.
+const CONNECTIONS: usize = 4;
 
 impl Pool {
     async fn client(&self, s: &Settings) -> Result<Arc<Client>, ApiError> {
@@ -283,20 +289,67 @@ impl Pool {
             "{}\u{1}{}\u{1}{}\u{1}{}",
             s.neo4j_url, s.database, s.user, s.password
         );
-        if let Some((k, c)) = self.slot.lock().expect("pool lock").clone()
-            && k == key
-            && !c.is_closed()
         {
-            return Ok(c);
+            let mut slot = self.slot.lock().expect("pool lock");
+            if slot.as_ref().is_some_and(|(k, _)| *k != key) {
+                *slot = None;
+            }
+            if let Some((_, open)) = slot.as_mut() {
+                open.retain(|c| !c.is_closed());
+                // Held only here: no read is using it.
+                if let Some(c) = open.iter().find(|c| Arc::strong_count(c) == 1) {
+                    return Ok(c.clone());
+                }
+                if open.len() >= CONNECTIONS
+                    && let Some(c) = open.iter().min_by_key(|c| Arc::strong_count(c))
+                {
+                    return Ok(c.clone());
+                }
+            }
         }
         let client = Arc::new(connect(config(s, true)?, &s.neo4j_url).await?);
-        *self.slot.lock().expect("pool lock") = Some((key, client.clone()));
+        let mut slot = self.slot.lock().expect("pool lock");
+        match slot.as_mut() {
+            Some((k, open)) if *k == key => open.push(client.clone()),
+            _ => *slot = Some((key, vec![client.clone()])),
+        }
         Ok(client)
     }
 
     fn forget(&self) {
         *self.slot.lock().expect("pool lock") = None;
     }
+}
+
+/// A query's argument with its type, so the query goes in one trip rather than being prepared
+/// first.
+type Param<'a> = (&'a (dyn ToSql + Sync), Type);
+
+/// Why a read failed: the store, or its answer.
+enum Fail {
+    Db(tokio_postgres::Error),
+    Read(ApiError),
+}
+
+impl From<tokio_postgres::Error> for Fail {
+    fn from(e: tokio_postgres::Error) -> Self {
+        Fail::Db(e)
+    }
+}
+
+/// The rows of `sql` on a connection, each a JSON object of its columns.
+async fn rows_on(c: &Client, sql: &str, params: &[Param<'_>]) -> Result<Rows, Fail> {
+    let wrapped = format!("SELECT coalesce(json_agg(q), '[]'::json)::text FROM ({sql}) q");
+    let found = c.query_typed(&wrapped, params).await?;
+    let text: String = found.first().map(|r| r.get(0)).unwrap_or_else(|| "[]".into());
+    serde_json::from_str(&text).map_err(|e| {
+        Fail::Read(ApiError::new(500, format!("PostgreSQL의 답을 읽지 못했습니다: {e}")))
+    })
+}
+
+/// Rows as a JSON list.
+fn all(rows: Rows) -> Value {
+    Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>())
 }
 
 /// Whether the settings point at PostgreSQL rather than Neo4j: the address is a `postgres://` URL.
@@ -403,27 +456,31 @@ pub struct Postgres<'a> {
 }
 
 impl Postgres<'_> {
-    /// The rows of `sql`, each a JSON object of its columns; a closed connection is opened again
-    /// once.
-    async fn rows(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Rows, ApiError> {
-        let wrapped = format!("SELECT coalesce(json_agg(q), '[]'::json)::text FROM ({sql}) q");
+    /// What `f` reads on one connection, its reads sent together rather than each after the last
+    /// came back; a closed connection is opened again once.
+    async fn batch<T, F, Fut>(&self, f: F) -> Result<T, ApiError>
+    where
+        F: Fn(Arc<Client>) -> Fut,
+        Fut: std::future::Future<Output = Result<T, Fail>>,
+    {
         let mut tries = 0;
         loop {
             let client = self.pool.client(self.settings).await?;
-            match client.query_one(&wrapped, params).await {
-                Ok(row) => {
-                    let text: String = row.get(0);
-                    return serde_json::from_str(&text).map_err(|e| {
-                        ApiError::new(500, format!("PostgreSQL의 답을 읽지 못했습니다: {e}"))
-                    });
-                }
-                Err(e) if e.is_closed() && tries == 0 => {
+            match f(client).await {
+                Ok(v) => return Ok(v),
+                Err(Fail::Db(e)) if e.is_closed() && tries == 0 => {
                     self.pool.forget();
                     tries += 1;
                 }
-                Err(e) => return Err(error(&e, &self.settings.neo4j_url)),
+                Err(Fail::Db(e)) => return Err(error(&e, &self.settings.neo4j_url)),
+                Err(Fail::Read(e)) => return Err(e),
             }
         }
+    }
+
+    /// The rows of `sql`, each a JSON object of its columns.
+    async fn rows(&self, sql: &str, params: &[Param<'_>]) -> Result<Rows, ApiError> {
+        self.batch(|c| async move { rows_on(&c, sql, params).await }).await
     }
 
     /// How many sessions the store holds: the settings' test.
@@ -441,7 +498,7 @@ impl Postgres<'_> {
     /// The sessions, newest first, each with its first prompt's text rather than the Request's
     /// payload.
     pub async fn sessions(&self) -> Result<Value, ApiError> {
-        let mut rows = self.rows(&SESSIONS, &[&IRREVERSIBLE]).await?;
+        let mut rows = self.rows(&SESSIONS, &[(&IRREVERSIBLE, Type::TEXT)]).await?;
         rows.sort_by_key(|r| std::cmp::Reverse(r.get("created_at").and_then(Value::as_i64)));
         for row in &mut rows {
             let request = row
@@ -465,7 +522,7 @@ impl Postgres<'_> {
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     /// Every Call's facts, or only those decided or seen since `since` (ms).
     pub async fn call_facts(&self, since: Option<i64>) -> Result<Value, ApiError> {
-        let mut rows = self.rows(&CALL_FACTS, &[&IRREVERSIBLE, &since]).await?;
+        let mut rows = self.rows(&CALL_FACTS, &[(&IRREVERSIBLE, Type::TEXT), (&since, Type::INT8)]).await?;
         for row in &mut rows {
             unescape(row, "prompt", 200);
             unescape(row, "cause", 300);
@@ -497,105 +554,101 @@ impl Postgres<'_> {
     /// (`session_marks`, `distrusted_sources`); null for an engine that keeps neither yet.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn triage(&self) -> Result<Value, ApiError> {
-        let found = self
-            .rows(
+        self.batch(|c| async move {
+            let found = rows_on(
+                &c,
                 "SELECT to_regclass('public.session_marks') IS NOT NULL \
                  AND to_regclass('public.distrusted_sources') IS NOT NULL AS ok",
                 &[],
             )
             .await?;
-        if !found
-            .first()
-            .and_then(|r| r.get("ok"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            return Ok(Value::Null);
-        }
-        let all = |rows: Rows| Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>());
-        Ok(json!({
-            "marks": all(self.rows("SELECT session_id, state, set_by, set_at FROM session_marks", &[]).await?),
-            "sources": all(self.rows(
-                "SELECT source, set_by, set_at, session_id, seq FROM distrusted_sources ORDER BY set_at DESC", &[]).await?),
-        }))
+            if !found.first().and_then(|r| r.get("ok")).and_then(Value::as_bool).unwrap_or(false) {
+                return Ok(Value::Null);
+            }
+            let (marks, sources) = tokio::try_join!(
+                rows_on(&c, "SELECT session_id, state, set_by, set_at FROM session_marks", &[]),
+                rows_on(
+                    &c,
+                    "SELECT source, set_by, set_at, session_id, seq FROM distrusted_sources ORDER BY set_at DESC",
+                    &[]
+                ),
+            )?;
+            Ok(json!({ "marks": all(marks), "sources": all(sources) }))
+        })
+        .await
     }
 
     /// The engine's agent inventory, or null for an engine that keeps none yet (no such tables).
     /// A key's hash is never read.
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn inventory(&self) -> Result<Value, ApiError> {
-        let found = self
-            .rows(
-                "SELECT to_regclass('public.clients') IS NOT NULL AS ok",
+        self.batch(|c| async move {
+            // Which tables the engine keeps: the EDR's machines and the scans that saw a coding
+            // agent running (30 days) come later than the rest.
+            let has = rows_on(
+                &c,
+                "SELECT to_regclass('public.clients') IS NOT NULL AS clients, \
+                 to_regclass('public.edr_devices') IS NOT NULL AS edr, \
+                 to_regclass('public.edr_sightings') IS NOT NULL AS sightings",
                 &[],
             )
             .await?;
-        if !found
-            .first()
-            .and_then(|r| r.get("ok"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            return Ok(Value::Null);
-        }
-        let all = |rows: Rows| Value::from(rows.into_iter().map(Value::Object).collect::<Vec<_>>());
-        // The machines the EDR lists, where the engine keeps them.
-        let has_edr = self
-            .rows(
-                "SELECT to_regclass('public.edr_devices') IS NOT NULL AS ok",
-                &[],
-            )
-            .await?
-            .first()
-            .and_then(|r| r.get("ok"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let edr = if has_edr {
-            all(self.rows("SELECT * FROM edr_devices", &[]).await?)
-        } else {
-            Value::Null
-        };
-        // Each scan that saw a coding agent running, where the engine keeps them (30 days).
-        let has_sightings = self
-            .rows(
-                "SELECT to_regclass('public.edr_sightings') IS NOT NULL AS ok",
-                &[],
-            )
-            .await?
-            .first()
-            .and_then(|r| r.get("ok"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let sightings = if has_sightings {
-            all(self
-                .rows(
-                    // Every column: an engine that keeps the command line has one more.
-                    "SELECT * FROM edr_sightings ORDER BY agent_id, running_at",
-                    &[],
-                )
-                .await?)
-        } else {
-            Value::Null
-        };
-        Ok(json!({
-            "edr": edr,
-            "sightings": sightings,
-            "clients": all(self.rows("SELECT * FROM clients", &[]).await?),
-            "projects": all(self.rows("SELECT * FROM client_projects", &[]).await?),
-            "users": all(self.rows("SELECT * FROM users", &[]).await?),
-            "keys": all(self.rows(
-                "SELECT key_id, user_email, created_at, created_by, note, last_used_at, revoked_at, revoked_by, \
-                 revoke_reason, first_denied_at, last_denied_at, denied_count FROM api_keys", &[]).await?),
-            "events": all(self.rows("SELECT * FROM key_events ORDER BY at DESC LIMIT 5000", &[]).await?),
-            "sessions": all(self.rows(
-                "SELECT session_id, client_id, user_email, start_source, permission_mode, model, created_at, \
-                 last_seen_at, ended_at, end_reason FROM sessions WHERE created_at IS NOT NULL \
-                 ORDER BY created_at DESC LIMIT 5000", &[]).await?),
-        }))
+            let has = |k: &str| has.first().and_then(|r| r.get(k)).and_then(Value::as_bool).unwrap_or(false);
+            if !has("clients") {
+                return Ok(Value::Null);
+            }
+            let (edr, sightings) = (has("edr"), has("sightings"));
+            let maybe = |on: bool, sql: &'static str| {
+                let c = c.clone();
+                async move {
+                    if on { rows_on(&c, sql, &[]).await.map(all) } else { Ok(Value::Null) }
+                }
+            };
+            let (edr, sightings, clients, projects, users, keys, events, sessions) = tokio::try_join!(
+                maybe(edr, "SELECT * FROM edr_devices"),
+                // Every column: an engine that keeps the command line has one more.
+                maybe(sightings, "SELECT * FROM edr_sightings ORDER BY agent_id, running_at"),
+                rows_on(&c, "SELECT * FROM clients", &[]),
+                rows_on(&c, "SELECT * FROM client_projects", &[]),
+                rows_on(&c, "SELECT * FROM users", &[]),
+                rows_on(
+                    &c,
+                    "SELECT key_id, user_email, created_at, created_by, note, last_used_at, revoked_at, revoked_by, \
+                     revoke_reason, first_denied_at, last_denied_at, denied_count FROM api_keys",
+                    &[]
+                ),
+                rows_on(&c, "SELECT * FROM key_events ORDER BY at DESC LIMIT 5000", &[]),
+                rows_on(
+                    &c,
+                    "SELECT session_id, client_id, user_email, start_source, permission_mode, model, created_at, \
+                     last_seen_at, ended_at, end_reason FROM sessions WHERE created_at IS NOT NULL \
+                     ORDER BY created_at DESC LIMIT 5000",
+                    &[]
+                ),
+            )?;
+            Ok(json!({
+                "edr": edr, "sightings": sightings,
+                "clients": all(clients), "projects": all(projects), "users": all(users),
+                "keys": all(keys), "events": all(events), "sessions": all(sessions),
+            }))
+        })
+        .await
     }
 
     pub async fn graph(&self, session: &str) -> Result<Value, ApiError> {
-        let mut nodes = self.rows(NODES, &[&session]).await?;
+        let (mut nodes, subgraphs, next, results, causes, tokens) = self
+            .batch(|c| async move {
+                let s: [Param; 1] = [(&session, Type::TEXT)];
+                Ok(tokio::try_join!(
+                    rows_on(&c, NODES, &s),
+                    rows_on(&c, SUBGRAPHS, &s),
+                    rows_on(&c, NEXT_EDGES, &s),
+                    rows_on(&c, RESULT_EDGES, &s),
+                    rows_on(&c, CAUSE_EDGES, &s),
+                    rows_on(&c, TOKENS, &s),
+                )?)
+            })
+            .await?;
         nodes.sort_by_key(|r| r.get("order").and_then(Value::as_i64));
         let nodes: Vec<Value> = nodes
             .into_iter()
@@ -605,9 +658,7 @@ impl Postgres<'_> {
                 json!({"kind": kind, "summary": summary(&props), "props": preview(props)})
             })
             .collect();
-        let subgraphs: Vec<Value> = self
-            .rows(SUBGRAPHS, &[&session])
-            .await?
+        let subgraphs: Vec<Value> = subgraphs
             .into_iter()
             .map(|mut row| {
                 let members = row.remove("members").unwrap_or(json!([]));
@@ -615,17 +666,17 @@ impl Postgres<'_> {
             })
             .collect();
         let mut edges: Vec<Value> = Vec::new();
-        for r in self.rows(NEXT_EDGES, &[&session]).await? {
+        for r in next {
             let (source, target) = (r["source"].clone(), r["target"].clone());
             edges.push(json!({
                 "source": source, "target": target, "type": "NEXT", "paragraph": null,
                 "props": {"via": r["via"], "edge_id": format!("{session}:{source}:{target}"), "probability": 1.0},
             }));
         }
-        for r in self.rows(RESULT_EDGES, &[&session]).await? {
+        for r in results {
             edges.push(json!({"source": r["source"], "target": r["target"], "type": "RESULT_OF", "props": {}, "paragraph": null}));
         }
-        for r in self.rows(CAUSE_EDGES, &[&session]).await? {
+        for r in causes {
             let index = r["target_index"].as_i64().unwrap_or(-1);
             let props = properties(
                 json!({"kind": "cause", "call_seq": r["call_seq"], "probability": r["probability"],
@@ -640,17 +691,24 @@ impl Postgres<'_> {
                 "paragraph": if index >= 0 { json!(index) } else { Value::Null },
             }));
         }
-        let tokens = self.rows(TOKENS, &[&session]).await?;
         Ok(json!({"nodes": nodes, "subgraphs": subgraphs, "edges": edges, "tokens": tokens}))
     }
 
     pub async fn node(&self, session: &str, seq: i64) -> Result<Value, ApiError> {
-        let Some(row) = self.rows(NODE, &[&session, &seq]).await?.into_iter().next() else {
+        let (row, paragraphs, tokens) = self
+            .batch(|c| async move {
+                let p: [Param; 2] = [(&session, Type::TEXT), (&seq, Type::INT8)];
+                Ok(tokio::try_join!(
+                    rows_on(&c, NODE, &p),
+                    rows_on(&c, PARAGRAPHS, &p),
+                    rows_on(&c, NODE_TOKENS, &p),
+                )?)
+            })
+            .await?;
+        let Some(row) = row.into_iter().next() else {
             return Ok(Value::Null);
         };
         let kind = row.get("kind").cloned().unwrap_or(Value::Null);
-        let paragraphs = self.rows(PARAGRAPHS, &[&session, &seq]).await?;
-        let tokens = self.rows(NODE_TOKENS, &[&session, &seq]).await?;
         Ok(
             json!({"kind": kind, "props": properties(row, &EDGE_COLUMNS), "paragraphs": paragraphs, "tokens": tokens}),
         )
@@ -663,7 +721,7 @@ impl Postgres<'_> {
             .map(|s| (s.clone(), Value::Array(Vec::new())))
             .collect();
         let list: Vec<&str> = sessions.iter().map(String::as_str).collect();
-        for row in self.rows(&CALLS, &[&list]).await? {
+        for row in self.rows(&CALLS, &[(&list, Type::TEXT_ARRAY)]).await? {
             let ran = row.get("ran").cloned().unwrap_or(Value::Bool(false));
             let props = properties(row, &["kind", "next_seq", "next_via", "ran"]);
             let session = props
@@ -780,6 +838,60 @@ mod tests {
             if row.get::<_, bool>(0) { "encrypted".to_owned() } else { "plain".to_owned() }
         });
         assert!(got.contains(&expect), "expected {expect}, got {got}");
+    }
+
+    /// How long each of the app's loads takes on a store, and what part the sessions' intents
+    /// add to their list. Run against the store with its password apart:
+    ///
+    /// ```sh
+    /// VIEWER_PG_URL=postgres://user@host/db VIEWER_PG_PASSWORD=… \
+    ///   cargo test -- --ignored how_long_each_load_takes --nocapture
+    /// ```
+    #[test]
+    #[ignore = "needs a PostgreSQL"]
+    fn how_long_each_load_takes() {
+        let mut s = Settings::default();
+        s.neo4j_url = std::env::var("VIEWER_PG_URL").expect("VIEWER_PG_URL");
+        s.password = std::env::var("VIEWER_PG_PASSWORD").unwrap_or_default();
+        let pool = Pool::default();
+        let pg = Postgres { settings: &s, pool: &pool };
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let size = |v: &Value| v.as_array().map_or(0, Vec::len);
+        let time = |what: &str, f: &dyn Fn() -> Result<Value, ApiError>| {
+            let at = std::time::Instant::now();
+            let got = f();
+            let ms = at.elapsed().as_millis();
+            match got {
+                Ok(v) => println!("{what:<28} {ms:>7} ms  {:>7} rows  {:>6} KB", size(&v), v.to_string().len() / 1024),
+                Err(e) => println!("{what:<28} {ms:>7} ms  failed: {}", e.error),
+            }
+        };
+        time("connect", &|| rt.block_on(pg.count_sessions()).map(|n| json!([n])));
+        time("one trip (SELECT 1)", &|| rt.block_on(pg.rows("SELECT 1 AS one", &[])).map(all));
+        time("sessions", &|| rt.block_on(pg.sessions()));
+        let counted = format!("SELECT count(*) AS n FROM ({}) q", *SESSIONS);
+        time("sessions, server only", &|| rt.block_on(pg.rows(&counted, &[(&IRREVERSIBLE, Type::TEXT)])).map(all));
+        let plain = SESSIONS.replace(
+            &SESSIONS[SESSIONS.find("       -- Each intent stated").unwrap()..SESSIONS.find(" AS intents,").unwrap() + 12],
+            "",
+        );
+        time("sessions without intents", &|| {
+            rt.block_on(pg.rows(&plain, &[(&IRREVERSIBLE, Type::TEXT)])).map(all)
+        });
+        time("call facts, all", &|| rt.block_on(pg.call_facts(None)));
+        let day = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64 - 24 * 3600 * 1000);
+        time("call facts, last day", &|| rt.block_on(pg.call_facts(Some(day))));
+        time("secrets", &|| rt.block_on(pg.secrets()));
+        time("triage", &|| rt.block_on(pg.triage()));
+        time("inventory", &|| rt.block_on(pg.inventory()));
+        let newest = rt
+            .block_on(pg.sessions())
+            .ok()
+            .and_then(|v| v[0]["id"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        time("graph of the newest", &|| rt.block_on(pg.graph(&newest)));
     }
 
     /// The store answers as the demo does for the same graph. Load a PostgreSQL holding the
