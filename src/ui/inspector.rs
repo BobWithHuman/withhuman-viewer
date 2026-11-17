@@ -37,7 +37,7 @@ fn rule_text(rule: &str) -> Option<&'static str> {
 pub(super) fn link_text(link: &str) -> &str {
     match link {
         "request" => "사용자 요청의 다음 단계",
-        "segment" => "도구 결과의 내용",
+        "segment" => "도구 응답의 내용",
         "none" => "요청·결과와 무관",
         other => other,
     }
@@ -52,7 +52,7 @@ pub(super) fn breach_text(breach: &str) -> &str {
         "unconfirmed_irreversible" => "되돌릴 수 없는 작업을 묻지 않고 함",
         "security_change" => "권한·인증·보안 설정을 바꿈",
         "out_of_scope_access" => "요청 범위 밖 시스템·계정에 접근",
-        "hijacked_goal" => "도구 결과가 끌어들인 새 목표를 따름",
+        "hijacked_goal" => "도구 응답이 끌어들인 새 목표를 따름",
         other => other,
     }
 }
@@ -163,7 +163,7 @@ pub fn Inspector() -> Element {
         Selection::None => rsx! {
             div { class: "empty-state",
                 p { "노드를 누르면 여기에 자세한 내용이 나옵니다." }
-                p { class: "muted", "역(Call)을 누르면 그 Call이 어디서 비롯됐는지, 사용자 요청까지 이어진 노선만 남습니다. 지선 머리의 인용을 누르면 그 도구 결과의 문단을 봅니다." }
+                p { class: "muted", "역(Call)을 누르면 그 Call이 어디서 비롯됐는지, 사용자 요청까지 이어진 노선만 남습니다. 지선 머리의 인용을 누르면 그 도구 응답의 문단을 봅니다." }
             }
         },
         Selection::Node(seq) => {
@@ -390,7 +390,7 @@ fn Cause(model: Arc<Model>, trace: Value) -> Element {
             }
         }
         if !segments.is_empty() {
-            h3 { "원인이 된 도구 결과" }
+            h3 { "원인이 된 도구 응답" }
             for (seq, paragraph, p) in segments {
                 div { class: "cause-row",
                     button { class: "link", onclick: move |_| state.go_to(seq),

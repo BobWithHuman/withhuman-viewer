@@ -28,12 +28,29 @@ static OUTWARD: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid regex")
 });
 
-/// Whether a Call sends what it holds outside: a fetch, an MCP tool, or a command that reaches out.
+/// Whether the value is whom the Call sends to (an account money goes to, an address mail goes
+/// to) rather than what it sends: the masked value's visible start and end match the recipient.
+fn is_recipient(m: &SecretMention) -> bool {
+    let (Some(value), Some(to)) = (m.text.as_deref(), m.recipient.as_deref()) else {
+        return false;
+    };
+    let parts: Vec<&str> = value.split(['*', '…']).filter(|p| !p.is_empty()).collect();
+    let (Some(head), Some(tail)) = (parts.first(), parts.last()) else {
+        return false;
+    };
+    let to: String = to.chars().filter(|c| !c.is_whitespace()).collect();
+    head.len() + tail.len() >= 4 && to.starts_with(head) && to.ends_with(tail)
+}
+
+/// Whether a Call sends the value outside: a fetch, an MCP tool that sends, or a command that
+/// reaches out, with the value as what it sends and not as whom it sends to.
 pub(super) fn outward(m: &SecretMention) -> bool {
     let tool = m.tool.as_deref().unwrap_or("");
-    tool == "WebFetch"
-        || crate::metro::mcp_parts(tool).is_some_and(|(_, name)| super::mcp_tools::sends_out(name))
-        || (tool == "Bash" && m.target.as_deref().is_some_and(|t| OUTWARD.is_match(t)))
+    !is_recipient(m)
+        && (tool == "WebFetch"
+            || crate::metro::mcp_parts(tool)
+                .is_some_and(|(_, name)| super::mcp_tools::sends_out(name))
+            || (tool == "Bash" && m.target.as_deref().is_some_and(|t| OUTWARD.is_match(t))))
 }
 
 /// A Call the agent put the value in.
@@ -65,7 +82,7 @@ pub(super) fn node_label(m: &SecretMention) -> &'static str {
         (Some("Request"), _) => "사용자 요청",
         (Some("Call"), _) => "호출",
         (_, Some("agent")) => "에이전트의 말",
-        (Some("Segment" | "Error"), _) => "도구 결과",
+        (Some("Segment" | "Error"), _) => "도구 응답",
         _ => "기록",
     }
 }
@@ -145,9 +162,9 @@ impl Trail {
             (3, "out")
         } else if self.out_stopped > 0 {
             (2, "blocked")
-        } else if self.calls > 0 {
-            (1, "used")
         } else {
+            // A value put in a Call that sent nothing out is no more than one seen: the team
+            // has nothing to do about it.
             (0, "seen")
         }
     }
@@ -201,13 +218,45 @@ fn trails(mentions: &[SecretMention]) -> Vec<Trail> {
     list
 }
 
+/// A Call that sent sensitive values out and was not kept from running: the values' kinds and
+/// where they went.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct Leak {
+    pub kinds: Vec<String>,
+    pub places: Vec<String>,
+}
+
+/// Every Call that sent a value out, by session and number, as 메인 puts them in its queue.
+pub(super) fn leaks(all: &[SecretMention]) -> HashMap<(String, i64), Leak> {
+    let mut by: HashMap<(String, i64), Leak> = HashMap::new();
+    for m in all.iter().filter(|m| in_call(m) && outward(m) && !held(m)) {
+        let leak = by.entry((m.session.clone(), m.seq)).or_default();
+        let kind = kind_label(m.kind.as_deref().unwrap_or_default()).to_owned();
+        if !leak.kinds.contains(&kind) {
+            leak.kinds.push(kind);
+        }
+        let place = destination(m);
+        if !leak.places.contains(&place) {
+            leak.places.push(place);
+        }
+    }
+    by
+}
+
 /// Whether a Call holding a value was kept from running: stopped, or held and not let through.
 pub(super) fn held(m: &SecretMention) -> bool {
     m.decision.as_deref() == Some("DENY") || (m.decision.as_deref() == Some("REVIEW") && !m.ran)
 }
 
+/// A tool name that names nothing: what a client sends when it does not know the tool.
+fn named(tool: &Option<String>) -> Option<String> {
+    tool.clone()
+        .filter(|t| !t.trim().is_empty() && !t.eq_ignore_ascii_case("unknown"))
+}
+
 /// The document or tool result a value first came out of: the file, URL or command of its first
-/// mention. None for a value a person or the agent wrote first.
+/// mention, else of the Call that result answered, else that Call's or the result's tool. None
+/// for a value a person or the agent wrote first.
 pub(super) fn source_of(t: &Trail) -> Option<String> {
     if t.from != "external" {
         return None;
@@ -217,9 +266,17 @@ pub(super) fn source_of(t: &Trail) -> Option<String> {
         first
             .target
             .clone()
-            .or_else(|| first.tool.clone())
-            .unwrap_or_else(|| "알 수 없는 곳".into()),
+            .or_else(|| first.by_target.clone())
+            .or_else(|| named(&first.by_tool))
+            .or_else(|| named(&first.tool))
+            .unwrap_or_else(|| "도구 모름".into()),
     )
+}
+
+/// The tool a value first came out of, by the same reading as [`source_of`].
+pub(super) fn source_tool(t: &Trail) -> Option<String> {
+    let first = t.mentions.first()?;
+    named(&first.by_tool).or_else(|| named(&first.tool))
 }
 
 #[component]
@@ -235,16 +292,16 @@ pub fn Secrets() -> Element {
             async move { (b.secrets().await, now_ms()) }
         }
     });
-    // Whose each session and machine is, from the inventory; unknown where the engine keeps none.
+    // The machines' names, from the inventory; their IDs where the engine keeps none.
     let inventory = use_resource(move || {
         let b = backend.clone();
         let _ = (state.reload)();
         let _ = (state.public)();
         async move { b.inventory().await.ok().flatten() }
     });
-    let owners = match &*inventory.read() {
-        Some(Some(inv)) => super::secrets_web::Owners::of(inv),
-        _ => super::secrets_web::Owners::default(),
+    let hosts = match &*inventory.read() {
+        Some(Some(inv)) => super::secrets_web::Hosts::of(inv),
+        _ => super::secrets_web::Hosts::default(),
     };
     let p = (state.public)();
     let titles: HashMap<String, String> = match &*state.sessions.read() {
@@ -263,7 +320,7 @@ pub fn Secrets() -> Element {
     let data = super::secrets_web::page(
         &trails(&all),
         &titles,
-        &owners,
+        &hosts,
         &super::secrets_web::Head {
             now: now_ms(),
             loaded,
@@ -324,6 +381,38 @@ mod tests {
         assert_eq!(t.from, "external", "it first came from a tool result");
         assert_eq!((t.calls, t.out_ran, t.out_stopped), (2, 1, 0));
         assert_eq!(t.status().1, "out");
+    }
+
+    #[test]
+    fn the_account_money_is_sent_to_is_not_a_value_sent_out() {
+        let mut pay = seen(4, 40, "external", "Call");
+        pay.tool = Some("mcp__bank__send_money".into());
+        pay.text = Some("SE35****0003".into());
+        pay.recipient = Some("SE3550000000054910000003".into());
+        assert!(!outward(&pay), "the IBAN is whom it pays");
+        pay.recipient = Some("GB29NWBK60161331926819".into());
+        assert!(
+            outward(&pay),
+            "another account's number in the payment is sent"
+        );
+    }
+
+    #[test]
+    fn a_result_that_names_no_tool_is_named_by_the_call_it_answered() {
+        // A client sent the result with the tool "unknown" and no target; the Call it
+        // answered read a file.
+        let mut read = seen(2, 20, "external", "Segment");
+        read.tool = Some("unknown".into());
+        read.by_tool = Some("Read".into());
+        read.by_target = Some("/repo/config.json".into());
+        let list = trails(&[read.clone()]);
+        assert_eq!(source_of(&list[0]).as_deref(), Some("/repo/config.json"));
+        assert_eq!(source_tool(&list[0]).as_deref(), Some("Read"));
+        // With nothing to tell, it is said so, not "unknown".
+        read.by_tool = None;
+        read.by_target = None;
+        let list = trails(&[read]);
+        assert_eq!(source_of(&list[0]).as_deref(), Some("도구 모름"));
     }
 
     #[test]

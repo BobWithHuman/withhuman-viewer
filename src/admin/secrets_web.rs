@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::main_page::NO_NAME;
 use super::secrets::{
-    Trail, destination, held, in_call, kind_label, node_label, outward, source_of,
+    Trail, destination, held, in_call, kind_label, node_label, outward, source_of, source_tool,
 };
 use crate::model::SecretMention;
 
@@ -45,53 +45,35 @@ fn mention(m: &SecretMention) -> Value {
         "call": call,
         "out": out,
         "held": out && held(m),
+        "tool": m.tool,
+        "said": m.said,
         "what": call.then(|| m.target.clone().or_else(|| m.tool.clone())).flatten(),
         "place": out.then(|| destination(m)),
         "verdict": verdict(m),
     })
 }
 
-/// Whose the sessions and machines are, and the machines' names, as the inventory tells.
+/// The machines' names (host names) by client ID, as the inventory tells.
 #[derive(Default)]
-pub(super) struct Owners {
-    by_session: HashMap<String, String>,
-    by_machine: HashMap<String, String>,
-    pub(super) host: HashMap<String, String>,
-}
+pub(super) struct Hosts(HashMap<String, String>);
 
-impl Owners {
+impl Hosts {
     pub(super) fn of(inv: &crate::model::Inventory) -> Self {
-        let mut owners = Self::default();
-        for d in &inv.clients {
-            if let Some(user) = &d.user_email {
-                owners.by_machine.insert(d.client_id.clone(), user.clone());
-            }
-            if let Some(host) = &d.hostname {
-                owners.host.insert(d.client_id.clone(), host.clone());
-            }
-        }
-        for r in &inv.sessions {
-            if let Some(user) = &r.user_email {
-                owners.by_session.insert(r.session_id.clone(), user.clone());
-            }
-        }
-        owners
-    }
-
-    /// The person a session is: the one its session row names, else its machine's.
-    pub(super) fn user(&self, session: &str, machine: &str) -> Option<&String> {
-        self.by_session
-            .get(session)
-            .or_else(|| self.by_machine.get(machine))
+        Self(
+            inv.clients
+                .iter()
+                .filter_map(|d| Some((d.client_id.clone(), d.hostname.clone()?)))
+                .collect(),
+        )
     }
 }
 
-/// The page's data: the trails, the worst first, each with its session's title, whose it is and
-/// its machine's name.
+/// The page's data: the trails, the worst first, each with its session's title and its
+/// machine's name.
 pub(super) fn page(
     trails: &[Trail],
     titles: &HashMap<String, String>,
-    owners: &Owners,
+    hosts: &Hosts,
     head: &Head,
 ) -> String {
     let trails: Vec<Value> = trails
@@ -107,10 +89,9 @@ pub(super) fn page(
                 "text": t.text,
                 "from": t.from,
                 "source": source,
-                "sourceTool": source.as_ref().and_then(|_| t.mentions.first()?.tool.clone()),
+                "sourceTool": source.as_ref().and_then(|_| source_tool(t)),
                 "client": if t.client.is_empty() { NO_NAME } else { &t.client },
-                "user": owners.user(&t.session, &t.client),
-                "host": owners.host.get(&t.client),
+                "host": hosts.0.get(&t.client),
                 "calls": t.calls,
                 "outRan": t.out_ran,
                 "outStopped": t.out_stopped,

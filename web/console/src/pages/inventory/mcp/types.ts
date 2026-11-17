@@ -33,7 +33,7 @@ type Column = Verdict | "none";
 export const COLUMNS: Column[] = ["allow", "review", "deny", "none"];
 export const COLUMN: Record<Column, { label: string; color: string }> = {
   allow: { label: "허용", color: VERDICT.allow.color },
-  review: { label: "확인 요청", color: VERDICT.review.color },
+  review: { label: "사용자 확인", color: VERDICT.review.color },
   deny: { label: "차단", color: VERDICT.deny.color },
   none: { label: "호출 없음", color: "var(--info)" },
 };

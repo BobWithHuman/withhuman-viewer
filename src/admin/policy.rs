@@ -497,7 +497,7 @@ pub fn Policy() -> Element {
                         h2 { "사전 승인 정책" }
                         span { class: "n", "{d.approvals.len()}" }
                     }
-                    p { class: "admin-about", "여기에 맞는 행동은 되돌릴 수 없더라도 사람에게 묻지 않고 실행합니다(안내서 원칙 ④, 표 2-5의 사전 승인 정책). 자주 반복되는 정당한 작업을 빼서 확인 요청을 줄이는 데 씁니다." }
+                    p { class: "admin-about", "여기에 맞는 행동은 되돌릴 수 없더라도 사람에게 묻지 않고 실행합니다(안내서 원칙 ④, 표 2-5의 사전 승인 정책). 자주 반복되는 정당한 작업을 빼서 사용자 확인을 줄이는 데 씁니다." }
                     div { class: "admin-card admin-form",
                         div { class: "admin-form-row",
                             label { span { "도구" }
@@ -541,7 +541,7 @@ pub fn Policy() -> Element {
                             } else if form() == Approval::default() {
                                 span { "도구, 대상, 폴더, 단말 중 하나라도 정하면, 이 규칙이 있었다면 무엇이 묻지 않고 실행됐을지 기록에 대어 보여 줍니다." }
                             } else {
-                                span { "{period} 기록에 대어 보면: 확인 요청 " strong { "{preview.asked}건" } "이 묻지 않고 실행되고, 엔진이 차단한 호출 " strong { "{preview.stopped}건" } "도 허용됩니다." }
+                                span { "{period} 기록에 대어 보면: 사용자 확인 " strong { "{preview.asked}건" } "이 묻지 않고 실행되고, 엔진이 차단한 호출 " strong { "{preview.stopped}건" } "도 허용됩니다." }
                                 if preview.attacks > 0 {
                                     span { class: "warn", "그중 {preview.attacks}건은 공격(목표 탈취·외부 전송·안전장치 변경)으로 막힌 호출입니다. 범위를 좁히세요." }
                                 }
@@ -574,7 +574,7 @@ pub fn Policy() -> Element {
                                         div { class: "body",
                                             strong { "{rule.describe()}" }
                                             if !rule.note.is_empty() { span { class: "note", "{rule.note}" } }
-                                            span { class: "effect", "{period}: 확인 요청 {e.asked}건 생략, 차단 {e.stopped}건 허용" }
+                                            span { class: "effect", "{period}: 사용자 확인 {e.asked}건 생략, 차단 {e.stopped}건 허용" }
                                             if e.attacks > 0 { span { class: "warn", "공격으로 막힌 호출 {e.attacks}건까지 허용합니다" } }
                                         }
                                         button {

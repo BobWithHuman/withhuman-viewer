@@ -16,7 +16,7 @@
 //! The kind of action ([`action_of`]) is read off the tool's name and target here, until the
 //! engine tells which of its questions it asked a Call.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{Value, json};
 
@@ -36,10 +36,10 @@ pub(super) struct Read<'a> {
     pub refreshed: Option<i64>,
     /// What the team marked each session as, and the sources it distrusts.
     pub triage: &'a super::triage::Store,
-    /// Whose the sessions and machines are, and the machines to tell the team about: those
-    /// newly registered and those not heard from, as [`alerts`] lists them.
-    pub owners: &'a super::secrets_web::Owners,
+    /// The machines to tell the team about, as [`alerts`] lists them.
     pub alerts: &'a Value,
+    /// The Calls that sent sensitive values out, by session and number.
+    pub leaks: &'a HashMap<(String, i64), super::secrets::Leak>,
     /// The case opened, as [`super::case::case`] read it.
     pub case: Option<&'a Value>,
     /// What the last save of a file said.
@@ -138,16 +138,17 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
 }
 
 /// A Call worth a look, as the page lists and counts it.
-fn call(f: &CallFact, severity: Severity, owners: &super::secrets_web::Owners) -> Value {
+fn call(f: &CallFact, severity: Severity, leak: Option<&super::secrets::Leak>) -> Value {
     json!({
-        "user": owners.user(&f.session, f.client.as_deref().unwrap_or_default()),
+        "leak": leak.map(|l| json!({ "kinds": l.kinds, "places": l.places })),
         "session": f.session,
         "seq": f.seq,
         "at": f.at,
         "machine": machine_of_fact(f),
         "verdict": decision_key(f).to_lowercase(),
         "sev": severity.key(),
-        "kind": detection_kind(f),
+        // A Call the engine let through that sent values out is worth a look for that.
+        "kind": detection_kind(f).or_else(|| leak.map(|_| "secret_out".to_owned())),
         "action": action_of(f),
         "cause": f.cause,
         "source": source_of(f),
@@ -248,8 +249,9 @@ pub(super) fn data(read: &Read) -> String {
         {
             slot.latest = Some((at, mode.clone()));
         }
-        if let Some(severity) = Severity::of(f) {
-            calls.push(call(f, severity, read.owners));
+        let leak = read.leaks.get(&(f.session.clone(), f.seq));
+        if let Some(severity) = Severity::of(f).or(leak.map(|_| Severity::Critical)) {
+            calls.push(call(f, severity, leak));
         }
     }
     let cover: Vec<Value> = slots
@@ -317,8 +319,8 @@ mod tests {
             sessions: &[],
             refreshed: Some(9),
             triage: &crate::admin::triage::Store::default(),
-            owners: &crate::admin::secrets_web::Owners::default(),
             alerts: &Value::Null,
+            leaks: &HashMap::new(),
             case: None,
             saved: None,
             loading: false,

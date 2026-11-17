@@ -5,28 +5,28 @@
 // as the engine keeps it, and a place it showed opens in 기록.
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowUpRight, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, FileText, Globe, Laptop, MessageSquareText, Search, Send, ShieldAlert, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { send } from "@/bridge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, VerdictBadge, ago, clock, People, Person } from "@/kit";
+import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, ago, clock } from "@/kit";
 import { cn } from "@/lib/utils";
 import {
-  CALL_VERDICT, CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values,
-  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Mention, type Source, type Status, type Trail, type Value,
+  CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, valueKey,
+  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Source, type Status, type Trail, type Value,
 } from "./secrets/data";
 import { Flow } from "./secrets/flow";
 import { SourceBars, parts } from "./secrets/sources";
 
 const DAY = 24 * 3600e3;
 const PERIODS: [string, string][] = [["1", "24시간"], ["7", "7일"], ["30", "30일"], ["all", "전체"]];
-const RANK: Record<Status, number> = { out: 3, blocked: 2, used: 1, seen: 0 };
+const RANK: Record<Status, number> = { out: 3, blocked: 2, seen: 0 };
 type Tab = "values" | "sessions" | "sources";
 /** What a figure pressed leaves on the page: every value, those put in a prompt, those a session
  * tried to send out, or those that came out of a document or a tool result. */
@@ -37,9 +37,9 @@ const FOCUS: Record<Focus, (t: Trail) => boolean> = {
   tries: (t) => t.mentions.some((m) => m.out),
   sources: (t) => !!t.source,
 };
-type Open = { value: Value } | { trail: Trail } | { attempt: Attempt } | { source: Source } | null;
-type Split = "kind" | "place" | "client";
-const SPLITS: [Split, string][] = [["kind", "종류"], ["place", "보낸 곳"], ["client", "단말"]];
+type Open = { value: Value } | { attempt: Attempt } | { source: Source } | null;
+type Split = "kind" | "source" | "place" | "client";
+const SPLITS: [Split, string][] = [["kind", "종류"], ["source", "출처"], ["place", "전송 대상"], ["client", "단말"]];
 
 /** Asks the app to show a place a value was in on the route map of 기록. */
 const openInRecord = (session: string, seq: number) => send("secrets", { type: "open", session, seq });
@@ -98,17 +98,23 @@ export default function Page({ data }: { data: unknown | null }) {
   // picked in one stays in view beside what was not.
   const q = query.trim().toLowerCase();
   const shown = useMemo(
-    () => focused.filter((t) => passes(t, filter) && (!q || [t.text, t.kind, t.title, t.client, t.host, t.user, t.source, t.session].some((s) => s?.toLowerCase().includes(q)))),
+    () => focused.filter((t) => passes(t, filter) && (!q || [t.text, t.kind, t.title, t.client, t.host, t.source, t.session].some((s) => s?.toLowerCase().includes(q)))),
     [focused, filter, q],
   );
   const flowTrails = useMemo(() => focused.filter((t) => passes(t, filter, ["from", "source", "category", "status"])), [focused, filter]);
   const ended = byStatus(flowTrails);
   const flowSources = useMemo(() => sources(flowTrails), [flowTrails]);
   const splitBars = useMemo(
-    () => bars(focused.filter((t) => passes(t, filter, [split])), (t) => (split === "kind" ? [t.kind] : split === "client" ? [t.client] : placesOf(t))),
+    () => bars(focused.filter((t) => passes(t, filter, [split])), (t) => (split === "kind" ? [t.kind] : split === "client" ? [t.client] : split === "source" ? [t.source ?? FROM[fromOf(t)].label] : placesOf(t))),
     [focused, filter, split],
   );
   const shownValues = useMemo(() => values(shown), [shown]);
+  // Every session each value showed in, over all time, for "where else".
+  const byValue = useMemo(() => {
+    const m = new Map<string, Trail[]>();
+    for (const t of d.trails) m.set(valueKey(t), [...(m.get(valueKey(t)) ?? []), t]);
+    return m;
+  }, [d.trails]);
   const shownTries = useMemo(() => attempts(shown), [shown]);
   const shownFrom = useMemo(() => sources(shown), [shown]);
   const chips = (Object.keys(filter) as Dim[]).filter((k) => filter[k] !== undefined);
@@ -133,22 +139,22 @@ export default function Page({ data }: { data: unknown | null }) {
 
       <div className="scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-6 pb-6">
         <div className="grid shrink-0 grid-cols-4 gap-4">
-          <Stat label="드러난 값" icon={ShieldAlert} value={values(inPeriod).length} unit={`개 · 드러난 곳 ${inPeriod.length}`} delta={delta((l) => values(l).length)}
+          <Stat label="탐지된 민감정보" icon={ShieldAlert} value={values(inPeriod).length} unit={`개 · 노출 ${inPeriod.length}회`} delta={delta((l) => values(l).length)}
             active={focus === "all"} onClick={() => only("all", "values")} />
-          <Stat label="프롬프트에 넣음" icon={MessageSquareText} value={prompted.length}
+          <Stat label="사용자 입력" icon={MessageSquareText} value={prompted.length}
             unit={`회 · 세션 ${new Set(prompted.map((t) => t.session)).size} · 단말 ${new Set(prompted.map((t) => t.client)).size}`}
             delta={delta((l) => l.filter((t) => fromOf(t) === "user").length)}
             active={focus === "prompt"} onClick={() => only("prompt", "values")} />
-          <Stat label="유출 시도 세션" icon={Send} value={tries.length} tone={tries.some((a) => a.ran > 0) ? "var(--deny)" : undefined}
-            unit={`개 · 나감 ${tries.filter((a) => a.ran > 0).length} · 막힘 ${tries.filter((a) => a.ran === 0).length}`}
+          <Stat label="유출 시도" icon={Send} value={tries.length} tone={tries.some((a) => a.ran > 0) ? "var(--deny)" : undefined}
+            unit={`개 · 유출 ${tries.filter((a) => a.ran > 0).length} · 차단 ${tries.filter((a) => a.ran === 0).length}`}
             active={focus === "tries"} onClick={() => only("tries", "sessions")} />
-          <Stat label="값을 읽어 온 곳" icon={FileText} value={from.length} unit={`곳 · 값 ${from.reduce((a, s) => a + s.trails.length, 0)}`}
+          <Stat label="출처" icon={FileText} value={from.length} unit={`곳 · 값 ${from.reduce((a, s) => a + s.trails.length, 0)}`}
             active={focus === "sources"} onClick={() => only("sources", "values")} />
         </div>
 
         <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_340px] gap-4 min-[1600px]:grid-cols-[minmax(0,1fr)_400px]">
           {focus === "sources" ? (
-            <Panel title="값을 읽어 온 곳" count={flowSources.length} aside={<Legend items={STATUSES.map((k) => ({ label: STATUS[k].label, color: STATUS[k].color, value: ended[k] }))} />}>
+            <Panel title="출처" count={flowSources.length} aside={<Legend items={STATUSES.map((k) => ({ label: STATUS[k].label, color: STATUS[k].color, value: ended[k] }))} />}>
               <SourceBars sources={flowSources} picked={filter.source} height={flowHeight} onPick={(name) => setFilter({ ...filter, source: filter.source === name ? undefined : name })} />
             </Panel>
           ) : (
@@ -170,7 +176,7 @@ export default function Page({ data }: { data: unknown | null }) {
           title={
             <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
               <TabsList className="-ml-1">
-                {([["values", "값", shownValues.length], ["sessions", "유출 시도 세션", shownTries.length], ["sources", "읽어 온 곳", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
+                {([["values", "값", shownValues.length], ["sessions", "유출 시도", shownTries.length], ["sources", "출처", shownFrom.length]] as [Tab, string, number][]).map(([v, l, n]) => (
                   <TabsTrigger key={v} value={v} className="gap-1.5 px-2.5 text-[12.5px]">{l}<span className="tnum text-[11.5px] text-muted-foreground">{n}</span></TabsTrigger>
                 ))}
               </TabsList>
@@ -185,11 +191,11 @@ export default function Page({ data }: { data: unknown | null }) {
             {chips.length > 1 && <Button variant="ghost" size="xs" onClick={() => setFilter({})}>지우기</Button>}
             <label className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·사용자·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
+              <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="값·세션·단말" className="h-7 w-44 pl-7 text-[12.5px] md:text-[12.5px]" />
             </label>
           </>}>
-          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt")} rows={shownValues} onRow={(v) => setOpen(v.trails.length === 1 ? { trail: v.trails[0] } : { value: v })}
-            picked={(v) => !!open && (("value" in open && open.value.key === v.key) || ("trail" in open && v.trails.some((t) => t.id === open.trail.id)))} />}
+          {tab === "values" && <DataTable dense columns={valueColumns(d.now, focus === "prompt")} rows={shownValues} onRow={(v) => setOpen({ value: v })}
+            picked={(v) => !!open && "value" in open && open.value.key === v.key} />}
           {tab === "sessions" && <DataTable dense columns={attemptColumns(d.now)} rows={shownTries} onRow={(a) => setOpen({ attempt: a })} picked={(a) => !!open && "attempt" in open && open.attempt.session === a.session} />}
           {tab === "sources" && <DataTable dense columns={sourceColumns(d.now)} rows={shownFrom} onRow={(s) => setOpen({ source: s })} picked={(s) => !!open && "source" in open && open.source.name === s.name} />}
         </Panel>
@@ -197,10 +203,9 @@ export default function Page({ data }: { data: unknown | null }) {
 
       <Sheet open={open !== null} onOpenChange={(on) => !on && setOpen(null)}>
         <SheetContent className="gap-0 data-[side=right]:w-[520px] data-[side=right]:sm:max-w-[520px]" aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
-          {open && "value" in open && <ValueSheet v={open.value} onTrail={(t) => setOpen({ trail: t })} />}
-          {open && "trail" in open && <TrailSheet t={open.trail} />}
-          {open && "attempt" in open && <AttemptSheet a={open.attempt} />}
-          {open && "source" in open && <SourceSheet s={open.source} />}
+          {open && "value" in open && <ValueSheet v={open.value} all={byValue.get(valueKey(open.value.trails[0])) ?? open.value.trails} now={d.now} />}
+          {open && "attempt" in open && <AttemptSheet a={open.attempt} now={d.now} />}
+          {open && "source" in open && <SourceSheet s={open.source} now={d.now} />}
         </SheetContent>
       </Sheet>
     </div>
@@ -222,7 +227,8 @@ function SplitBars({ bars, split, picked, height, onPick }: { bars: Bar[]; split
               <span className="flex min-w-0 items-center gap-2">
                 {split === "place" && <PlaceMark name={b.key} />}
                 {split === "client" && <Laptop className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
-                <span className="truncate">{split === "place" ? b.key.replace(" (MCP)", "") : b.key}</span>
+                {split === "source" && <FileText className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} />}
+                <span className={cn("truncate", split === "source" && "font-mono text-[12px]")}>{split === "place" ? b.key.replace(" (MCP)", "") : split === "source" ? short(b.key) : b.key}</span>
               </span>
               <span className="flex h-2 overflow-hidden rounded-full bg-white/6">
                 <span className="flex h-full gap-px" style={{ width: `${(b.total / max) * 100}%` }}>
@@ -233,7 +239,7 @@ function SplitBars({ bars, split, picked, height, onPick }: { bars: Bar[]; split
             </button>
           </TooltipTrigger>
           <TooltipContent side="left" className="grid gap-1">
-            <span className="font-medium">{b.key}</span>
+            <span className="max-w-[360px] font-medium break-all">{b.key}</span>
             {STATUSES.filter((s) => b.split[s] > 0).map((s) => (
               <span key={s} className="tnum flex items-center gap-1.5"><i className="size-2 rounded-full" style={{ background: STATUS[s].color }} />{STATUS[s].label}<b className="ml-auto pl-4 font-medium">{b.split[s]}</b></span>
             ))}
@@ -253,16 +259,6 @@ function Spread({ sessions, clients }: { sessions: number; clients: number }) {
   return <span className={cn("tnum whitespace-nowrap", sessions > 1 ? "font-medium" : "text-muted-foreground")}>세션 {sessions} · 단말 {clients}</span>;
 }
 
-/** Whose machine something happened on: the person when the inventory knows, and the machine. */
-function Who({ t }: { t: { user?: string | null; host?: string | null; client: string } }) {
-  return (
-    <span className="flex min-w-0 items-center gap-2">
-      {t.user ? <Person name={t.user} size={20} label /> : <span className="text-muted-foreground">사용자 모름</span>}
-      <Client name={machineName(t)} />
-    </span>
-  );
-}
-
 function Places({ names }: { names: string[] }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
@@ -272,10 +268,37 @@ function Places({ names }: { names: string[] }) {
   );
 }
 
+/** Whom or where a value was sent to, apart from the MCP server that carried it: "bob@x.com ·
+ * slack (MCP)" is bob@x.com by slack; "slack (MCP)" is unknown by slack; a host is itself. */
+const targetOf = (place: string) => {
+  if (!place.endsWith("(MCP)")) return { target: place, server: null as string | null };
+  const parts = place.replace(" (MCP)", "").split(" · ");
+  return parts.length > 1 ? { target: parts[0], server: parts[1] } : { target: null, server: parts[0] };
+};
+/** The targets values went to, each once; those whose target is unknown are named by their server. */
+const targets = (places: string[]) => [...new Set(places.map((p) => targetOf(p).target ?? `${targetOf(p).server} (MCP)`))];
+
+/** A document or tool a value came out of, as a cell names it: an MCP tool by its server's logo
+ * and its own name, a path by its file name. */
+function SourceName({ name }: { name: string }) {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (mcp) return <span className="flex min-w-0 items-center gap-1.5" title={name}><ServiceLogo name={mcp[1]} size={16} /><Masked className="truncate">{mcp[2]}</Masked></span>;
+  return <Masked className="truncate" >{short(name)}</Masked>;
+}
+
+/** What a person typed a value in, else the session's name. */
+const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionName(t);
+
 /** A value over every session it showed in: how it ended at its worst, where it was sent, the
  * Call that carried it, where it came from, and how far it spread. */
 const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
-  { id: "status", header: "결과", size: 132, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => <StatusBadge s={v.status} /> },
+  { id: "status", header: "결과", size: 220, accessorFn: (v) => RANK[v.status], cell: ({ row: { original: v } }) => (
+    // Where a value that left, or was about to, was sent: the result names it.
+    <span className="flex min-w-0 items-center gap-2"><StatusBadge s={v.status} />{(() => {
+      const to = targets(v.places);
+      return v.status !== "seen" && to.length > 0 && <><Places names={to.slice(0, 1)} />{to.length > 1 && <span className="tnum shrink-0 text-[11.5px] text-muted-foreground">+{to.length - 1}</span>}</>;
+    })()}</span>
+  ) },
   { id: "text", header: "값", size: 300, accessorFn: (v) => v.text, cell: ({ row: { original: v } }) => {
     const Icon = CATEGORY[v.category as Category]?.icon;
     return (
@@ -286,26 +309,24 @@ const valueColumns = (now: number, typed: boolean): ColumnDef<Value>[] => [
       </span>
     );
   } },
-  { id: "places", header: "보낸 곳", size: 200, accessorFn: (v) => v.places.join(" "), cell: ({ row: { original: v } }) => (v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground/60">–</span>) },
-  { id: "carrier", header: "실어 나른 호출", accessorFn: (v) => v.carrier ?? "", cell: ({ row: { original: v } }) => (v.carrier ? <Masked className="block truncate text-muted-foreground" >{v.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
   typed
     // Every value here was typed by a person: the prompt it was typed in tells more than where from.
-    ? { id: "typed", header: "넣은 프롬프트", size: 250, accessorFn: (v) => sessionName(v.trails[0]), cell: ({ row: { original: v } }) => (
-      <span className="flex min-w-0 items-center gap-1.5" title={v.trails.map(sessionName).join("\n")}>
-        <span className="truncate">{sessionName(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
+    ? { id: "typed", header: "입력 프롬프트", size: 250, accessorFn: (v) => typedIn(v.trails[0]), cell: ({ row: { original: v } }) => (
+      <span className="flex min-w-0 items-center gap-1.5" title={v.trails.map(typedIn).join("\n")}>
+        <span className="truncate">{typedIn(v.trails[0])}</span>{v.sessions > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sessions - 1}</span>}
       </span>
     ) }
-    : { id: "from", header: "출처", size: 210, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => (
-      <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
-        {v.sources.length
-          ? <><Masked className="truncate">{short(v.sources[0])}</Masked>{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>
-          : <span className="truncate">{v.froms.map((f) => FROM[f].label).join(" · ")}</span>}
-      </span>
-    ) },
-  { id: "users", header: "사용자", size: 120, accessorFn: (v) => v.users.join(" "), cell: ({ row: { original: v } }) => (
-    v.users.length === 1 ? <Person name={v.users[0]} size={20} label /> : v.users.length ? <People names={v.users} max={4} /> : <span className="text-muted-foreground/60">–</span>
-  ) },
-  { id: "spread", header: "퍼진 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
+    // Where it came in: the person's input, or the tool's response and what it came out of.
+    : { id: "from", header: "유입 경로", size: 280, accessorFn: (v) => `${v.froms.join(" ")} ${v.sources.join(" ")}`, cell: ({ row: { original: v } }) => {
+      const typed = v.froms.includes("user"), from = typed ? "user" : v.froms[0];
+      return (
+        <span className="flex min-w-0 items-center gap-1.5" title={v.sources.join("\n") || undefined}>
+          <span className="shrink-0 rounded bg-secondary px-1.5 text-[11.5px] leading-[19px] text-foreground/85">{FROM[from].label}</span>
+          {!typed && v.sources.length > 0 && <><SourceName name={v.sources[0]} />{v.sources.length > 1 && <span className="tnum shrink-0 text-muted-foreground">+{v.sources.length - 1}</span>}</>}
+        </span>
+      );
+    } },
+  { id: "spread", header: "영향 범위", size: 132, accessorFn: (v) => v.sessions * 1000 + v.clients.length, cell: ({ row: { original: v } }) => <Spread sessions={v.sessions} clients={v.clients.length} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (v) => v.last ?? 0, cell: ({ row: { original: v } }) => <When at={v.last} now={now} /> },
   // A value that went out opens in 기록 at the Call that sent it, without the detail between.
   { id: "open", header: "", size: 44, enableSorting: false, cell: ({ row: { original: v } }) => {
@@ -334,8 +355,8 @@ function Kinds({ trails }: { trails: Trail[] }) {
 function Sent({ ran, held }: { ran: number; held: number }) {
   return (
     <span className="tnum flex items-center gap-2.5 text-[12px]">
-      <span className={cn("inline-flex items-center gap-1", ran ? "text-deny" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />나감 {ran}</span>
-      <span className={cn("inline-flex items-center gap-1", held ? "text-review" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />막힘 {held}</span>
+      <span className={cn("inline-flex items-center gap-1", ran ? "text-deny" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />유출 {ran}</span>
+      <span className={cn("inline-flex items-center gap-1", held ? "text-review" : "opacity-25")}><i className="size-1.5 rounded-full bg-current" />차단 {held}</span>
     </span>
   );
 }
@@ -345,8 +366,7 @@ function Sent({ ran, held }: { ran: number; held: number }) {
 const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
   { id: "status", header: "결과", size: 132, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <StatusBadge s={a.ran > 0 ? "out" : "blocked"} /> },
   { id: "session", header: "세션", size: 250, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
-  { id: "places", header: "보낸 곳", size: 200, accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
-  { id: "carrier", header: "실어 나른 호출", accessorFn: (a) => a.carrier ?? "", cell: ({ row: { original: a } }) => (a.carrier ? <Masked className="block truncate text-muted-foreground">{a.carrier}</Masked> : <span className="text-muted-foreground/60">–</span>) },
+  { id: "places", header: "전송 대상", size: 200, accessorFn: (a) => a.places.join(" "), cell: ({ row: { original: a } }) => <Places names={a.places} /> },
   { id: "values", header: "값", size: 190, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
   { id: "sent", header: "전송", size: 132, accessorFn: (a) => a.ran * 1000 + a.held, cell: ({ row: { original: a } }) => <Sent ran={a.ran} held={a.held} /> },
   { id: "client", header: "단말", size: 150, accessorFn: (a) => a.client, cell: ({ row: { original: a } }) => <Client name={a.client} /> },
@@ -356,7 +376,7 @@ const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
 /** A document, command or tool the agents read values from: what it is, how many values and how
  * they ended, which kinds, and how far they spread. */
 const sourceColumns = (now: number): ColumnDef<Source>[] => [
-  { id: "name", header: "읽어 온 곳", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => {
+  { id: "name", header: "출처", accessorFn: (s) => s.name, cell: ({ row: { original: s } }) => {
     const p = parts(s.name);
     return (
       <span className="flex min-w-0 items-center gap-2" title={s.name}>
@@ -367,7 +387,7 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
     );
   } },
   { id: "values", header: "값", size: 190, accessorFn: (s) => s.trails.length, cell: ({ row: { original: s } }) => <Kinds trails={s.trails} /> },
-  { id: "ended", header: "끝난 곳", size: 250, accessorFn: (s) => { const n = byStatus(s.trails); return n.out * 1e6 + n.blocked * 1e3 + s.trails.length; }, cell: ({ row: { original: s } }) => {
+  { id: "ended", header: "처리 결과", size: 250, accessorFn: (s) => { const n = byStatus(s.trails); return n.out * 1e6 + n.blocked * 1e3 + s.trails.length; }, cell: ({ row: { original: s } }) => {
     const n = byStatus(s.trails);
     return (
       <span className="flex items-center gap-2.5">
@@ -378,21 +398,11 @@ const sourceColumns = (now: number): ColumnDef<Source>[] => [
       </span>
     );
   } },
-  { id: "spread", header: "퍼진 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
+  { id: "spread", header: "영향 범위", size: 132, accessorFn: (s) => s.sessions * 1000 + s.clients, cell: ({ row: { original: s } }) => <Spread sessions={s.sessions} clients={s.clients} /> },
   { id: "last", header: "마지막", size: 88, accessorFn: (s) => s.last ?? 0, cell: ({ row: { original: s } }) => <When at={s.last} now={now} /> },
 ];
 
 // ---------------------------------------------------------------- the sheet
-const time = (ms: number | null) => (ms ? new Date(ms).toTimeString().slice(0, 8) : "");
-
-function Facts({ rows }: { rows: [string, ReactNode][] }) {
-  return (
-    <dl className="grid grid-cols-[84px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12.5px]">
-      {rows.map(([k, v]) => <div key={k} className="contents"><dt className="text-muted-foreground">{k}</dt><dd className="min-w-0">{v}</dd></div>)}
-    </dl>
-  );
-}
-
 function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
   return (
     <section className="grid gap-2">
@@ -402,172 +412,192 @@ function Section({ title, count, children }: { title: string; count?: number; ch
   );
 }
 
-/** One place a value showed in its session; pressed, it opens there in 기록. */
-function MentionRow({ m, session }: { m: Mention; session: string }) {
-  const tone = m.out ? (m.held ? "var(--review)" : "var(--deny)") : m.call ? "var(--write)" : "var(--info)";
+/** What a person typed, with the value marked where it is (both masked alike). */
+function Said({ text, value }: { text: string; value: string }) {
+  const at = value ? text.indexOf(value) : -1;
+  if (at < 0) return <span className="text-[13px] leading-relaxed break-words whitespace-pre-wrap">{text}</span>;
   return (
-    <button onClick={() => openInRecord(session, m.seq)} className="group relative grid w-full grid-cols-[14px_58px_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md py-1.5 pr-2 text-left text-[12.5px] transition-colors hover:bg-accent">
-      <i className="z-10 mx-auto size-2 rounded-full ring-4 ring-popover group-hover:ring-accent" style={{ background: tone }} />
-      <span className="tnum text-[12px] text-muted-foreground">{time(m.at)}</span>
-      <span className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0">{m.where}</span>
-        {m.place && <span className="inline-flex shrink-0 items-center gap-1" style={{ color: tone }}><PlaceMark name={m.place} size={15} />{m.place.replace(" (MCP)", "")}</span>}
-        {m.what && <Masked className="truncate text-muted-foreground">{m.what}</Masked>}
-      </span>
-      <span className="flex items-center gap-1.5">
-        {m.verdict && <VerdictBadge v={CALL_VERDICT[m.verdict].v}>{CALL_VERDICT[m.verdict].label}</VerdictBadge>}
-        <ArrowUpRight className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-      </span>
+    <span className="text-[13px] leading-relaxed break-words whitespace-pre-wrap">
+      {text.slice(0, at)}<mark className="rounded bg-deny/25 px-0.5 font-mono text-[12px] text-foreground">{value}</mark>{text.slice(at + value.length)}
+    </span>
+  );
+}
+
+const toolName = (tool: string | null | undefined) => (tool ?? "").replace(/^mcp__/, "").replace(/__/g, " · ");
+const Tool = ({ name }: { name?: string | null }) => (name ? <span className="max-w-36 shrink-0 truncate rounded-md bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{toolName(name)}</span> : null);
+
+/** Where a value came in, said plainly: by what way, and the document, tool or prompt itself. */
+function Origin({ t }: { t: Trail }) {
+  const said = t.mentions.find((m) => m.said);
+  const from = fromOf(t), Icon = FROM[from].icon;
+  return (
+    <button onClick={() => { const m = said ?? t.mentions[0]; if (m) openInRecord(t.session, m.seq); }}
+      className="group grid min-w-0 gap-1.5 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:bg-accent/60">
+      <span className="flex items-center gap-1.5 text-[12px] font-medium"><Icon className="size-3.5 text-muted-foreground" strokeWidth={1.9} />{FROM[from].label}<Tool name={said ? null : t.sourceTool} /><ArrowUpRight className="ml-auto size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" /></span>
+      {said ? <Said text={said.said!} value={t.text} />
+        : t.source ? <span className="grid gap-0.5"><Masked className="text-[13px] font-medium text-foreground">{short(t.source)}</Masked>{short(t.source) !== t.source && <Masked className="text-[11.5px] break-all text-muted-foreground">{t.source}</Masked>}</span>
+          : <span className="text-[12.5px] text-muted-foreground">어디서 왔는지 모름</span>}
     </button>
   );
 }
 
-/** A list of places down a line, as the value went through them. */
-function Line({ children }: { children: ReactNode }) {
-  return <div className="relative before:absolute before:top-3 before:bottom-3 before:left-[6.5px] before:w-px before:bg-border">{children}</div>;
-}
-
-/** A value named in a sheet's list; pressed, it opens where it first showed in 기록. */
-function ValueRow({ t, client }: { t: Trail; client?: boolean }) {
-  const first = t.mentions[0];
+/** How a value went, as two ends joined by an arrow: how it came in, and whom it was sent to
+ * with the tool that sent it. The arrow carries how it ended. */
+function Path({ trails, status }: { trails: Trail[]; status: Status }) {
+  const first = trails[0], from = fromOf(first), Icon = FROM[from].icon;
+  const typed = trails.some((t) => fromOf(t) === "user");
+  // The Calls that sent it, the first that got out leading.
+  const sends = trails.flatMap((t) => t.mentions.filter((m) => m.out && m.place)).sort((a, b) => Number(a.held) - Number(b.held));
+  const lead = sends[0];
+  const where = lead ? targetOf(lead.place!) : null;
+  const others = new Set(sends.map((m) => targetOf(m.place!).target ?? targetOf(m.place!).server)).size - 1;
+  // The tool that sent it: an MCP tool by its server's logo and its name; else the tool, or the command's first word.
+  const tool = lead && toolName(lead.tool ?? lead.what?.trim().split(/\s+/)[0]).split(" · ").pop();
+  const tone = status === "out" ? "var(--deny)" : status === "blocked" ? "var(--review)" : "var(--border)";
+  const end = "flex min-w-0 flex-col gap-1 rounded-lg border bg-background px-3 py-2.5";
   return (
-    <button onClick={() => first && openInRecord(t.session, first.seq)} className="group flex w-full min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
-      <Masked className="min-w-0 flex-1 truncate">{t.text}</Masked>
-      <span className="shrink-0 text-muted-foreground">{t.kind}</span>
-      {client && <span className="max-w-[120px] shrink-0 truncate text-muted-foreground">{t.client}</span>}
-      <StatusBadge s={t.status} />
-      <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-    </button>
+    <div className="grid grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)] items-center">
+      <div className={cn(end, from === "agent" && !typed && "border-dashed")}>
+        <span className="text-[11px] text-muted-foreground">유입 경로</span>
+        {typed ? <span className="flex items-center gap-1.5 text-[13px] font-medium"><MessageSquareText className="size-3.5 text-muted-foreground" strokeWidth={1.9} />사용자 입력</span>
+          : first.source ? (
+            <>
+              <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium"><Icon className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.9} /><SourceName name={first.source} /></span>
+              <span className="truncate text-[11.5px] text-muted-foreground" title={first.source}>{[first.sourceTool && toolName(first.sourceTool), short(first.source) !== first.source && first.source].filter(Boolean).join(" · ")}</span>
+            </>
+          ) : <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground"><Icon className="size-3.5" strokeWidth={1.9} />출처 불명</span>}
+      </div>
+      <div className="flex flex-col items-center gap-1 px-1.5">
+        {status !== "seen" && <span className="text-[11px] font-semibold" style={{ color: tone }}>{STATUS[status].label}</span>}
+        <span className="relative h-0.5 w-full rounded-full" style={{ background: tone }}><ArrowRight className="absolute -top-[7px] -right-1.5 size-4" style={{ color: tone }} /></span>
+      </div>
+      <div className={end} style={status !== "seen" ? { borderColor: `color-mix(in oklab, ${tone} 55%, transparent)`, background: `color-mix(in oklab, ${tone} 8%, var(--background))` } : undefined}>
+        <span className="text-[11px] text-muted-foreground">전송 대상</span>
+        {where ? (
+          <>
+            <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium">
+              {where.target ? <><PlaceMark name={where.server ? where.target : lead!.place!} size={16} /><span className="truncate">{where.target}</span></> : <span className="text-muted-foreground">대상 모름</span>}
+              {others > 0 && <span className="tnum shrink-0 text-[11.5px] font-normal text-muted-foreground">+{others}</span>}
+            </span>
+            {tool && <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">{where.server && <ServiceLogo name={where.server} size={14} />}<Masked className="truncate">{tool}</Masked></span>}
+          </>
+        ) : <span className="text-[13px] text-muted-foreground">밖으로 안 나감</span>}
+      </div>
+    </div>
   );
 }
 
-function OpenButton({ session, seq }: { session: string; seq: number | undefined }) {
+/** The machines a value showed on: each with how many sessions, how it ended at worst, and when
+ * last; pressed, its worst session opens in 기록 where it mattered most. */
+function Machines({ trails, now }: { trails: Trail[]; now: number }) {
+  const by = new Map<string, Trail[]>();
+  for (const t of trails) by.set(machineName(t), [...(by.get(machineName(t)) ?? []), t]);
+  const rows = [...by.entries()].map(([machine, list]) => {
+    const worst = list.reduce((a, t) => (RANK[t.status] > RANK[a.status] ? t : a), list[0]);
+    const latest = list.reduce((a, t) => ((t.last ?? 0) > (a.last ?? 0) ? t : a), list[0]);
+    return { machine, list, worst, latest };
+  }).sort((a, b) => RANK[b.worst.status] - RANK[a.worst.status] || (b.latest.last ?? 0) - (a.latest.last ?? 0));
   return (
-    <SheetFooter className="border-t">
-      <Button disabled={seq === undefined} onClick={() => seq !== undefined && openInRecord(session, seq)}><ArrowUpRight />기록에서 열기</Button>
-    </SheetFooter>
+    <div className="grid gap-1">
+      {rows.map(({ machine, list, worst, latest }) => {
+        const m = worst.mentions.find((x) => x.out && !x.held) ?? worst.mentions.find((x) => x.out) ?? worst.mentions[0];
+        return (
+          <button key={machine} onClick={() => m && openInRecord(worst.session, m.seq)} className="group flex min-w-0 items-center gap-3 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
+            <span className="min-w-0 flex-1"><Client name={machine} /></span>
+            <span className="tnum shrink-0 text-[12px] text-muted-foreground">세션 {list.length}</span>
+            <StatusBadge s={worst.status} />
+            <span className="w-14 shrink-0 text-right"><When at={latest.last} now={now} /></span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-/** A value that showed in several sessions: where it went and each session it showed in. */
-function ValueSheet({ v, onTrail }: { v: Value; onTrail: (t: Trail) => void }) {
+/** A value: how it went, from where to where; where it came in, plainly; and who it was. */
+function ValueSheet({ v, all, now }: { v: Value; all: Trail[]; now: number }) {
   const Icon = CATEGORY[v.category as Category]?.icon;
-  return (
-    <>
-      <SheetHeader className="gap-3 border-b pr-12">
-        <SheetTitle className="flex items-center gap-2 text-[15px]">{Icon && <Icon className="size-4 text-muted-foreground" strokeWidth={1.9} />}{v.kind}<StatusBadge s={v.status} /></SheetTitle>
-        <SheetDescription asChild><Masked className="block rounded-lg border bg-background px-3 py-2.5 text-[13px] break-all text-foreground">{v.text}</Masked></SheetDescription>
-      </SheetHeader>
-      <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <Facts rows={[
-          ["사용자", v.users.length ? <span className="flex flex-wrap gap-x-3 gap-y-1">{v.users.map((u) => <Person key={u} name={u} size={20} label />)}</span> : <span className="text-muted-foreground">모름</span>],
-          ["퍼진 범위", <span className="tnum">세션 {v.sessions} · 단말 {v.clients.length}</span>],
-          ["보낸 곳", v.places.length ? <Places names={v.places} /> : <span className="text-muted-foreground">–</span>],
-          ["실어 나른 호출", v.carrier ? <Masked className="break-all">{v.carrier}</Masked> : <span className="text-muted-foreground">–</span>],
-          ["출처", <span className="break-all">{v.sources.length ? v.sources.map(short).join(", ") : v.froms.map((f) => FROM[f].label).join(" · ")}</span>],
-          ["마지막", <span className="tnum">{clock(v.last)}</span>],
-        ]} />
-        <Section title="드러난 세션" count={v.trails.length}>
-          <div className="grid gap-1">
-            {v.trails.map((t) => (
-              <button key={t.id} onClick={() => onTrail(t)} className="flex w-full min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-left text-[12.5px] transition-colors hover:bg-accent">
-                <span className="grid min-w-0 flex-1 gap-1">
-                  <span className="truncate">{sessionName(t)}</span>
-                  <span className="text-[12px]"><Who t={t} /></span>
-                </span>
-                <StatusBadge s={t.status} />
-              </button>
-            ))}
-          </div>
-        </Section>
-      </div>
-    </>
-  );
-}
-
-function TrailSheet({ t }: { t: Trail }) {
-  const Icon = CATEGORY[t.category as Category]?.icon;
-  return (
-    <>
-      <SheetHeader className="gap-3 border-b pr-12">
-        <SheetTitle className="flex items-center gap-2 text-[15px]">{Icon && <Icon className="size-4 text-muted-foreground" strokeWidth={1.9} />}{t.kind}<StatusBadge s={t.status} /></SheetTitle>
-        <SheetDescription asChild><Masked className="block rounded-lg border bg-background px-3 py-2.5 text-[13px] break-all text-foreground">{t.text}</Masked></SheetDescription>
-      </SheetHeader>
-      <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <div className="grid grid-cols-3 gap-2">
-          {([["호출에 넣음", t.calls, "var(--write)"], ["밖으로 나감", t.outRan, "var(--deny)"], ["막힘", t.outStopped, "var(--review)"]] as [string, number, string][]).map(([l, n, c]) => (
-            <div key={l} className="rounded-lg border px-3 py-2">
-              <div className="text-[12px] text-muted-foreground">{l}</div>
-              <div className="tnum text-[20px] leading-tight font-semibold" style={{ color: n ? c : "var(--muted-foreground)" }}>{n}</div>
-            </div>
-          ))}
-        </div>
-        <Facts rows={[
-          ["유형", categoryLabel(t.category)],
-          ["들어온 곳", FROM[fromOf(t)].label],
-          ...(t.source ? [["출처", <Masked className="break-all">{t.source}</Masked>] as [string, ReactNode]] : []),
-          ...(placesOf(t).length ? [["보낸 곳", <Places names={placesOf(t)} />] as [string, ReactNode]] : []),
-          ["사용자", t.user ? <Person name={t.user} size={20} label /> : <span className="text-muted-foreground">모름</span>],
-          ["단말", <span className="flex min-w-0 items-center gap-2"><Client name={machineName(t)} />{t.host && t.host !== t.client && <Masked className="truncate text-muted-foreground">{t.client}</Masked>}</span>],
-          ["세션", <span className="line-clamp-2">{sessionName(t)}</span>],
-          ["마지막", <span className="tnum">{clock(t.last)}</span>],
-        ]} />
-        <Section title="지나간 곳" count={t.mentions.length}>
-          <Line>{t.mentions.map((m, i) => <MentionRow key={`${m.seq}-${i}`} m={m} session={t.session} />)}</Line>
-        </Section>
-      </div>
-      <OpenButton session={t.session} seq={t.mentions[0]?.seq} />
-    </>
-  );
-}
-
-function AttemptSheet({ a }: { a: Attempt }) {
+  // What a person typed the value in, each prompt once; a document or tool is named in the path.
+  const typedOrigins = all.filter((t) => t.mentions.some((m) => m.said)).filter((t, i, list) => list.findIndex((x) => (x.source ?? x.mentions.find((m) => m.said)?.said ?? fromOf(x)) === (t.source ?? t.mentions.find((m) => m.said)?.said ?? fromOf(t))) === i);
   return (
     <>
       <SheetHeader className="gap-2 border-b pr-12">
-        <SheetTitle className="line-clamp-2 text-[15px]">{sessionName(a)}</SheetTitle>
-        <div className="flex items-center gap-2 text-[12.5px]"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /><Client name={a.client} /></div>
+        <SheetTitle className="flex items-center gap-2 text-[15px]">{Icon && <Icon className="size-4 text-muted-foreground" strokeWidth={1.9} />}<Masked className="truncate text-[14px]">{v.text}</Masked><span className="shrink-0 text-[12.5px] font-normal text-muted-foreground">{v.kind}</span><span className="ml-1"><StatusBadge s={v.status} /></span></SheetTitle>
+        <SheetDescription className="sr-only">{v.kind}</SheetDescription>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <Facts rows={[
-          ["보내려 한 곳", <span className="flex flex-wrap gap-x-3 gap-y-1">{a.places.map((p) => <span key={p} className="inline-flex items-center gap-1.5"><PlaceMark name={p} size={16} />{p}</span>)}</span>],
-          ["호출", <span className="tnum flex gap-3"><span>나감 <b className={cn("font-medium", a.ran > 0 && "text-deny")}>{a.ran}</b></span><span>막힘 <b className={cn("font-medium", a.held > 0 && "text-review")}>{a.held}</b></span></span>],
-          ["마지막", <span className="tnum">{clock(a.last)}</span>],
-        ]} />
-        <Section title="보내려 한 값" count={a.trails.length}>
-          {a.trails.map((t) => (
-            <div key={t.id} className="grid gap-1">
-              <ValueRow t={t} />
-              <Line>{t.mentions.filter((m) => m.out).map((m, i) => <MentionRow key={`${m.seq}-${i}`} m={m} session={t.session} />)}</Line>
-            </div>
-          ))}
+        <Path trails={all} status={v.status} />
+        {typedOrigins.length > 0 && (
+          <Section title="입력 프롬프트" count={typedOrigins.length > 1 ? typedOrigins.length : undefined}>
+            {typedOrigins.slice(0, 3).map((t) => <Origin key={t.id} t={t} />)}
+          </Section>
+        )}
+        <Section title="단말" count={new Set(all.map(machineName)).size}>
+          <Machines trails={all} now={now} />
         </Section>
       </div>
-      <OpenButton session={a.session} seq={a.latest} />
     </>
   );
 }
 
-function SourceSheet({ s }: { s: Source }) {
-  const first = s.trails[0];
+/** A session that tried to send values out: how they went, what the person asked, and which values. */
+function AttemptSheet({ a, now }: { a: Attempt; now: number }) {
+  const said = a.trails.flatMap((t) => t.mentions).find((m) => m.said)?.said ?? a.title;
+  return (
+    <>
+      <SheetHeader className="gap-2 border-b pr-12">
+        <SheetTitle className="flex items-center gap-2 text-[15px]">유출 시도<span className="ml-1"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /></span></SheetTitle>
+        <SheetDescription className="sr-only">유출 시도</SheetDescription>
+      </SheetHeader>
+      <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
+        <Path trails={a.trails} status={a.ran > 0 ? "out" : "blocked"} />
+        <Section title="사용자 요청">
+          <div className="rounded-lg border bg-background px-3 py-2.5 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{said ?? <span className="text-muted-foreground">프롬프트 없음</span>}</div>
+        </Section>
+        <Section title="실려 간 값" count={a.trails.length}>
+          <div className="flex flex-wrap gap-1.5">
+            {a.trails.map((t) => <span key={t.id} className="inline-flex items-center gap-1.5 rounded-md bg-secondary px-2 py-1 text-[12px]"><Masked>{t.text}</Masked><span className="text-muted-foreground">{t.kind}</span></span>)}
+          </div>
+        </Section>
+        <Section title="단말">
+          <Machines trails={a.trails.slice(0, 1)} now={now} />
+        </Section>
+      </div>
+    </>
+  );
+}
+
+/** A document or tool values came out of: what came out and how it ended, and who read it. */
+function SourceSheet({ s, now }: { s: Source; now: number }) {
+  const n = byStatus(s.trails);
+  const readers = [...new Map(s.trails.map((t) => [t.session, t] as const)).values()].sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
   return (
     <>
       <SheetHeader className="gap-3 border-b pr-12">
-        <SheetTitle className="flex items-center gap-2 text-[15px]"><FileText className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">{short(s.name)}</span></SheetTitle>
-        <SheetDescription asChild><Masked className="block rounded-lg border bg-background px-3 py-2.5 break-all text-foreground">{s.name}</Masked></SheetDescription>
+        <SheetTitle className="flex items-center gap-2 text-[15px]"><FileText className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.9} /><span className="truncate">{short(s.name)}</span><Tool name={s.tool} /></SheetTitle>
+        <SheetDescription asChild><Masked className="block text-[12px] break-all text-muted-foreground">{s.name}</Masked></SheetDescription>
+        <div className="flex items-center gap-3 text-[12.5px]">
+          <span className="tnum">값 <b className="font-semibold">{s.trails.length}</b></span>
+          <Sent ran={n.out} held={n.blocked} />
+          <span className="ml-auto"><Spread sessions={s.sessions} clients={s.clients} /></span>
+        </div>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
-        <Facts rows={[
-          ["읽은 도구", <span className="break-all">{s.tool}</span>],
-          ["유형", <span className="flex flex-wrap gap-1">{s.categories.map((c) => <Badge key={c} variant="secondary" className="border-0 font-normal">{categoryLabel(c)}</Badge>)}</span>],
-          ["세션", <span className="tnum">{s.sessions}</span>],
-          ["마지막", <span className="tnum">{clock(s.last)}</span>],
-        ]} />
         <Section title="여기서 나온 값" count={s.trails.length}>
-          <div className="grid gap-1">{s.trails.map((t) => <ValueRow key={t.id} t={t} client />)}</div>
+          <div className="grid gap-1">
+            {[...s.trails].sort((a, b) => RANK[b.status] - RANK[a.status]).map((t) => (
+              <div key={t.id} className="flex min-w-0 items-center gap-2 rounded-md bg-background/60 px-2.5 py-2 text-[12.5px]">
+                <Masked className="min-w-0 truncate">{t.text}</Masked>
+                <span className="shrink-0 text-muted-foreground">{t.kind}</span>
+                <span className="ml-auto flex shrink-0 items-center gap-2">{t.status !== "seen" && placesOf(t).length > 0 && <Places names={placesOf(t).slice(0, 1)} />}<StatusBadge s={t.status} /></span>
+              </div>
+            ))}
+          </div>
+        </Section>
+        <Section title="읽은 단말" count={new Set(readers.map(machineName)).size}>
+          <Machines trails={readers} now={now} />
         </Section>
       </div>
-      <OpenButton session={first?.session ?? ""} seq={first?.mentions[0]?.seq} />
     </>
   );
 }

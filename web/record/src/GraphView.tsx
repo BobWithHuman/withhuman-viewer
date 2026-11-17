@@ -64,7 +64,7 @@ function CauseEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style }:
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
       <EdgeLabelRenderer>
-        <div className="nodrag nopan pointer-events-none absolute rounded bg-bg px-1.5 py-px text-[11px] font-semibold text-hold" style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}>결과가 시킴</div>
+        <div className="nodrag nopan pointer-events-none absolute rounded bg-bg px-1.5 py-px text-[11px] font-semibold text-hold" style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}>응답이 유도</div>
       </EdgeLabelRenderer>
     </>
   );

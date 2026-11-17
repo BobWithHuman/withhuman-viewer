@@ -809,7 +809,7 @@ fn call_row(
             if c.via.is_some() { span { class: "fx-text-chip", "글" } }
             // A value it used came out of an earlier turn's tool result.
             if let Some(o) = c.origin.as_ref() {
-                span { class: "fx-text-chip cross", title: "‘{o.value}’: 턴 {o.turn + 1}의 도구 결과에서 처음 나온 값", "턴{o.turn + 1}" }
+                span { class: "fx-text-chip cross", title: "‘{o.value}’: 턴 {o.turn + 1}의 도구 응답에서 처음 나온 값", "턴{o.turn + 1}" }
             }
             span { class: "tm", "{hm(c.at)}" }
         }
@@ -841,7 +841,7 @@ fn hides(hidden: &HashSet<&'static str>, c: &crate::flow::Call) -> bool {
 
 /// The marks the legend can light.
 const LIGHTS: [(&str, &str); 5] = [
-    ("told", "도구 결과가 시킨 호출"),
+    ("told", "도구 응답이 유도한 호출"),
     ("carried", "이전 턴의 값을 쓴 호출"),
     ("loose", "시킨 것을 못 찾은 호출"),
     ("outside", "밖과 주고받은 호출"),
@@ -942,7 +942,7 @@ fn legend_rows(f: &Flow, turns: &[usize], stops: &[Stop]) -> Vec<LegRow> {
     }
     for (key, label) in [
         ("blocked", "차단"),
-        ("warn", "확인 요청"),
+        ("warn", "사용자 확인"),
         ("allowed", "허용"),
         ("none", "판정 없음"),
     ] {
@@ -1538,7 +1538,7 @@ fn LineMap(
                                 x: "{hx + 14.0}", y: "{hy + 14.0}", width: "{w}", height: "128",
                                 div {
                                     class: "{cls}",
-                                    title: "눌러서 사용자 프롬프트 보기",
+                                    title: "눌러서 사용자 입력 보기",
                                     onclick: move |_| {
                                         select_turn(turn, state, &fl, n);
                                         head_open.set(if opened { None } else { Some(n) });
@@ -1638,7 +1638,7 @@ fn LineMap(
                     };
                     let y = hy + 144.0;
                     let n = m.turn;
-                    let asker = if tt.agent.is_some() { "에이전트 보고" } else { "사용자 프롬프트" };
+                    let asker = if tt.agent.is_some() { "에이전트 보고" } else { "사용자 입력" };
                     rsx! {
                         div {
                             class: "fx-prompt",
@@ -1725,7 +1725,7 @@ fn LineMap(
             if tracing {
                 div { class: "fx-trace on", onmousedown: move |e| e.stop_propagation(),
                     span { class: "dot" }
-                    {if picked.and_then(|p| f.call(p)).is_some_and(|c| c.blocked) { "차단된" } else { "확인 요청된" }}
+                    {if picked.and_then(|p| f.call(p)).is_some_and(|c| c.blocked) { "차단된" } else { "사용자 확인으로 멈춘" }}
                     " 호출의 원인 경로 · 다른 역을 누르면 돌아가요"
                 }
             }
@@ -1818,7 +1818,7 @@ fn LineMap(
                         }
                     }
                     if has_branch {
-                        p { class: "lg-foot", i { class: "sw", style: "background: {TEXT_COLOR}" } "보라색 길은 도구 결과의 글을 따라간 길입니다." }
+                        p { class: "lg-foot", i { class: "sw", style: "background: {TEXT_COLOR}" } "보라색 길은 도구 응답의 글을 따라간 길입니다." }
                     }
                 }
             }

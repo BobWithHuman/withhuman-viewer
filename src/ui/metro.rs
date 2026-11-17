@@ -258,7 +258,7 @@ fn cause_title(m: &Metro, cause: &Cause, example: &Station) -> (&'static str, St
     match cause {
         Cause::Result(_) => match example.source.as_ref().and_then(|src| m.station(src.by)) {
             Some(b) => ("used", format!("{}{}", b.cause_name(), source_kind(b))),
-            None => ("used", "도구 결과".to_owned()),
+            None => ("used", "도구 응답".to_owned()),
         },
         Cause::Nothing => ("nobody", "시킨 것 없음".to_owned()),
         Cause::Turn(i) => {
@@ -296,7 +296,7 @@ fn CallLines(station: Station, title: String, full_time: bool) -> Element {
     let s = &station;
     let mark = match s.decision.as_deref() {
         Some("DENY") => "차단",
-        Some("REVIEW") => "확인 요청",
+        Some("REVIEW") => "사용자 확인",
         Some(_) => "허용",
         None => "판정 없음",
     };
@@ -519,7 +519,7 @@ pub(super) fn RoutePanel(
                                         }
                                         Board::Nowhere => rsx! {
                                             div { class: "nv-stop-head", b { "시킨 것을 찾지 못함" } }
-                                            div { class: "nv-meta faint", "세션 안의 요청에도 도구 결과에도 이어지지 않습니다. 세션 밖의 입력이거나 에이전트가 스스로 한 일일 수 있습니다." }
+                                            div { class: "nv-meta faint", "세션 안의 요청에도 도구 응답에도 이어지지 않습니다. 세션 밖의 입력이거나 에이전트가 스스로 한 일일 수 있습니다." }
                                         },
                                     }
                                     if passed > 1 && !walked { div { class: "nv-pass", "{passed - 1}개 역 이동" } }
