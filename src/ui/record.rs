@@ -202,7 +202,10 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
     // message is the answer already.
     let last = m.last_word.as_ref().map(|(seq, _)| *seq);
     for ask in &m.asks {
-        if let Some(AskParent { from: ParentOf::Message(seq), .. }) = &ask.parent
+        if let Some(AskParent {
+            from: ParentOf::Message(seq),
+            ..
+        }) = &ask.parent
             && Some(*seq) != last
             && !items.iter().any(|(_, _, s)| s["id"] == format!("m{seq}"))
             && let Some(said) = m.says.iter().find(|s| s.seq == *seq)
@@ -319,7 +322,8 @@ mod tests {
     // by the Call that brought it, the agent's message (a step of its own), the request before.
     #[test]
     fn a_prompt_joins_what_the_turn_before_it_was_written_from() {
-        let parent = |key: &str| json!({"request_parent": {"key": key, "probability": 0.8}}).to_string();
+        let parent =
+            |key: &str| json!({"request_parent": {"key": key, "probability": 0.8}}).to_string();
         let nodes = json!([
             {"kind": "Request", "props": {"seq": 1}, "summary": {"prompt": "읽어줘"}},
             {"kind": "Call", "props": {"seq": 2, "trace_json": "{\"link\":\"request\"}"}, "summary": {"tool_name": "Read"}},
@@ -340,13 +344,54 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|p| (p["prompt"].as_str().unwrap().into(), p["from"].as_str().unwrap().into(), p["via"].as_str().unwrap().into()))
+            .map(|p| {
+                (
+                    p["prompt"].as_str().unwrap().into(),
+                    p["from"].as_str().unwrap().into(),
+                    p["via"].as_str().unwrap().into(),
+                )
+            })
             .collect();
         let s = |a: &str, b: &str, c: &str| (a.to_owned(), b.to_owned(), c.to_owned());
-        assert_eq!(parents, [s("a5", "s2", "result"), s("a7", "m6", "message"), s("a8", "a7", "request")]);
+        assert_eq!(
+            parents,
+            [
+                s("a5", "s2", "result"),
+                s("a7", "m6", "message"),
+                s("a8", "a7", "request")
+            ]
+        );
         // The message a prompt was written from is a step, in its place; the last is the answer.
-        let ids: Vec<&str> = out["steps"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap()).collect();
+        let ids: Vec<&str> = out["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap())
+            .collect();
         assert!(ids.iter().position(|&i| i == "m6") < ids.iter().position(|&i| i == "a7"));
         assert_eq!(ids.last(), Some(&"answer"));
+    }
+}
+
+/// Every demo session as the page is handed it, written to VIEWER_DUMP_RECORDS, to try the page
+/// on outside the app.
+#[cfg(test)]
+mod dump {
+    #[test]
+    #[ignore = "writes a file"]
+    fn every_demo_session_as_the_page_gets_it() {
+        let to = std::env::var("VIEWER_DUMP_RECORDS").expect("VIEWER_DUMP_RECORDS");
+        let demo = crate::demo::Demo::load();
+        let sessions: Vec<crate::model::Session> = serde_json::from_value(demo.sessions()).unwrap();
+        let all: Vec<serde_json::Value> = sessions
+            .iter()
+            .filter_map(|s| {
+                let graph = serde_json::from_value(demo.graph(&s.id).ok()?).ok()?;
+                let model = crate::layout::Model::build(&graph);
+                let m = crate::metro::Metro::build_with(&model, &std::collections::HashSet::new());
+                Some(super::record_data(&m, Some(s), &s.id))
+            })
+            .collect();
+        std::fs::write(to, serde_json::to_string(&all).unwrap()).unwrap();
     }
 }

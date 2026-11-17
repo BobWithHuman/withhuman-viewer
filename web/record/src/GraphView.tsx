@@ -239,16 +239,25 @@ export function GraphView({ data }: { data: RecordData }) {
   const refs = useRef<Record<string, HTMLDivElement | null>>({});
   useEffect(() => { setPicked(opening(data)); setOpen(null); }, [data]);
   useEffect(() => { if (picked) refs.current[picked]?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [picked]);
+  useEffect(() => { if (open) refs.current[open]?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [open]);
   // On 경로, the way in view, as near as it fits; on 순서, the whole. The rest is a button away.
-  const wayKey = mode === "path" ? (picked ?? "") : "";
+  // What was picked in the session shown before is not here: the new one opens on its own
+  // until the effect catches up.
+  const known = useMemo(() => new Set(data.steps.map((s) => s.id)), [data]);
+  const sel = picked && !known.has(picked) ? opening(data) : picked;
+  const wayKey = mode === "path" ? (sel ?? "") : "";
   useEffect(() => {
-    requestAnimationFrame(() => rf.fitView({ padding: mode === "path" ? 0.3 : 0.18, maxZoom: 1, duration: 300 }));
+    // 순서 of many steps opens on the step picked at a size its name reads; of few, on the whole.
+    const at = mode === "order" && data.steps.length > 12 ? data.steps.findIndex((s) => s.id === sel) : -1;
+    requestAnimationFrame(() => at >= 0
+      ? rf.setCenter(at * 210 + 120, (data.steps[at].lane ?? 0) * 150 - 70, { zoom: 0.85, duration: 300 })
+      : rf.fitView({ padding: mode === "path" ? 0.3 : 0.18, maxZoom: 1, duration: 300 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, rf, mode, wayKey]);
-  const way = useMemo(() => wayBack(data, picked), [data, picked]);
+  const way = useMemo(() => wayBack(data, sel), [data, sel]);
   const { nodes, edges } = useMemo(
-    () => (mode === "path" && way.ids.length ? layoutWay(data, picked, way) : layout(data, picked, mode, way)),
-    [data, picked, mode, way],
+    () => (mode === "path" && way.ids.length ? layoutWay(data, sel, way) : layout(data, sel, mode, way)),
+    [data, sel, mode, way],
   );
   // On 경로 the timeline holds the way alone, the earliest first, each link named between.
   const shown = mode === "path" && way.ids.length ? [...way.ids].reverse() : data.steps.map((s) => s.id);
@@ -263,7 +272,7 @@ export function GraphView({ data }: { data: RecordData }) {
     ["모델", sess.model], ["작업 폴더", sess.folder && <code className="font-mono text-[11px]">{sess.folder}</code>], ["세션 ID", <code className="font-mono text-[11px]">{sess.id}</code>], ["시작", sess.start], ["엔진 모드", sess.mode],
   ];
   return (
-    <Pick.Provider value={(id) => { setPicked(id); setOpen(null); }}>
+    <Pick.Provider value={(id) => { if (mode === "path" && way.ids.length) setOpen(id); else { setPicked(id); setOpen(null); } }}>
       <div className="relative min-w-0 flex-1">
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.2} maxZoom={1.8} proOptions={{ hideAttribution: true }} nodesConnectable={false} />
         <ToolStrip timeline={timeline} setTimeline={setTimeline} />
@@ -288,8 +297,8 @@ export function GraphView({ data }: { data: RecordData }) {
               return (
                 <div key={id} className="space-y-1">
                   {h && <HopMark h={h} />}
-                  <Card s={s} open={onPath ? open === id || (open === null && picked === id) : picked === id} cardRef={(el) => (refs.current[id] = el)}
-                    onToggle={() => onPath ? setOpen(open === id ? "" : id) : setPicked(picked === id ? null : id)}
+                  <Card s={s} open={onPath ? open === id || (open === null && sel === id) : sel === id} cardRef={(el) => (refs.current[id] = el)}
+                    onToggle={() => onPath ? setOpen(open === id ? "" : id) : setPicked(sel === id ? null : id)}
                     onLocate={() => { if (!onPath) setPicked(id); locate(id); }}
                     onWay={onPath || s.kind === "prompt" && !data.parents?.some((p) => p.prompt === id) ? undefined : () => { setPicked(id); setOpen(null); setMode("path"); }} />
                 </div>

@@ -25,9 +25,10 @@ export const PARENT_LABEL: Record<string, string> = {
 
 /** The way back from `id`, the step itself first. */
 export function wayBack(data: RecordData, id: string | null): { ids: string[]; hops: Hop[] } {
-  if (!id) return { ids: [], hops: [] };
   const index = new Map(data.steps.map((s, i) => [s.id, i]));
   const step = new Map(data.steps.map((s) => [s.id, s]));
+  // A step picked in a session no longer shown has no way here.
+  if (!id || !step.has(id)) return { ids: [], hops: [] };
   const ids = [id];
   const hops: Hop[] = [];
   const seen = new Set(ids);
