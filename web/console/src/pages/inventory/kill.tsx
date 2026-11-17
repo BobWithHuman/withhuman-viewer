@@ -11,7 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ago } from "@/kit";
 import { cn } from "@/lib/utils";
-import { Chip } from "./marks";
 import type { Machine } from "./model";
 
 /** The switch as a button: 킬스위치, or 멈춤 풀기 on a stopped machine. */
@@ -57,11 +56,6 @@ export function KillSwitch({ m, now, busy, onStop, size = "sm" }: {
               <AlertDialog.Title className="text-[15px] font-semibold">킬스위치</AlertDialog.Title>
               <span className="truncate font-mono text-[12.5px] text-muted-foreground">{m.name}</span>
             </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            <Chip className="bg-deny/15 text-deny">모든 도구 호출 차단</Chip>
-            <Chip>멈춤 풀기 전까지</Chip>
-            <Chip>기록에 남음</Chip>
           </div>
           <label className="flex flex-col gap-1.5 text-[12px] text-muted-foreground">사유
             <Input autoFocus value={why} placeholder="유출 의심 · 조사 중" onChange={(e) => setWhy(e.target.value)}
