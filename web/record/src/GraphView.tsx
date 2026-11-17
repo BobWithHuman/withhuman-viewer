@@ -59,18 +59,19 @@ function StepNode({ data }: NodeProps<Node<D>>) {
   );
 }
 /** A SubGraph on 순서: a box of its steps, each a row to pick. */
-type G = { n: number; steps: Step[]; picked: string | null };
+type G = { n: number; ns: number[]; steps: Step[]; picked: string | null };
 const ROW = 30, HEAD = 26, BOX = 236;
 function SgNode({ data }: NodeProps<Node<G>>) {
   const pick = useContext(Pick);
   const first = data.steps[0];
   const tag = first?.kind === "prompt" ? "프롬프트" : first?.kind === "answer" ? "답변" : "도구";
+  const ns = data.ns.length > 1 ? `S${data.ns[0]}–${data.ns[data.ns.length - 1]}` : `S${data.n}`;
   return (
     <div className="rounded-lg bg-panel shadow-[0_6px_18px_rgba(0,0,0,.35)] ring-1 ring-white/10" style={{ width: BOX }}>
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
       <div className="flex items-center gap-1.5 px-2.5 text-[10.5px] text-mut" style={{ height: HEAD }}>
-        <span className="rounded bg-white/8 px-1 font-mono tabular-nums">S{data.n}</span>{tag}
+        <span className="rounded bg-white/8 px-1 font-mono tabular-nums">{ns}</span>{tag}
       </div>
       <div className="px-1 pb-1">
         {data.steps.map((s) => (
@@ -104,8 +105,43 @@ const SG_TIE: Record<string, { color: string; label?: string }> = {
  * box and all that hangs from it keep a band of their own, its children (in the order made)
  * stacked to its right from its top, so a turn and what it led to read left to right together.
  * Where each step sits, to bring it into view. */
-function layoutTree(data: RecordData, picked: string | null) {
+/** The SubGraphs as boxes: the agent's steps that hang the same way from one SubGraph (the
+ * tools a prompt asked for, one by one, and the turn's answer) share a box; what a tool result
+ * told and a prompt written from the turn before keep their own, where the line branches. */
+function boxes(data: RecordData) {
   const gs = [...(data.subgraphs ?? [])].sort((a, b) => a.n - b.n);
+  const first = new Map(data.steps.map((s) => [s.id, s.kind]));
+  const joins = (g: (typeof gs)[number]) =>
+    g.parent != null && (g.via === "ask" || g.via === "answer") && first.get(g.steps[0]) !== "prompt";
+  // Each SubGraph's box, by the first SubGraph in it.
+  const boxOf = new Map<number, number>();
+  const shared = new Map<number, number>();
+  for (const g of gs) {
+    const into = joins(g) ? shared.get(g.parent!) : undefined;
+    boxOf.set(g.n, into ?? g.n);
+    if (joins(g) && into === undefined) shared.set(g.parent!, g.n);
+  }
+  const out = new Map<number, { n: number; ns: number[]; parent: number | null; via: string; p?: number | null; steps: string[] }>();
+  for (const g of gs) {
+    const b = boxOf.get(g.n)!;
+    const box = out.get(b) ?? { n: b, ns: [], parent: null, via: "none", p: null, steps: [] };
+    box.ns.push(g.n);
+    box.steps.push(...g.steps);
+    if (b === g.n && g.parent != null) {
+      box.parent = boxOf.get(g.parent) ?? g.parent;
+      box.via = g.via;
+      box.p = g.p;
+    }
+    out.set(b, box);
+  }
+  // A box's steps in the order they were made.
+  const order = new Map(data.steps.map((s, i) => [s.id, i]));
+  for (const box of out.values()) box.steps.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  return [...out.values()];
+}
+
+function layoutTree(data: RecordData, picked: string | null) {
+  const gs = boxes(data);
   const byN = new Map(gs.map((g) => [g.n, g]));
   const step = new Map(data.steps.map((s) => [s.id, s]));
   const stepsOf = (n: number) => (byN.get(n)?.steps ?? []).map((id) => step.get(id)).filter((s): s is Step => !!s);
@@ -122,7 +158,7 @@ function layoutTree(data: RecordData, picked: string | null) {
     const steps = stepsOf(n);
     const own = HEAD + steps.length * ROW + 8;
     const x = depth * (BOX + 90);
-    nodes.push({ id: `g${n}`, type: "sg", position: { x, y }, data: { n, steps, picked }, draggable: false, selectable: false });
+    nodes.push({ id: `g${n}`, type: "sg", position: { x, y }, data: { n, ns: byN.get(n)?.ns ?? [n], steps, picked }, draggable: false, selectable: false });
     steps.forEach((s, i) => spots.set(s.id, { x: x + BOX / 2, y: y + HEAD + i * ROW + ROW / 2 }));
     let below = y;
     for (const c of children.get(n) ?? []) if (!placed.has(c)) below += place(c, depth + 1, below);
