@@ -42,7 +42,25 @@ fn attention(graph: &Value) -> Value {
         .filter(|c| c.get("decision_mode").is_some_and(Value::is_string))
         .max_by_key(|c| c.get("decided_at").and_then(Value::as_i64))
         .and_then(|c| c.get("decision_mode").cloned());
-    json!({"risky": risky, "undecided": undecided, "from_result": from_result, "mode": mode})
+    // Each intent stated and the Calls made under it, as the database query gives them.
+    let mut nodes: Vec<&Value> = graph["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|n| n["kind"] == "Intent" || n["kind"] == "Call")
+        .collect();
+    nodes.sort_by_key(|n| n["props"]["order"].as_i64());
+    let mut intents: Vec<(Value, i64)> = Vec::new();
+    for n in nodes {
+        if n["kind"] == "Intent" {
+            if n["props"]["intent"].is_string() {
+                intents.push((n["props"]["intent"].clone(), 0));
+            }
+        } else if let Some((_, calls)) = intents.last_mut() {
+            *calls += 1;
+        }
+    }
+    json!({"risky": risky, "undecided": undecided, "from_result": from_result, "mode": mode, "intents": intents})
 }
 
 #[cfg_attr(not(feature = "admin"), allow(dead_code))]

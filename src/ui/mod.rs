@@ -572,7 +572,14 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
                         .last_session
                         .clone()
                         .filter(|id| list.iter().any(|s| &s.id == id));
-                    let pick = open.or(last).or_else(|| list.first().map(|s| s.id.clone()));
+                    // VIEWER_SESSION names one to open first by the start of its ID.
+                    let asked = std::env::var("VIEWER_SESSION").ok().and_then(|p| {
+                        list.iter().find(|s| s.id.starts_with(&p)).map(|s| s.id.clone())
+                    });
+                    let pick = open
+                        .or(asked)
+                        .or(last)
+                        .or_else(|| list.first().map(|s| s.id.clone()));
                     if *current.peek() != pick {
                         current.set(pick);
                     }

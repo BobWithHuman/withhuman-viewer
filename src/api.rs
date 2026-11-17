@@ -73,12 +73,51 @@ impl Backend {
             Ok(self.demo.lock().expect("demo lock").sessions())
         } else {
             if crate::pg::is_postgres(&settings) {
-                crate::pg::Postgres {
+                let pg = crate::pg::Postgres {
                     settings: &settings,
                     pool: &self.pg,
-                }
-                .sessions()
-                .await
+                };
+                // What was read is kept in a file beside the settings, and the next read asks only
+                // for the sessions begun or with a Call seen since a little before the latest kept.
+                let path = sessions_cache(&settings.neo4j_url);
+                let kept: Vec<Value> = std::fs::read(&path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                    .unwrap_or_default();
+                let at = |row: &Value| row["last_at"].as_i64().or(row["created_at"].as_i64());
+                let since = kept.iter().filter_map(at).max().map(|t| t - SESSIONS_OVERLAP_MS);
+                // With what was kept, the IDs of all there are, to drop those gone since.
+                let (fresh, ids) = tokio::join!(pg.sessions(since), async {
+                    match since {
+                        Some(_) => pg.session_ids().await.ok(),
+                        None => None,
+                    }
+                });
+                fresh.map(|fresh| {
+                    let mut all = match fresh {
+                        Value::Array(rows) => rows,
+                        _ => Vec::new(),
+                    };
+                    let read: std::collections::HashSet<String> = all
+                        .iter()
+                        .filter_map(|r| r["id"].as_str().map(str::to_owned))
+                        .collect();
+                    if since.is_some() {
+                        let there: Option<std::collections::HashSet<String>> =
+                            ids.map(|ids| ids.into_iter().collect());
+                        all.extend(kept.into_iter().filter(|r| {
+                            r["id"].as_str().is_some_and(|id| {
+                                !read.contains(id) && there.as_ref().is_none_or(|t| t.contains(id))
+                            })
+                        }));
+                    }
+                    all.sort_by_key(|r| std::cmp::Reverse(r["created_at"].as_i64()));
+                    all.truncate(SESSIONS_KEPT);
+                    if let Ok(text) = serde_json::to_vec(&all) {
+                        let _ = std::fs::write(&path, text);
+                    }
+                    Value::Array(all)
+                })
             } else {
                 Neo4j {
                     client: &self.client,
@@ -517,6 +556,18 @@ impl Backend {
                 .await
             }
         };
+        if value.is_ok() && crate::pg::is_postgres(&settings) {
+            let path = sessions_cache(&settings.neo4j_url);
+            if let Some(mut kept) = std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Vec<Value>>(&bytes).ok())
+            {
+                kept.retain(|r| r["id"].as_str() != Some(session));
+                if let Ok(text) = serde_json::to_vec(&kept) {
+                    let _ = std::fs::write(&path, text);
+                }
+            }
+        }
         value
             .map(|v| v["deleted"].as_i64().unwrap_or(0))
             .map_err(|e| e.error)
@@ -698,6 +749,21 @@ fn clone_change(c: &Change) -> Change {
 const FACTS_OVERLAP_MS: i64 = 24 * 60 * 60 * 1000;
 /// As many Calls as one read of the store hands over.
 const FACTS_KEPT: usize = 50_000;
+
+/// How far before the latest session kept the next read of the sessions starts, for Calls
+/// decided after they were seen.
+const SESSIONS_OVERLAP_MS: i64 = 10 * 60 * 1000;
+/// As many sessions as one read of the store hands over.
+const SESSIONS_KEPT: usize = 5_000;
+
+/// The file a store's sessions are kept in between reads, named after the store's address.
+fn sessions_cache(url: &str) -> std::path::PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut hasher);
+    // The number is the rows' shape: a file of an older shape is left unread.
+    config_dir().join(format!("sessions1-{:016x}.json", hasher.finish()))
+}
 
 /// The file a store's Calls are kept in between reads, named after the store's address.
 fn facts_cache(url: &str) -> std::path::PathBuf {

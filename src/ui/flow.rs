@@ -502,18 +502,42 @@ pub fn SessionPick(class: &'static str) -> Element {
 }
 
 /// The security team's session list, dropped from the session's name in the top bar: the
-/// sessions the newest first, narrowed by what is typed, each with its folder, machine, when, and
-/// the Calls blocked and held; the one open marked. Pressing one opens it.
+/// machines first (by their host name, the newest heard from first, with how many sessions and
+/// Calls blocked and held), then the picked machine's sessions, the newest first, each with its
+/// folder, when, and the Calls blocked and held; the one open marked. What is typed narrows both.
 #[component]
 pub fn SessionDrop() -> Element {
     let state = use_context::<AppState>();
+    let backend = use_context::<Arc<crate::api::Backend>>();
     let mut picking = use_context::<Picking>().0;
     let mut query = use_signal(String::new);
+    // The machine picked: its client ID, or [`ALL`], or [`NONE`] for sessions no machine sent.
+    let mut machine = use_signal(String::new);
+    // The machines' host names, from the inventory.
+    let hosts = use_resource(move || {
+        let b = backend.clone();
+        let _ = (state.reload)();
+        async move {
+            let inv = b.inventory().await.ok().flatten().unwrap_or_default();
+            inv.clients
+                .into_iter()
+                .filter_map(|c| Some((c.client_id, (c.hostname?, c.os))))
+                .collect::<HashMap<String, (String, Option<String>)>>()
+        }
+    });
     use_effect(move || {
         if picking() {
             query.set(String::new());
+            let current = state.current.peek().clone().unwrap_or_default();
+            let of = match &*state.sessions.peek() {
+                Load::Ready(list) => list.iter().find(|s| s.id == current).map(machine_of),
+                _ => None,
+            };
+            machine.set(of.unwrap_or_else(|| ALL.into()));
             document::eval(
-                "requestAnimationFrame(() => document.getElementById('tb-drop-find')?.focus())",
+                "requestAnimationFrame(() => { document.getElementById('tb-drop-find')?.focus(); \
+                 const l = document.querySelector('.tb-drop-list'); if (l) l.scrollTop = 0; \
+                 document.querySelector('.tb-drop-row.on')?.scrollIntoView({ block: 'nearest' }); })",
             );
         }
     });
@@ -521,26 +545,62 @@ pub fn SessionDrop() -> Element {
         return rsx! {};
     }
     let current = state.current.read().clone().unwrap_or_default();
+    let hosts = hosts.read().clone().unwrap_or_default();
+    let name_of = |key: &str| match key {
+        ALL => "전체".to_owned(),
+        NONE => "기기 모름".to_owned(),
+        k => hosts.get(k).map_or_else(|| clip(k, 24), |(h, _)| h.clone()),
+    };
     let q = query().trim().to_lowercase();
-    let list: Vec<Session> = match &*state.sessions.read() {
+    let found: Vec<Session> = match &*state.sessions.read() {
         Load::Ready(list) => list
             .iter()
             .filter(|s| {
+                let key = machine_of(s);
                 q.is_empty()
                     || [
                         s.title(),
+                        s.prompt.as_deref().unwrap_or(""),
                         s.folder().as_str(),
-                        s.client.as_deref().unwrap_or(""),
+                        key.as_str(),
+                        name_of(&key).as_str(),
                         s.id.as_str(),
                     ]
-                    .iter()
-                    .any(|t| t.to_lowercase().contains(&q))
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&q))
             })
-            .take(80)
             .cloned()
             .collect(),
         _ => Vec::new(),
     };
+    // The machines with sessions found, the newest heard from first; all of them on top.
+    let mut machines: Vec<Shelf> = Vec::new();
+    for s in &found {
+        let key = machine_of(s);
+        let at = s.last_at.or(s.created_at).unwrap_or(0);
+        match machines.iter_mut().find(|m| m.key == key) {
+            Some(m) => m.add(s, at),
+            None => {
+                let mut m = Shelf { name: name_of(&key), key, ..Shelf::default() };
+                m.add(s, at);
+                machines.push(m);
+            }
+        }
+    }
+    machines.sort_by(|a, b| (a.key == NONE).cmp(&(b.key == NONE)).then(b.last.cmp(&a.last)));
+    let mut all = Shelf { key: ALL.into(), name: name_of(ALL), ..Shelf::default() };
+    for s in &found {
+        all.add(s, s.last_at.or(s.created_at).unwrap_or(0));
+    }
+    machines.insert(0, all);
+    // A machine with nothing found gives way to the first that has some.
+    let picked = machine();
+    let picked = if machines.iter().any(|m| m.key == picked) { picked } else { ALL.into() };
+    let list: Vec<Session> = found
+        .into_iter()
+        .filter(|s| picked == ALL || machine_of(s) == picked)
+        .take(120)
+        .collect();
     let first = list.first().map(|s| s.id.clone());
     rsx! {
         div { class: "tb-drop-shade", onclick: move |_| picking.set(false) }
@@ -551,7 +611,7 @@ pub fn SessionDrop() -> Element {
                 id: "tb-drop-find",
                 class: "tb-drop-find",
                 value: "{query}",
-                placeholder: "세션·폴더·단말",
+                placeholder: "기기·세션·폴더",
                 oninput: move |e| query.set(e.value()),
                 onkeydown: move |e| {
                     if let (Key::Enter, Some(id)) = (e.key(), first.clone()) {
@@ -560,37 +620,80 @@ pub fn SessionDrop() -> Element {
                     }
                 },
             }
-            div { class: "tb-drop-list",
-                if list.is_empty() { div { class: "tb-drop-none", "없음" } }
-                for s in list {
-                    {
-                        let id = s.id.clone();
-                        let on = id == current;
-                        let tone = if s.denied > 0 { "red" } else if s.reviewed > 0 { "amber" } else { "plain" };
-                        let place = [s.folder(), s.client.clone().unwrap_or_default()]
-                            .into_iter()
-                            .filter(|t| !t.is_empty())
-                            .collect::<Vec<_>>()
-                            .join(" · ");
-                        let when = day_time(s.last_at.or(s.created_at));
-                        rsx! {
-                            button {
-                                key: "{id}",
-                                class: if on { "tb-drop-row on" } else { "tb-drop-row" },
-                                title: "{s.title()}",
-                                onclick: move |_| {
-                                    state.open_session(id.clone());
-                                    picking.set(false);
-                                },
-                                i { class: "dot {tone}" }
-                                span { class: "main",
-                                    span { class: "t", "{clip(s.title(), 60)}" }
-                                    span { class: "p", "{place}" }
+            div { class: "tb-drop-cols",
+                div { class: "tb-drop-machines",
+                    for m in machines {
+                        {
+                            let key = m.key.clone();
+                            let on = key == picked;
+                            let os = hosts.get(&key).and_then(|(_, os)| os.clone()).unwrap_or_default();
+                            let kind = if key == ALL { "all" } else if key == NONE { "none" } else { "pc" };
+                            rsx! {
+                                button {
+                                    key: "{key}",
+                                    class: if on { "tb-drop-machine on" } else { "tb-drop-machine" },
+                                    title: "{key}",
+                                    onclick: move |_| {
+                                        machine.set(key.clone());
+                                        document::eval("const l = document.querySelector('.tb-drop-list'); if (l) l.scrollTop = 0;");
+                                    },
+                                    i { class: "ico {kind}" }
+                                    span { class: "main",
+                                        span { class: "t", "{m.name}" }
+                                        span { class: "p",
+                                            "세션 {m.sessions}"
+                                            if !os.is_empty() { " · {os}" }
+                                        }
+                                    }
+                                    span { class: "side",
+                                        if m.denied > 0 { span { class: "n red", "차단 {m.denied}" } }
+                                        if m.reviewed > 0 { span { class: "n amber", "확인 {m.reviewed}" } }
+                                    }
                                 }
-                                span { class: "side",
-                                    if s.denied > 0 { span { class: "n red", "차단 {s.denied}" } }
-                                    if s.reviewed > 0 { span { class: "n amber", "확인 {s.reviewed}" } }
-                                    span { class: "w", "{when}" }
+                            }
+                        }
+                    }
+                }
+                div { class: "tb-drop-list",
+                    if list.is_empty() { div { class: "tb-drop-none", "없음" } }
+                    for s in list {
+                        {
+                            let id = s.id.clone();
+                            let on = id == current;
+                            let tone = if s.denied > 0 { "red" } else if s.reviewed > 0 { "amber" } else { "plain" };
+                            let place = if picked == ALL {
+                                [s.folder(), name_of(&machine_of(&s))]
+                                    .into_iter()
+                                    .filter(|t| !t.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join(" · ")
+                            } else {
+                                s.folder()
+                            };
+                            let when = day_time(s.last_at.or(s.created_at));
+                            let more = s.other_intents().len();
+                            rsx! {
+                                button {
+                                    key: "{id}",
+                                    class: if on { "tb-drop-row on" } else { "tb-drop-row" },
+                                    title: "{s.title()}",
+                                    onclick: move |_| {
+                                        state.open_session(id.clone());
+                                        picking.set(false);
+                                    },
+                                    i { class: "dot {tone}" }
+                                    span { class: "main",
+                                        span { class: "t",
+                                            "{clip(s.title(), 60)}"
+                                            if more > 0 { span { class: "more", "+{more}" } }
+                                        }
+                                        span { class: "p", "{place}" }
+                                    }
+                                    span { class: "side",
+                                        if s.denied > 0 { span { class: "n red", "차단 {s.denied}" } }
+                                        if s.reviewed > 0 { span { class: "n amber", "확인 {s.reviewed}" } }
+                                        span { class: "w", "{when}" }
+                                    }
                                 }
                             }
                         }
@@ -598,6 +701,36 @@ pub fn SessionDrop() -> Element {
                 }
             }
         }
+    }
+}
+
+/// The session picker's choice of every machine, and of the sessions no machine sent.
+const ALL: &str = "*";
+const NONE: &str = "?";
+
+/// The machine a session came from, as the picker keys it.
+fn machine_of(s: &Session) -> String {
+    s.client.clone().filter(|c| !c.is_empty()).unwrap_or_else(|| NONE.into())
+}
+
+/// A machine in the session picker: its sessions and their Calls blocked and held, and when it
+/// was last heard from.
+#[derive(Default)]
+struct Shelf {
+    key: String,
+    name: String,
+    sessions: usize,
+    denied: i64,
+    reviewed: i64,
+    last: i64,
+}
+
+impl Shelf {
+    fn add(&mut self, s: &Session, at: i64) {
+        self.sessions += 1;
+        self.denied += s.denied;
+        self.reviewed += s.reviewed;
+        self.last = self.last.max(at);
     }
 }
 

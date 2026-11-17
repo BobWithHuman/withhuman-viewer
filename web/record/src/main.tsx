@@ -29,7 +29,12 @@ function App() {
     <TT.Provider>
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <header className="shrink-0 px-5 pt-4 pb-3">
-          <h1 className="truncate text-[22px] leading-tight font-semibold tracking-[-0.01em]">"{data.session.title}"</h1>
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="truncate text-[22px] leading-tight font-semibold tracking-[-0.01em]">{data.session.quote ? `"${data.session.title}"` : data.session.title}</h1>
+            {!!data.session.others?.length && (
+              <span title={data.session.others.join("\n")} className="shrink-0 cursor-default rounded-md bg-white/8 px-1.5 py-0.5 text-[12px] font-semibold text-mut tabular-nums">+{data.session.others.length}</span>
+            )}
+          </div>
           <div className="mt-1.5 flex items-center gap-2 text-[13px] text-mut">
             <span>{data.session.device}</span><span className="text-dim">|</span><span className="font-mono text-[12px]">세션 {data.session.id}</span>
             {caught > 0 && <><span className="text-dim">|</span><span className="inline-flex items-center gap-1 rounded-md bg-catch/15 px-1.5 text-[12px] font-semibold text-catch"><TriangleAlert className="size-3" />원인 {caught}</span></>}

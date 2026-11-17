@@ -236,15 +236,20 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
         })
         .collect();
 
-    let title = m
-        .asks
-        .first()
-        .map(|a| clip(&a.text, 80))
-        .or_else(|| session.and_then(|s| s.prompt.clone()))
+    // The session's name, as its list gives it: the intent it did the most under, or its first
+    // prompt, quoted.
+    let named = session.map(|s| s.title()).filter(|t| !t.is_empty());
+    let quote = named.is_none_or(|t| session.and_then(|s| s.prompt.as_deref()) == Some(t));
+    let title = named
+        .map(|t| clip(t, 80))
+        .or_else(|| m.asks.first().map(|a| clip(&a.text, 80)))
         .unwrap_or_else(|| "세션".into());
+    let others = session.map_or_else(Vec::new, |s| s.other_intents());
     json!({
         "session": {
             "title": title,
+            "quote": quote,
+            "others": others,
             "device": session.and_then(|s| s.client.clone()).unwrap_or_else(|| "단말 모름".into()),
             "folder": session.and_then(|s| s.cwd.clone()),
             "id": id,
