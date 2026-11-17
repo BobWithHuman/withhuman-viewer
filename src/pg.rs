@@ -73,11 +73,12 @@ fn ran(call: &str) -> String {
 }
 
 static SESSIONS: LazyLock<String> = LazyLock::new(|| {
-    r#"
+    format!(
+        r#"
 SELECT s.session_id AS id, s.version, s.created_at,
        c.nodes, c.calls, c.denied, c.reviewed, c.allowed, c.failed, c.undecided, c.risky, c.from_result, c.last_at,
-       (SELECT payload_json FROM nodes WHERE session_id = s.session_id AND kind = 'Request'
-        ORDER BY "order" LIMIT 1) AS first_request,
+       (SELECT left({prompt}, 1200) FROM nodes WHERE session_id = s.session_id AND kind = 'Request'
+        ORDER BY "order" LIMIT 1) AS prompt,
        (SELECT intent FROM nodes WHERE session_id = s.session_id AND kind = 'Intent'
         ORDER BY "order" DESC LIMIT 1) AS intent,
        -- Each intent stated and the Calls made under it, in order.
@@ -93,7 +94,11 @@ SELECT s.session_id AS id, s.version, s.created_at,
         ORDER BY "order" LIMIT 1) AS client,
        (SELECT decision_mode FROM nodes WHERE session_id = s.session_id AND kind = 'Call'
         AND decision_mode IS NOT NULL ORDER BY decided_at DESC NULLS LAST LIMIT 1) AS mode
-FROM (SELECT * FROM sessions WHERE created_at IS NOT NULL ORDER BY created_at DESC LIMIT 5000) s
+FROM (SELECT * FROM sessions WHERE created_at IS NOT NULL
+      -- Only those begun or with a Call seen since $2, when it is given.
+      AND ($2::bigint IS NULL OR created_at >= $2 OR session_id IN (
+        SELECT session_id FROM nodes WHERE kind = 'Call' AND observed_at >= $2))
+      ORDER BY created_at DESC LIMIT 5000) s
 CROSS JOIN LATERAL (
   SELECT count(*) AS nodes,
          count(*) FILTER (WHERE kind = 'Call') AS calls,
@@ -108,8 +113,9 @@ CROSS JOIN LATERAL (
   FROM nodes WHERE session_id = s.session_id
 ) c
 ORDER BY s.created_at DESC
-"#
-    .to_owned()
+"#,
+        prompt = field("payload_json", "prompt"),
+    )
 });
 
 /// Every Call cut down to what the security team's charts count, as `graph::CALL_FACTS`.
@@ -495,28 +501,32 @@ impl Postgres<'_> {
             .unwrap_or(0))
     }
 
-    /// The sessions, newest first, each with its first prompt's text rather than the Request's
-    /// payload.
-    pub async fn sessions(&self) -> Result<Value, ApiError> {
-        let mut rows = self.rows(&SESSIONS, &[(&IRREVERSIBLE, Type::TEXT)]).await?;
+    /// The IDs of the sessions [`Self::sessions`] reads all of, to tell those gone.
+    pub async fn session_ids(&self) -> Result<Vec<String>, ApiError> {
+        let rows = self
+            .rows(
+                "SELECT session_id AS id FROM sessions WHERE created_at IS NOT NULL \
+                 ORDER BY created_at DESC LIMIT 5000",
+                &[],
+            )
+            .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_owned))
+            .collect())
+    }
+
+    /// The sessions, newest first, each with its first prompt's text; only those begun or with a
+    /// Call seen since `since` (ms), when it is given.
+    pub async fn sessions(&self, since: Option<i64>) -> Result<Value, ApiError> {
+        let mut rows = self
+            .rows(&SESSIONS, &[(&IRREVERSIBLE, Type::TEXT), (&since, Type::INT8)])
+            .await?;
         rows.sort_by_key(|r| std::cmp::Reverse(r.get("created_at").and_then(Value::as_i64)));
         for row in &mut rows {
-            let request = row
-                .remove("first_request")
-                .and_then(|v| {
-                    v.as_str()
-                        .and_then(|s| serde_json::from_str::<Value>(s).ok())
-                })
-                .unwrap_or(Value::Null);
-            let prompt = request
-                .get("prompt")
-                .and_then(Value::as_str)
-                .map(|p| clip(p, 300));
-            row.insert("prompt".into(), prompt.map_or(Value::Null, Value::String));
+            unescape(row, "prompt", 300);
         }
-        Ok(Value::from(
-            rows.into_iter().map(Value::Object).collect::<Vec<_>>(),
-        ))
+        Ok(all(rows))
     }
 
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
@@ -868,16 +878,18 @@ mod tests {
         };
         time("connect", &|| rt.block_on(pg.count_sessions()).map(|n| json!([n])));
         time("one trip (SELECT 1)", &|| rt.block_on(pg.rows("SELECT 1 AS one", &[])).map(all));
-        time("sessions", &|| rt.block_on(pg.sessions()));
-        let counted = format!("SELECT count(*) AS n FROM ({}) q", *SESSIONS);
-        time("sessions, server only", &|| rt.block_on(pg.rows(&counted, &[(&IRREVERSIBLE, Type::TEXT)])).map(all));
-        let plain = SESSIONS.replace(
-            &SESSIONS[SESSIONS.find("       -- Each intent stated").unwrap()..SESSIONS.find(" AS intents,").unwrap() + 12],
-            "",
-        );
-        time("sessions without intents", &|| {
-            rt.block_on(pg.rows(&plain, &[(&IRREVERSIBLE, Type::TEXT)])).map(all)
+        time("sessions", &|| rt.block_on(pg.sessions(None)));
+        // Every column worked out, but only its length sent.
+        let counted = format!("SELECT sum(length(q::text)) AS n FROM ({}) q", *SESSIONS);
+        let none: Option<i64> = None;
+        time("sessions, server only", &|| {
+            rt.block_on(pg.rows(&counted, &[(&IRREVERSIBLE, Type::TEXT), (&none, Type::INT8)])).map(all)
         });
+        let hour = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64 - 3600 * 1000);
+        time("sessions, last hour", &|| rt.block_on(pg.sessions(Some(hour))));
+        time("session IDs", &|| rt.block_on(pg.session_ids()).map(|v| json!(v)));
         time("call facts, all", &|| rt.block_on(pg.call_facts(None)));
         let day = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -887,7 +899,7 @@ mod tests {
         time("triage", &|| rt.block_on(pg.triage()));
         time("inventory", &|| rt.block_on(pg.inventory()));
         let newest = rt
-            .block_on(pg.sessions())
+            .block_on(pg.sessions(Some(0)))
             .ok()
             .and_then(|v| v[0]["id"].as_str().map(str::to_owned))
             .unwrap_or_default();
@@ -935,7 +947,7 @@ mod tests {
 
         // The sessions and the counts the pages read off them.
         let ds = demo.sessions();
-        let ps = rt.block_on(pg.sessions()).unwrap();
+        let ps = rt.block_on(pg.sessions(None)).unwrap();
         let by_id = |v: &Value| -> std::collections::BTreeMap<String, Value> {
             v.as_array()
                 .unwrap()
