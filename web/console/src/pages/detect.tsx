@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { send } from "../bridge";
 import { type RankBy, Ranking } from "./detect/breakdown";
 import { type Call, DIM, DIMS, type Data, type Dim, type Filter, type Period, VERDICTS, demo, named, passes, rangeLabel, span, within } from "./detect/data";
-import { type Ask, type Told, Watch } from "./detect/list";
+import { type Ask, Watch } from "./detect/list";
 import { Trend } from "./detect/trend";
 
 const PERIODS: [number, string][] = [[1, "24시간"], [7, "7일"], [30, "30일"], [0, "전체"]];
@@ -47,18 +47,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const first = useMemo(() => d.calls.reduce((a, c) => (c.at !== null && c.at < a ? c.at : a), now), [d, now]);
   const blank = d.loading && !d.calls.length;
   const marks = d.triage ?? {}, blocked = d.blocked ?? [];
-  // The machines to do something about: those with Calls nothing decided, set up yet never
-  // heard, heard yet never set up, newly registered, or gone quiet.
-  const alerts = useMemo<Told[]>(() => {
-    const quiet = new Set<number>();
-    for (const [hour, m, , , undecided] of d.cover) if (undecided > 0 && hour + 3_600_000 > from && hour < to) quiet.add(m);
-    const of = (list: typeof d.alerts extends infer A ? A extends { new: infer L } ? L : never : never, why: Told["why"]) => (list ?? []).map((a) => ({ ...a, why }));
-    return [
-      ...[...quiet].map((m) => ({ id: d.machines[m], host: null, user: null, at: null, edr: null, why: "undecided" as const })),
-      ...of(d.alerts?.installed ?? [], "installed"), ...of(d.alerts?.unregistered ?? [], "unregistered"),
-      ...of(d.alerts?.new ?? [], "new"), ...of(d.alerts?.silent ?? [], "silent"),
-    ];
-  }, [d, from, to]);
   const chips: { key: string; label: string; value: string; drop: () => void }[] = [
     ...(period.range ? [{ key: "range", label: "기간", value: rangeLabel(period.range), drop: () => setPeriod((p) => ({ ...p, range: null })) }] : []),
     ...DIMS.filter((dim) => filter[dim] !== undefined).map((dim) => ({ key: dim, label: DIM[dim].label, value: dim === "session" ? named(d.calls.find((c) => c.session === filter.session)) ?? DIM.session.name(filter.session!) : DIM[dim].name(filter[dim]!), drop: () => setFilter((f) => ({ ...f, [dim]: undefined })) })),
@@ -137,7 +125,7 @@ export default function Page({ data }: { data: unknown | null }) {
               </div>
             </Panel>
           </div>
-          <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} alerts={alerts} className="h-[clamp(420px,58vh,760px)] shrink-0" />
+          <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} className="h-[clamp(420px,58vh,760px)] shrink-0" />
         </div>
       </div>
     </div>

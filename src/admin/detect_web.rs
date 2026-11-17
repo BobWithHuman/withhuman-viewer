@@ -101,6 +101,42 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
     }
 }
 
+/// What the Call that told this one to act was on, by kind (`web`, `file`, `tool`, `command`)
+/// and a short name: a URL's host, a file's name, an MCP tool's own name, a command's program.
+pub(super) fn cause_of(cause: &str) -> (&'static str, String) {
+    let cause = cause.trim();
+    if let Some(rest) = cause
+        .strip_prefix("https://")
+        .or_else(|| cause.strip_prefix("http://"))
+    {
+        let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+        return ("web", host.to_owned());
+    }
+    if let Some(rest) = cause.strip_prefix("mcp__") {
+        return (
+            "tool",
+            rest.split_once("__").map_or(rest, |(_, t)| t).to_owned(),
+        );
+    }
+    if !cause.contains(char::is_whitespace) {
+        if cause.contains(['/', '\\']) {
+            let name = cause
+                .trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(cause);
+            return ("file", name.to_owned());
+        }
+        if !cause.contains('.') {
+            return ("tool", cause.to_owned());
+        }
+        return ("file", cause.to_owned());
+    }
+    let program =
+        program_of(cause).unwrap_or_else(|| cause.split_whitespace().next().unwrap_or(cause));
+    ("command", program.to_owned())
+}
+
 /// The program a shell command runs: past `cd` and the like, settings (`A=b`), wrappers such as
 /// `sudo`, `env` or `timeout` with their options, and into what `bash -c` is given; by its file
 /// name.
@@ -301,6 +337,8 @@ fn call(f: &CallFact, severity: Severity, leak: Option<&super::secrets::Leak>) -
         "kind": detection_kind(f).or_else(|| leak.map(|_| "secret_out".to_owned())),
         "action": action_of(f),
         "cause": f.cause,
+        "cause_kind": f.cause.as_deref().map(|c| cause_of(c).0),
+        "cause_name": f.cause.as_deref().map(|c| cause_of(c).1),
         "source": source_of(f),
         "tool": f.tool,
         // A shell command's program, which the tools are told apart by.
@@ -458,6 +496,37 @@ pub(super) fn data(read: &Read) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_cause_by_kind_and_short_name() {
+        use super::cause_of;
+        let named = |c: &str| {
+            let (k, n) = cause_of(c);
+            (k, n)
+        };
+        assert_eq!(
+            named("https://pastebin.com/raw/x?y=1"),
+            ("web", "pastebin.com".into())
+        );
+        assert_eq!(
+            named("/Users/a/proj/deploy.sh"),
+            ("file", "deploy.sh".into())
+        );
+        assert_eq!(
+            named("C:\\WithHuman\\notes.md"),
+            ("file", "notes.md".into())
+        );
+        assert_eq!(
+            named("mcp__internal_workspace__get_page"),
+            ("tool", "get_page".into())
+        );
+        assert_eq!(named("WebFetch"), ("tool", "WebFetch".into()));
+        assert_eq!(named("README.md"), ("file", "README.md".into()));
+        assert_eq!(
+            named("cd C:\\WithHuman\\bin && python3 run.py"),
+            ("command", "python3".into())
+        );
+    }
+
     use super::*;
 
     fn fact(client: &str, at: i64, decision: Option<&str>, mode: Option<&str>) -> CallFact {
