@@ -6,6 +6,13 @@ import type { Kind, Step, Svc, Verdict } from "./data";
 import { Code } from "./code";
 import { isLong, LongText } from "./longtext";
 
+export const clock = (at: Step["at"]) => {
+  if (at === undefined) return "";
+  if (typeof at === "string") return at;
+  const d = new Date(at), z = (n: number) => String(n).padStart(2, "0");
+  return `${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+};
+
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
 export function Tip({ label, children, side = "bottom" }: { label: string; children: ReactNode; side?: "top" | "bottom" | "right" | "left" }) {
@@ -69,9 +76,9 @@ export function toneHex(s: Step) {
 }
 
 export function VerdictChip({ s }: { s: Step }) {
-  if (s.verdict && s.verdict !== "allow") return <span className={cx("inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap", VERDICT[s.verdict][1])}><i className="size-1.5 rounded-full bg-current" />{VERDICT[s.verdict][0]}</span>;
-  if (s.catch) return <span className="inline-flex items-center gap-1 rounded-md bg-catch/15 px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap text-catch"><TriangleAlert className="size-3" />외부 지시 {s.catch.score}%</span>;
-  if (s.verdict === "allow") return <span className="rounded-md bg-white/6 px-2 py-0.5 text-[12px] text-mut">허용</span>;
+  if (s.verdict && s.verdict !== "allow") return <span className={cx("inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap", VERDICT[s.verdict][1])}><i className="size-1.5 rounded-full bg-current" />{VERDICT[s.verdict][0]}</span>;
+  if (s.catch) return <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-catch/15 px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap text-catch"><TriangleAlert className="size-3" />외부 지시 {s.catch.score}%</span>;
+  if (s.verdict === "allow") return <span className="shrink-0 rounded-md bg-white/6 px-2 py-0.5 text-[12px] whitespace-nowrap text-mut">허용</span>;
   return null;
 }
 
@@ -82,12 +89,12 @@ export function DetailBody({ s }: { s: Step }) {
       {s.text && (isLong(s.text.body)
         ? <LongText label={s.text.label} text={s.text.body} mark={s.text.mark} />
         : <div><div className="mb-1.5 text-[11.5px] text-mut">{s.text.label}</div><Code text={s.text.body} mark={s.text.mark} tool={s.detail.find(([k]) => k === "도구")?.[1] ?? s.type} /></div>)}
-      <dl className="grid grid-cols-[64px_1fr] gap-x-3 gap-y-1 text-[11.5px]">
+      <dl className="grid grid-cols-[64px_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11.5px]">
         {s.catch && <><dt className="text-mut">지시 확률</dt><dd className="m-0 flex items-center gap-1.5 text-fg"><TriangleAlert className="size-3.5 fill-catch text-[#282828]" />{s.catch.score}%</dd></>}
         {s.detail.map(([k, v], i) => (
           <div key={i} className="contents">
             <dt className="text-mut">{k}</dt>
-            <dd className="m-0 text-fg/85">{k === "판정" && s.verdict ? <span className={cx("rounded-md px-1.5 py-px text-[11px] font-semibold", VERDICT[s.verdict][1])}>{v}</span> : k === "규칙" ? <code className="font-mono text-[11px]">{v}</code> : v}</dd>
+            <dd className="m-0 min-w-0 text-fg/85 [overflow-wrap:anywhere]">{k === "판정" && s.verdict ? <span className={cx("rounded-md px-1.5 py-px text-[11px] font-semibold", VERDICT[s.verdict][1])}>{v}</span> : k === "규칙" ? <code className="font-mono text-[11px]">{v}</code> : v}</dd>
           </div>
         ))}
       </dl>

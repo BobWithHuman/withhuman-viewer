@@ -149,7 +149,12 @@ fn station_step(st: &Station) -> Value {
         Some("ALLOW") => "허용",
         _ => "판정 없음",
     };
-    let mut detail = vec![json!(["판정", decided]), json!(["도구", st.tool])];
+    // An MCP tool by its server and its own name, as people read them.
+    let tool = mcp.map_or_else(
+        || st.tool.clone(),
+        |(server, name)| format!("{server} · {name}"),
+    );
+    let mut detail = vec![json!(["판정", decided]), json!(["도구", tool])];
     if let Some(src) = &st.source {
         detail.push(json!([
             "출처",

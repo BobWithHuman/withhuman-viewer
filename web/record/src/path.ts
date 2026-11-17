@@ -10,9 +10,9 @@ export type Tie = "ask" | "cause" | "result" | "parent";
 export type Hop = { from: string; to: string; tie: Tie; label: string; p?: number };
 
 export const TIE: Record<Tie, { color: string; label: string }> = {
-  ask: { color: "#548cd0", label: "요청" },
+  ask: { color: "#548cd0", label: "요청에 따라" },
   cause: { color: "#f2a93b", label: "외부 지시" },
-  result: { color: "#bcbcbc", label: "결과" },
+  result: { color: "#bcbcbc", label: "결과 반환" },
   parent: { color: "#58c0a4", label: "이어 물음" },
 };
 

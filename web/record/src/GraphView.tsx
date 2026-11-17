@@ -6,7 +6,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type { RecordData, Step } from "./data";
 import { isLong } from "./longtext";
 import { type Hop, PARENT_LABEL, TIE, wayBack } from "./path";
-import { DetailBody, KIND_ICON, LogoDisc, ONLY, SvcLogo, Tip, VerdictChip, cx, flagged, tone, type Only } from "./parts";
+import { DetailBody, KIND_ICON, LogoDisc, ONLY, SvcLogo, Tip, VerdictChip, clock, cx, flagged, tone, type Only } from "./parts";
+import { WayFlow } from "./way";
 
 // 기록's graph: what the agent asked for and what came back, left to right. A step that was
 // caught or refused is drawn large with its verdict; a quiet one is a small dot. Seen two ways:
@@ -19,12 +20,6 @@ type D = { step: Step; picked: boolean; dim: boolean; large?: boolean };
 type Mode = "path" | "order";
 const Pick = createContext<(id: string) => void>(() => {});
 
-export const clock = (at: Step["at"]) => {
-  if (at === undefined) return "";
-  if (typeof at === "string") return at;
-  const d = new Date(at), z = (n: number) => String(n).padStart(2, "0");
-  return `${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
-};
 const bigStep = (s: Step) => flagged(s) || s.kind === "prompt";
 
 function StepNode({ data }: NodeProps<Node<D>>) {
@@ -107,6 +102,35 @@ const SG_TIE: Record<string, { color: string; label?: string; dashed?: boolean }
   untraced: { color: "#7a7a7a", label: "추적 없음", dashed: true },
   loose: { color: "#ef6b5e", label: "출처 못 찾음", dashed: true },
 };
+
+/** What a line's colour says, for the legend under the graph. */
+type Line = "ask" | "cause" | "parent" | "answer" | "next" | "untraced" | "loose";
+const LINE: Record<Line, { color: string; label: string; dashed?: boolean }> = {
+  next: { color: "#8a8a8a", label: "다음 단계" },
+  ask: { color: TIE.ask.color, label: "요청에 따라" },
+  cause: { color: TIE.cause.color, label: "외부 지시" },
+  parent: { color: TIE.parent.color, label: "이어 물음" },
+  answer: { color: "#6f6f6f", label: "답변" },
+  untraced: { color: "#7a7a7a", label: "추적 없음", dashed: true },
+  loose: { color: "#ef6b5e", label: "출처 못 찾음", dashed: true },
+};
+const LINES = Object.keys(LINE) as Line[];
+const lineOf = (via: string): Line => (via === "message" || via === "result" || via === "request" ? "parent" : (LINES as string[]).includes(via) ? (via as Line) : "ask");
+
+function Legend({ lines }: { lines: Set<Line> }) {
+  const shown = LINES.filter((l) => lines.has(l));
+  if (!shown.length) return null;
+  return (
+    <span className="flex items-center gap-2.5 border-l border-white/10 pl-2.5 text-[11px]">
+      {shown.map((l) => (
+        <span key={l} className="inline-flex items-center gap-1">
+          <svg width="14" height="4" aria-hidden><line x1="0" y1="2" x2="14" y2="2" stroke={LINE[l].color} strokeWidth="2" strokeDasharray={LINE[l].dashed ? "3 2" : undefined} /></svg>
+          {LINE[l].label}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 /** The SubGraphs as boxes: the agent's steps that hang the same way from one SubGraph (the
  * tools a prompt asked for, one by one, and the turn's answer) share a box; what a tool result
@@ -197,7 +221,8 @@ function layoutTree(data: RecordData, picked: string | null, match: Match) {
       markerEnd: { type: MarkerType.ArrowClosed, color: tie.color, width: 14, height: 14 }, zIndex: on ? 4 : 0,
     };
   });
-  return { nodes: nodes as Node[], edges, spots };
+  const lines = new Set<Line>(gs.filter(hangs).map((g) => lineOf(g.via)));
+  return { nodes: nodes as Node[], edges, spots, lines };
 }
 
 /** A link that is not the next step: an arch over the line, higher the farther, named. */
@@ -241,7 +266,7 @@ function HopEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targe
 
 const edgeTypes = { arc: ArcEdge, hop: HopEdge };
 
-function ToolStrip({ timeline, setTimeline }: { timeline: boolean; setTimeline: (v: boolean) => void }) {
+function ToolStrip({ timeline, setTimeline, zoom }: { timeline: boolean; setTimeline: (v: boolean) => void; zoom: boolean }) {
   const rf = useReactFlow();
   const btn = (label: string, icon: ReactNode, onClick?: () => void, on?: boolean) => (
     <Tip label={label} side="right" key={label}>
@@ -251,10 +276,12 @@ function ToolStrip({ timeline, setTimeline }: { timeline: boolean; setTimeline: 
   return (
     <div className="absolute top-3 left-3 z-10 flex flex-col items-center gap-0.5 rounded-lg bg-panel p-1 shadow-[0_8px_24px_rgba(0,0,0,.35)]">
       {btn("타임라인", <ListTree />, () => setTimeline(!timeline), timeline)}
-      <i className="my-1 h-px w-5 bg-white/10" />
-      {btn("확대", <ZoomIn />, () => rf.zoomIn({ duration: 250 }))}
-      {btn("전체 보기", <Scan />, () => rf.fitView({ duration: 400, padding: 0.2 }))}
-      {btn("축소", <ZoomOut />, () => rf.zoomOut({ duration: 250 }))}
+      {zoom && <>
+        <i className="my-1 h-px w-5 bg-white/10" />
+        {btn("확대", <ZoomIn />, () => rf.zoomIn({ duration: 250 }))}
+        {btn("전체 보기", <Scan />, () => rf.fitView({ duration: 400, padding: 0.2 }))}
+        {btn("축소", <ZoomOut />, () => rf.zoomOut({ duration: 250 }))}
+      </>}
     </div>
   );
 }
@@ -315,29 +342,10 @@ function layout(data: RecordData, picked: string | null, mode: Mode, way: { ids:
       data: { label: a.label, color: a.color }, style: { stroke: a.color, strokeWidth: 2.2, opacity: match ? 0.3 : 0.95 }, markerEnd: arrow(a.color, 14),
     });
   }
-  return { nodes, edges };
-}
-
-/** 경로: the way alone, its steps side by side the earliest first, each link named and counting
- * the steps it passes over. */
-function layoutWay(data: RecordData, picked: string | null, way: { ids: string[]; hops: Hop[] }) {
-  const order = [...way.ids].reverse();
-  const index = new Map(data.steps.map((s, i) => [s.id, i]));
-  const byId = new Map(data.steps.map((s) => [s.id, s]));
-  const nodes: Node<D>[] = order.map((id, i) => ({
-    id, type: "step", position: { x: i * 270 - 32, y: -32 },
-    data: { step: byId.get(id)!, picked: picked === id, dim: false, large: true }, draggable: false, selectable: false,
-  }));
-  const edges: Edge[] = way.hops.map((h) => {
-    const color = TIE[h.tie].color;
-    const skipped = Math.max(0, Math.abs((index.get(h.to) ?? 0) - (index.get(h.from) ?? 0)) - 1);
-    return {
-      id: `hop:${h.from}>${h.to}`, source: h.from, target: h.to, type: "hop",
-      data: { label: h.label, color, p: h.p, skipped },
-      style: { stroke: color, strokeWidth: 2.4 }, markerEnd: { type: MarkerType.ArrowClosed, color, width: 15, height: 15 },
-    };
-  });
-  return { nodes, edges };
+  const lines = new Set<Line>(path ? way.hops.map((h) => (h.tie === "result" ? "next" : h.tie)) : [
+    ...(data.links.length ? ["next" as const] : []), ...(data.causes.length ? ["cause" as const] : []), ...(data.parents?.length ? ["parent" as const] : []),
+  ]);
+  return { nodes, edges, lines };
 }
 
 /** 경로 or 순서, over the graph. */
@@ -409,10 +417,12 @@ export function GraphView({ data, only, setOnly }: { data: RecordData; only: Onl
   const go = (m: Mode) => { setMode(m); if (m === "path") setOnly(null); };
   const way = useMemo(() => wayBack(data, sel), [data, sel]);
   const tree = mode === "order" && (data.subgraphs?.length ?? 0) > 0;
-  const { nodes, edges, spots } = useMemo(
-    (): { nodes: Node[]; edges: Edge[]; spots?: Map<string, { x: number; y: number }> } =>
-      mode === "path" && way.ids.length ? layoutWay(data, open || sel, way) : tree ? layoutTree(data, sel, match) : layout(data, sel, mode, way, match),
-    [data, sel, open, mode, way, tree, match],
+  // 경로 is read, not panned: cards at their size, running on to the next line.
+  const flow = mode === "path" && way.ids.length > 0;
+  const { nodes, edges, spots, lines } = useMemo(
+    (): { nodes: Node[]; edges: Edge[]; spots?: Map<string, { x: number; y: number }>; lines?: Set<Line> } =>
+      flow ? { nodes: [], edges: [] } : tree ? layoutTree(data, sel, match) : layout(data, sel, mode, way, match),
+    [data, sel, mode, way, tree, match, flow],
   );
   /** Where a step is drawn, to bring it into view. */
   const spotOf = (id: string) => {
@@ -425,6 +435,7 @@ export function GraphView({ data, only, setOnly }: { data: RecordData; only: Onl
   const shown = mode === "path" && way.ids.length ? [...way.ids].reverse() : data.steps.filter((s) => !match || match(s)).map((s) => s.id);
   const byId = new Map(data.steps.map((s) => [s.id, s]));
   const locate = (id: string) => {
+    if (flow) { document.getElementById(`way-${id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }); return; }
     const at = spotOf(id);
     if (at) rf.setCenter(at.x, at.y, { zoom: Math.max(rf.getZoom(), 0.9), duration: 500 });
   };
@@ -455,7 +466,7 @@ export function GraphView({ data, only, setOnly }: { data: RecordData; only: Onl
         const next = order[Math.min(order.length - 1, Math.max(0, (at < 0 ? order.length - 1 : at) + by))];
         e.preventDefault();
         setOpen(next);
-        center(next);
+        locate(next);
         return;
       }
       const steps = match ? data.steps.filter(match) : data.steps;
@@ -484,15 +495,16 @@ export function GraphView({ data, only, setOnly }: { data: RecordData; only: Onl
   return (
     <Pick.Provider value={pick}>
       <div className="relative min-w-0 flex-1">
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodeClick={(_, n) => n.type === "step" && pick(n.id)}
-          panOnScroll panOnScrollMode={PanOnScrollMode.Free} zoomOnScroll={false} zoomOnPinch minZoom={0.2} maxZoom={1.8} proOptions={{ hideAttribution: true }} nodesConnectable={false} />
-        <ToolStrip timeline={timeline} setTimeline={setTimeline} />
+        {flow ? <WayFlow data={data} way={way} picked={open || sel} onPick={pick} /> : <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodeClick={(_, n) => n.type === "step" && pick(n.id)}
+          panOnScroll panOnScrollMode={PanOnScrollMode.Free} zoomOnScroll={false} zoomOnPinch minZoom={0.2} maxZoom={1.8} proOptions={{ hideAttribution: true }} nodesConnectable={false} />}
+        <ToolStrip timeline={timeline} setTimeline={setTimeline} zoom={!flow} />
         <ModeSwitch mode={mode} setMode={go} />
-        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-panel/90 px-3 py-1 text-[12px] text-mut tabular-nums">
+        <div className="pointer-events-none absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2.5 rounded-md bg-panel/90 px-3 py-1 text-[12px] whitespace-nowrap text-mut tabular-nums">
           {mode === "path" ? (way.ids.length ? `경로 ${way.ids.length}단계 · 턴 ${way.ids.filter((id) => byId.get(id)?.kind === "prompt").length}` : "도구를 누르면 경로")
             : only && match ? `${ONLY[only].label} ${Math.max(0, shown.indexOf(sel ?? "")) + 1}/${shown.length}`
             : `노드 ${data.steps.length} · 외부 지시 ${data.steps.filter((s) => s.catch).length} · 이어 물음 ${data.parents?.length ?? 0}`}
-          <span className="ml-2.5 inline-flex gap-0.5 align-middle">
+          {!flow && lines && <Legend lines={lines} />}
+          <span className="inline-flex gap-0.5 align-middle">
             {(mode === "path" && way.ids.length || match ? ["←", "→"] : ["←", "→", "↑", "↓"]).map((k) => (
               <kbd key={k} className="grid size-[17px] place-items-center rounded border border-white/15 bg-white/5 font-sans text-[10.5px] text-fg/70">{k}</kbd>
             ))}
@@ -502,7 +514,7 @@ export function GraphView({ data, only, setOnly }: { data: RecordData; only: Onl
       {timeline && (
         <aside className="my-3 mr-3 flex min-h-0 w-[340px] shrink-0 min-[1500px]:w-[380px] flex-col rounded-xl bg-panel shadow-[0_12px_40px_rgba(0,0,0,.45)]">
           <div className="flex h-10 shrink-0 items-center gap-2 px-3.5"><ListTree className="size-3.5" /><h2 className="text-[13px] font-semibold">{mode === "path" && way.ids.length ? "경로" : only && match ? ONLY[only].label : "타임라인"}</h2><span className="rounded-full bg-chip px-2 text-[11.5px] text-mut">{shown.length}</span></div>
-          <dl className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1 px-3.5 pb-3 text-[11.5px]">
+          <dl className="grid grid-cols-[60px_minmax(0,1fr)] gap-x-3 gap-y-1 px-3.5 pb-3 text-[11.5px]">
             {meta.filter(([, v]) => v).map(([k, v]) => <div key={k} className="contents"><dt className="text-mut">{k}</dt><dd className="m-0 truncate text-fg/85">{v}</dd></div>)}
           </dl>
           <div className="scroll relative min-h-0 flex-1 space-y-1 overflow-auto border-t border-white/8 px-3 pt-2.5 pb-5">
