@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 
 use super::main_page::NO_NAME;
 use super::secrets::{
-    Trail, destination, held, in_call, kind_label, node_label, outward, source_of, source_tool,
-    why_out,
+    Trail, destination, held, in_call, kind_label, node_label, normal, outward, source_of,
+    source_tool, why_out,
 };
 use crate::model::SecretMention;
 
@@ -38,7 +38,9 @@ fn verdict(m: &SecretMention) -> Option<&'static str> {
 /// One place a value showed in its session. Only a Call says what it acted on and where it sent.
 fn mention(m: &SecretMention, from: &str) -> Value {
     let call = in_call(m);
-    let out = call && outward(m);
+    // A Call sending the value where it is used (its own service, this machine, where the person
+    // said) sends nothing worth a look: not a send here.
+    let out = call && outward(m) && (held(m) || !normal(why_out(m, from)));
     json!({
         "seq": m.seq,
         "at": m.at,
@@ -49,6 +51,10 @@ fn mention(m: &SecretMention, from: &str) -> Value {
         "why": (out && !held(m)).then(|| why_out(m, from)),
         "mode": m.mode,
         "tool": m.tool,
+        // A shell command's program, past comments, settings and wrappers.
+        "program": (m.tool.as_deref() == Some("Bash"))
+            .then(|| m.target.as_deref().and_then(super::detect_web::program_of))
+            .flatten(),
         "said": m.said,
         "what": call.then(|| m.target.clone().or_else(|| m.tool.clone())).flatten(),
         "place": out.then(|| destination(m)),
@@ -133,7 +139,6 @@ pub(super) fn page(
                 "calls": t.calls,
                 "outRan": t.out_ran,
                 "outStopped": t.out_stopped,
-                "normal": t.normal,
                 "why": t.why,
                 "status": t.status().1,
                 "last": t.last,

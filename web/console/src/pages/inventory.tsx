@@ -16,7 +16,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { send } from "@/bridge";
-import { DataTable, Empty, PageHeader, Panel, ServiceLogo, ago, clock, num } from "@/kit";
+import { DataTable, Empty, PageHeader, Panel, ServiceLogo, SourceMeta, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
 import { Asks, type Ask } from "./inventory/dialogs";
@@ -165,8 +165,7 @@ export default function Page({ data }: { data: unknown | null }) {
 
   const header = (
     <PageHeader title="인벤토리" meta={<>
-      <span className="inline-flex items-center gap-1.5"><i className={cn("size-1.5 rounded-full", d.source.demo ? "bg-catch" : "bg-allow")} />{d.source.label}</span>
-      {d.status !== "loading" && <span className="tnum">{clock(d.now)}</span>}
+      <SourceMeta label={d.source.label} demo={d.source.demo} at={d.status !== "loading" ? d.now : null} />
     </>}>
       <Select value={String(windowMin)} onValueChange={(v) => setWindowMin(Number(v))}>
         <SelectTrigger size="sm" className="gap-1.5 text-[12.5px]"><span className="text-muted-foreground">활동 기준</span><SelectValue /></SelectTrigger>

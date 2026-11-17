@@ -12,7 +12,7 @@ const COLUMNS: [FlowColumn, FlowColumn, FlowColumn] = [
   { title: "처리 결과", order: STATUSES, label: (k) => STATUS[k as Status].label, icon: (k) => STATUS[k as Status].icon },
 ];
 /** How much of a band is its end's colour when nothing is picked: the worse the end, the more. */
-const WEIGHT: Record<Status, number> = { out: 78, blocked: 54, normal: 20, seen: 13 };
+const WEIGHT: Record<Status, number> = { out: 78, blocked: 54, seen: 13 };
 
 export function Flow({ trails, filter, onFilter, height }: { trails: Trail[]; filter: Filter; onFilter: (f: Filter) => void; height: number }) {
   const rows = useMemo<FlowRow[]>(() => trails.map((t) => ({ keys: [fromOf(t), t.category, t.status], n: 1 })), [trails]);

@@ -186,26 +186,23 @@ pub(super) struct Trail {
     pub client: String,
     /// Every mention, oldest first.
     pub mentions: Vec<SecretMention>,
-    /// Calls the agent put it in, and of those the ones sending it outside: ran (a leak), ran
-    /// to where it is used (`normal`), or stopped; and why those that ran got out.
+    /// Calls the agent put it in, and of those the ones sending it outside: ran (a leak), or
+    /// stopped; and why those that ran got out. One sending it where it is used is neither.
     pub calls: usize,
     pub out_ran: usize,
     pub out_stopped: usize,
-    pub normal: usize,
     pub why: BTreeMap<&'static str, usize>,
     pub last: Option<i64>,
 }
 
 impl Trail {
-    /// How it ended, worst first: it left (`out`), it was about to leave (`blocked`), it was
-    /// sent only where it is used (`normal`), it was only seen (`seen`).
+    /// How it ended, worst first: it left (`out`), it was about to leave (`blocked`), it was only
+    /// seen or sent only where it is used (`seen`).
     pub fn status(&self) -> (u8, &'static str) {
         if self.out_ran > 0 {
             (3, "out")
         } else if self.out_stopped > 0 {
             (2, "blocked")
-        } else if self.normal > 0 {
-            (1, "normal")
         } else {
             // A value put in a Call that sent nothing out is no more than one seen: the team
             // has nothing to do about it.
@@ -251,11 +248,10 @@ fn trails(mentions: &[SecretMention]) -> Vec<Trail> {
                     if held(m) {
                         t.out_stopped += 1;
                     } else {
+                        // Sent where the value is used: not a send to count.
                         let why = why_out(m, &t.from);
-                        *t.why.entry(why).or_default() += 1;
-                        if normal(why) {
-                            t.normal += 1;
-                        } else {
+                        if !normal(why) {
+                            *t.why.entry(why).or_default() += 1;
                             t.out_ran += 1;
                         }
                     }

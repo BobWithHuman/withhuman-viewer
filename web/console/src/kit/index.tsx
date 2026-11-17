@@ -190,12 +190,25 @@ export function Empty({ children = "없음" }: { children?: ReactNode }) {
 }
 
 // ---------------------------------------------------------------- the table
-/** A sortable table over shadcn's Table; a row can be pressed. */
+/** A sortable table over shadcn's Table; a row can be pressed. Its columns give way to the
+ * width there is: one made wide (180px or more) or given no width holds text and takes a share of
+ * what the others leave, as large as its width, its text cut short at the end; any other keeps
+ * its width. So the table never runs past its side. */
 export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense }: {
   columns: ColumnDef<T>[]; rows: T[]; onRow?: (row: T) => void; picked?: (row: T) => boolean; initialSort?: SortingState; dense?: boolean;
 }) {
   const [sorting, setSorting] = useState<SortingState>(initialSort ?? []);
   const table = useReactTable({ data: rows, columns, state: { sorting }, onSortingChange: setSorting, getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel() });
+  const widthOf = (c: ColumnDef<T>) => (c.size && c.size !== 150 ? c.size : undefined);
+  const grows = (c: ColumnDef<T>) => { const w = widthOf(c); return w === undefined || w >= 180; };
+  const shareOf = (c: ColumnDef<T>) => widthOf(c) ?? 260;
+  const total = columns.filter(grows).reduce((a, c) => a + shareOf(c), 0) || 1;
+  // The short columns keep their width; the text ones split what is left between them, so the
+  // widths add up to the table's in every browser.
+  const fixed = columns.filter((c) => !grows(c)).reduce((a, c) => a + (widthOf(c) ?? 0), 0);
+  const head = (c: ColumnDef<T>) => (grows(c)
+    ? { width: `calc((100% - ${fixed}px) * ${shareOf(c) / total})` }
+    : { width: widthOf(c) });
   return (
     <Table className="table-fixed">
       <TableHeader className="sticky top-0 z-10 bg-card">
@@ -203,9 +216,8 @@ export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense 
           <TableRow key={g.id} className="hover:bg-transparent">
             {g.headers.map((h) => {
               const sort = h.column.getIsSorted();
-              const w = h.column.columnDef.size;
               return (
-                <TableHead key={h.id} className="h-9 text-[12px] font-normal text-muted-foreground" style={w && w !== 150 ? { width: w } : undefined}>
+                <TableHead key={h.id} className="h-9 text-[12px] font-normal whitespace-nowrap text-muted-foreground" style={head(h.column.columnDef)}>
                   {h.column.getCanSort() ? (
                     <button onClick={h.column.getToggleSortingHandler()} className="inline-flex items-center gap-1 hover:text-foreground">
                       {flexRender(h.column.columnDef.header, h.getContext())}
@@ -221,7 +233,11 @@ export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense 
       <TableBody>
         {table.getRowModel().rows.map((r) => (
           <TableRow key={r.id} onClick={() => onRow?.(r.original)} data-state={picked?.(r.original) ? "selected" : undefined} className={cn(onRow && "cursor-pointer")}>
-            {r.getVisibleCells().map((c) => <TableCell key={c.id} className={cn("truncate", dense ? "py-1.5" : "py-2.5")}>{flexRender(c.column.columnDef.cell, c.getContext())}</TableCell>)}
+            {r.getVisibleCells().map((c) => {
+              const def = c.column.columnDef;
+              const content = flexRender(def.cell, c.getContext());
+              return <TableCell key={c.id} className={cn("truncate", dense ? "py-1.5" : "py-2.5")}>{content}</TableCell>;
+            })}
           </TableRow>
         ))}
         {!rows.length && <TableRow className="hover:bg-transparent"><TableCell colSpan={columns.length}><Empty /></TableCell></TableRow>}
@@ -238,6 +254,17 @@ export const ago = (ms: number | null | undefined, now = Date.now()) => {
   if (d < day) return `${Math.round(d / h)}시간 전`;
   return `${Math.round(d / day)}일 전`;
 };
+/** Where a page's data came from, as its header shows it: a dot (green the store, yellow the
+ * demo), the address alone without the store's name, and when it was read. */
+export function SourceMeta({ label, demo, at }: { label: string; demo?: boolean; at?: number | null }) {
+  return (
+    <>
+      <span className="inline-flex min-w-0 items-center gap-1.5"><i className={cn("size-1.5 shrink-0 rounded-full", demo ? "bg-catch" : "bg-allow")} /><span className="max-w-72 truncate">{label.replace(/^[A-Za-z0-9]+ · /, "")}</span></span>
+      {at ? <span className="tnum">{clock(at)}</span> : null}
+    </>
+  );
+}
+
 export const clock = (ms: number | null | undefined) => {
   if (!ms) return "";
   const d = new Date(ms), z = (n: number) => String(n).padStart(2, "0");
