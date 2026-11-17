@@ -372,9 +372,11 @@ function HopMark({ h }: { h: Hop }) {
   );
 }
 
-/** The step to open on: the latest Call caught or refused, else the first step worth a look. */
+/** The step to open on: the Call opened from another page, else the latest Call caught or
+ * refused, else the first step worth a look. */
 const opening = (data: RecordData) =>
-  [...data.steps].reverse().find((s) => s.kind === "call" && flagged(s))?.id ?? data.steps.find(flagged)?.id ?? null;
+  (data.focus && data.steps.some((s) => s.id === data.focus) ? data.focus : null)
+  ?? [...data.steps].reverse().find((s) => s.kind === "call" && flagged(s))?.id ?? data.steps.find(flagged)?.id ?? null;
 
 export function GraphView({ data, only, setOnly }: { data: RecordData; only: Only | null; setOnly: (o: Only | null) => void }) {
   const first = opening(data);

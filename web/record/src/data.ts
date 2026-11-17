@@ -64,6 +64,8 @@ export interface RecordData {
    * from, and how (`ask` the prompt asked for it, `cause` a tool result told it, `message`,
    * `result` or `request` a prompt was written from it, `answer` the turn's answer). */
   subgraphs?: { n: number; parent: number | null; via: string; p?: number | null; steps: string[] }[];
+  /** The step of a Call opened from another page, to open on. */
+  focus?: string | null;
 }
 
 export const SESSION: Session = {

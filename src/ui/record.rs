@@ -5,7 +5,7 @@
 use dioxus::prelude::*;
 use serde_json::{Value, json};
 
-use super::{AppState, Load};
+use super::{AppState, Load, Selection};
 use crate::layout::Model;
 use crate::metro::{AskParent, Metro, ParentOf, Station, mcp_parts};
 use crate::model::Session;
@@ -51,7 +51,24 @@ pub fn RecordGraph() -> Element {
             Load::Ready(list) => list.iter().find(|s| Some(&s.id) == id.as_ref()).cloned(),
             _ => None,
         };
-        Some(record_data(model, &metro, session.as_ref(), id.as_deref().unwrap_or("")).to_string())
+        let mut out = record_data(model, &metro, session.as_ref(), id.as_deref().unwrap_or(""));
+        // The Call opened from another page (민감 정보, 메인): the step it stands in, to open on.
+        if let Selection::Node(seq) = (state.selected)() {
+            let step = metro
+                .stations
+                .iter()
+                .find(|st| st.seq == seq || st.members.contains(&seq))
+                .map(|st| format!("s{}", st.seq))
+                .or_else(|| {
+                    metro
+                        .asks
+                        .iter()
+                        .any(|a| a.seq == seq)
+                        .then(|| format!("a{seq}"))
+                });
+            out["focus"] = json!(step);
+        }
+        Some(out.to_string())
     });
     use_effect(move || {
         if let Some(json) = data() {
