@@ -2,13 +2,13 @@
 // up on it, how its sessions were let run, and the switch that stops it.
 
 import { BadgeCheck, Laptop, OctagonX, ShieldCheck, ShieldOff } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Legend, ServiceLogo, SplitBar, Warn, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./marks";
+import { KillSwitch } from "./kill";
 import { isOn } from "./mcp/types";
 import { EDR_STATUS, ENGINE, ENGINE_KEYS, agentLabel, type Machine, type View } from "./model";
 
@@ -48,10 +48,8 @@ export const When = ({ children }: { children: ReactNode }) => <span className="
 export function DeviceSheet({ m, view, onServer, onStop }: {
   m: Machine; view: View; onServer: (name: string) => void;
   /** Stops the machine, or lets it go again. */
-  onStop: (stopped: boolean) => void;
+  onStop: (stopped: boolean, reason: string) => void;
 }) {
-  // Stopping asks twice: the first press arms it.
-  const [armed, setArmed] = useState(false);
   const servers = view.serversOn(m);
   const projects = view.projects.filter((p) => p.device === m.id);
   // Projects a check found with no hooks, and agents the EDR saw running with no session open.
@@ -74,13 +72,20 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
           <EngineBadge mode={m.engine_mode} />
           {m.shadow > 0 && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><ShieldOff />섀도 AI {m.shadow}</Badge>}
           {m.stopped && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><OctagonX />멈춤{m.stopped.denied ? ` · 거부 ${m.stopped.denied}` : ""}</Badge>}
-          {m.state !== "unregistered" && (m.stopped
-            ? <Button size="xs" variant="outline" className="ml-auto" onClick={() => onStop(false)}>멈춤 풀기</Button>
-            : <Button size="xs" variant="outline" className={cn("ml-auto", armed && "border-deny bg-deny/15 text-deny hover:bg-deny/25 hover:text-deny")} onBlur={() => setArmed(false)}
-                onClick={() => { if (armed) { onStop(true); setArmed(false); } else setArmed(true); }}><OctagonX />{armed ? "한 번 더" : "기기 멈춤"}</Button>)}
+          {m.state !== "unregistered" && <span className="ml-auto"><KillSwitch m={m} now={view.now} size="xs" onStop={onStop} /></span>}
         </div>
       </SheetHeader>
       <div className="scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">
+        {/* Why and by whom the machine was stopped. */}
+        {m.stopped && (
+          <div className="flex flex-col gap-1.5 rounded-lg border border-deny/40 bg-deny/[0.07] p-3.5">
+            <span className="flex items-center gap-1.5 text-[12px] font-semibold text-deny"><OctagonX className="size-3.5" />멈춤
+              <span className="tnum font-normal text-muted-foreground">{clock(m.stopped.at)} · {ago(m.stopped.at, view.now)}{m.stopped.by ? ` · ${m.stopped.by}` : ""}</span>
+            </span>
+            <span className="text-[13px] break-words">{m.stopped.reason || <span className="text-muted-foreground">사유 없음</span>}</span>
+            {(m.stopped.denied ?? 0) > 0 && <span className="tnum text-[12px] text-muted-foreground">막힌 호출 {m.stopped.denied}</span>}
+          </div>
+        )}
         <Facts rows={[
           ["EDR", m.edr
             ? <span className="inline-flex items-center gap-1.5"><BadgeCheck className={cn("size-3.5", m.edr.status === "active" ? "text-info" : "text-muted-foreground")} strokeWidth={2} />{EDR_STATUS[m.edr.status ?? ""] ?? m.edr.status ?? "상태 모름"}<span className="font-mono text-[11.5px] text-muted-foreground">에이전트 {m.edr.id}</span></span>
