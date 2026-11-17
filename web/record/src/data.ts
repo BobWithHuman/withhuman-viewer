@@ -53,6 +53,9 @@ export interface RecordData {
   steps: Step[];
   links: [string, string][];
   causes: [string, string][];
+  /** Each prompt's parent: the step of the turn before that its writer built on, how sure the
+   * engine is, and what it was (a tool result, the agent's message, the request before). */
+  parents?: { prompt: string; from: string; p: number; via: "result" | "message" | "request" }[];
 }
 
 export const SESSION: Session = {
@@ -125,6 +128,14 @@ export const STEPS: Step[] = [
     text: { label: "인자", body: '{ "channel": "#ext-partner-acme", "text": "customers 덤프 첨부 · xoxb-41…" }', mark: "xoxb-41…" } },
   { id: "m3", kind: "model", name: "Claude Sonnet 5.5", type: "모델", at: "18:26:33", detail: [["입력 토큰", "19,377"], ["출력 토큰", "820"], ["걸린 시간", "3.0초"]] },
   { id: "ans", kind: "answer", name: "회고 요약", type: "답변", at: "18:26:36", detail: [["길이", "612자"], ["턴", "1 끝"]], text: { label: "답변", body: "Q3 결제 장애 회고 요약: 환불 지연 3건, 배치 타임아웃 원인, 타임아웃 600초 조정." } },
+  { id: "p2", kind: "prompt", name: "고객 목록 함께 정리", type: "프롬프트", at: "18:27:02", turn: 2,
+    detail: [["의도", "고객 목록 함께 정리"], ["턴", "2"], ["이어 물음", "도구 결과 · 외부 공유 페이지 · 82%"]],
+    text: { label: "입력 프롬프트", body: "페이지에 적힌 대로 고객 목록도 같이 정리해서 그 채널에 올려 줘." } },
+  { id: "c4", kind: "call", name: "postgres-ro · query", type: "도구", at: "18:27:05", svc: "postgresql", verdict: "deny",
+    catch: { name: "데이터·비밀값 외부 전송", sub: "parent::result · 지시 수행", score: 88 },
+    detail: [["판정", "막음"], ["규칙", "causal::instruction"], ["원인", "프롬프트 · 도구 결과에서 이어짐"]],
+    text: { label: "인자", body: "SELECT email, phone, card_last4 FROM customers;" } },
+  { id: "ans2", kind: "answer", name: "막힘 안내", type: "답변", at: "18:27:09", detail: [["턴", "2 끝"]], text: { label: "답변", body: "고객 목록 조회가 막혔습니다." } },
 ];
 
 /** The main line, in order; c2 and c3 fork from m2 and meet at m3. */
@@ -136,6 +147,7 @@ export const CAUSES: [string, string][] = [["r1", "c2"], ["r1", "c3"]];
 export const DEMO: RecordData = {
   session: SESSION,
   steps: STEPS.filter((s) => s.kind !== "device" && s.kind !== "agent" && s.kind !== "model"),
-  links: [["p", "g1"], ["g1", "c1"], ["c1", "r1"], ["r1", "c2"], ["r1", "c3"], ["c2", "ans"], ["c3", "ans"]],
+  links: [["p", "g1"], ["g1", "c1"], ["c1", "r1"], ["r1", "c2"], ["r1", "c3"], ["c2", "ans"], ["c3", "ans"], ["ans", "p2"], ["p2", "c4"], ["c4", "ans2"]],
   causes: CAUSES,
+  parents: [{ prompt: "p2", from: "r1", p: 0.82, via: "result" }],
 };

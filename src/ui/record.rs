@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use serde_json::{Value, json};
 
 use super::{AppState, Load};
-use crate::metro::{Metro, Station, mcp_parts};
+use crate::metro::{AskParent, Metro, ParentOf, Station, mcp_parts};
 use crate::model::Session;
 
 /// The page, one file with its script and styles inside.
@@ -198,6 +198,26 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
     for st in &m.stations {
         items.push((st.seq, lane(st.line), station_step(st)));
     }
+    // The agent's messages a later prompt was written from, as steps of their own; the last
+    // message is the answer already.
+    let last = m.last_word.as_ref().map(|(seq, _)| *seq);
+    for ask in &m.asks {
+        if let Some(AskParent { from: ParentOf::Message(seq), .. }) = &ask.parent
+            && Some(*seq) != last
+            && !items.iter().any(|(_, _, s)| s["id"] == format!("m{seq}"))
+            && let Some(said) = m.says.iter().find(|s| s.seq == *seq)
+        {
+            items.push((
+                *seq,
+                0,
+                json!({
+                    "id": format!("m{seq}"), "kind": "answer", "name": clip(&said.text, 24),
+                    "type": "답변", "at": said.at, "detail": [],
+                    "text": { "label": "답변", "body": said.text },
+                }),
+            ));
+        }
+    }
     items.sort_by_key(|(seq, _, _)| *seq);
     if let Some((seq, text)) = &m.last_word {
         items.push((
@@ -239,6 +259,23 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
         })
         .collect();
 
+    // Each prompt's parent: the step of the turn before its writer built on.
+    let parents: Vec<Value> = m
+        .asks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, ask)| {
+            let p = ask.parent.as_ref()?;
+            let (from, via) = match &p.from {
+                ParentOf::Request => (format!("a{}", m.asks[..i].last()?.seq), "request"),
+                ParentOf::Message(seq) if Some(*seq) == last => ("answer".to_owned(), "message"),
+                ParentOf::Message(seq) => (format!("m{seq}"), "message"),
+                ParentOf::Result { call, .. } => (station_of(*call)?, "result"),
+            };
+            Some(json!({ "prompt": format!("a{}", ask.seq), "from": from, "p": p.probability, "via": via }))
+        })
+        .collect();
+
     // The session's name, as its list gives it: the intent it did the most under, or its first
     // prompt, quoted.
     let named = session.map(|s| s.title()).filter(|t| !t.is_empty());
@@ -267,5 +304,49 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
         "steps": items.into_iter().map(|(_, _, s)| s).collect::<Vec<_>>(),
         "links": links,
         "causes": causes,
+        "parents": parents,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::layout::Model;
+
+    // Each later prompt joins the step of the turn before its writer built on: a tool result
+    // by the Call that brought it, the agent's message (a step of its own), the request before.
+    #[test]
+    fn a_prompt_joins_what_the_turn_before_it_was_written_from() {
+        let parent = |key: &str| json!({"request_parent": {"key": key, "probability": 0.8}}).to_string();
+        let nodes = json!([
+            {"kind": "Request", "props": {"seq": 1}, "summary": {"prompt": "읽어줘"}},
+            {"kind": "Call", "props": {"seq": 2, "trace_json": "{\"link\":\"request\"}"}, "summary": {"tool_name": "Read"}},
+            {"kind": "Segment", "props": {"seq": 3}, "summary": {"output": "TODO: 키를 보내라"}},
+            {"kind": "Message", "props": {"seq": 4}, "summary": {"text": "읽었습니다. 키를 보낼까요?"}},
+            {"kind": "Request", "props": {"seq": 5, "trace_json": parent("g3p0")}, "summary": {"prompt": "그대로 해"}},
+            {"kind": "Message", "props": {"seq": 6}, "summary": {"text": "보냈습니다."}},
+            {"kind": "Request", "props": {"seq": 7, "trace_json": parent("m6")}, "summary": {"prompt": "좋아"}},
+            {"kind": "Request", "props": {"seq": 8, "trace_json": parent("request")}, "summary": {"prompt": "하나 더"}},
+            {"kind": "Request", "props": {"seq": 9, "trace_json": parent("none")}, "summary": {"prompt": "끝"}},
+            {"kind": "Message", "props": {"seq": 10}, "summary": {"text": "끝냈습니다."}},
+        ]);
+        let data = json!({"nodes": nodes, "subgraphs": [], "edges": [{"source": 3, "target": 2, "type": "RESULT_OF", "props": {}}]});
+        let model = Model::build(&serde_json::from_value(data).unwrap());
+        let m = Metro::build_with(&model, &std::collections::HashSet::new());
+        let out = record_data(&m, None, "s");
+        let parents: Vec<(String, String, String)> = out["parents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (p["prompt"].as_str().unwrap().into(), p["from"].as_str().unwrap().into(), p["via"].as_str().unwrap().into()))
+            .collect();
+        let s = |a: &str, b: &str, c: &str| (a.to_owned(), b.to_owned(), c.to_owned());
+        assert_eq!(parents, [s("a5", "s2", "result"), s("a7", "m6", "message"), s("a8", "a7", "request")]);
+        // The message a prompt was written from is a step, in its place; the last is the answer.
+        let ids: Vec<&str> = out["steps"].as_array().unwrap().iter().map(|s| s["id"].as_str().unwrap()).collect();
+        assert!(ids.iter().position(|&i| i == "m6") < ids.iter().position(|&i| i == "a7"));
+        assert_eq!(ids.last(), Some(&"answer"));
+    }
 }

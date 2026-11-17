@@ -1,18 +1,22 @@
 import {
-  type Edge, type EdgeProps, type Node, type NodeProps, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, useReactFlow,
+  type Edge, type EdgeProps, type Node, type NodeProps, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, getBezierPath, useReactFlow,
 } from "@xyflow/react";
-import { ChevronRight, Eye, ListTree, MapPin, Plus, Scan, TriangleAlert, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronRight, ListTree, MapPin, Plus, Route, Rows3, Scan, TriangleAlert, ZoomIn, ZoomOut } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { RecordData, Step } from "./data";
 import { isLong } from "./longtext";
+import { type Hop, PARENT_LABEL, TIE, wayBack } from "./path";
 import { DetailBody, KIND_ICON, LogoDisc, SvcLogo, Tip, VerdictChip, cx, flagged, tone } from "./parts";
 
 // 기록's graph: what the agent asked for and what came back, left to right. A step that was
-// caught or refused is drawn large with its verdict; a quiet one is a small dot. A Call a tool
-// result made is joined to that result by an orange line. The timeline on the right holds the
-// same steps, each opening to its detail.
+// caught or refused is drawn large with its verdict; a quiet one is a small dot. Seen two ways:
+// 경로, a picked step's way back to the request it came from lit (a Call to its turn's prompt or
+// the tool result that told it, a prompt to the step of the turn before it built on), and the
+// timeline holding that way alone; 순서, every step in order with its causes and each prompt's
+// parent drawn over the line.
 
-type D = { step: Step; picked: boolean; dim: boolean };
+type D = { step: Step; picked: boolean; dim: boolean; large?: boolean };
+type Mode = "path" | "order";
 const Pick = createContext<(id: string) => void>(() => {});
 
 export const clock = (at: Step["at"]) => {
@@ -21,11 +25,12 @@ export const clock = (at: Step["at"]) => {
   const d = new Date(at), z = (n: number) => String(n).padStart(2, "0");
   return `${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
 };
-const big = (s: Step) => flagged(s) || s.kind === "prompt";
+const bigStep = (s: Step) => flagged(s) || s.kind === "prompt";
 
 function StepNode({ data }: NodeProps<Node<D>>) {
-  const { step: s, picked, dim } = data;
+  const { step: s, picked, dim, large } = data;
   const pick = useContext(Pick);
+  const big = (x: Step) => large || bigStep(x);
   const size = big(s) ? 64 : 22;
   return (
     <div className={cx("relative transition-opacity duration-300", dim && "opacity-25")} style={{ width: size, height: size }} onClick={() => pick(s.id)}>
@@ -55,8 +60,8 @@ function StepNode({ data }: NodeProps<Node<D>>) {
 }
 const nodeTypes = { step: StepNode };
 
-/** A cause: an arch from the result's Call over the line to the Call it made, higher the farther. */
-function CauseEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style }: EdgeProps) {
+/** A link that is not the next step: an arch over the line, higher the farther, named. */
+function ArcEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, data }: EdgeProps<Edge<{ label: string; color: string; faint?: boolean }>>) {
   const h = 46 + Math.abs(targetX - sourceX) * 0.22;
   const top = Math.min(sourceY, targetY) - h;
   const path = `M${sourceX},${sourceY} C${sourceX},${top} ${targetX},${top} ${targetX},${targetY}`;
@@ -64,15 +69,39 @@ function CauseEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style }:
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
-      <EdgeLabelRenderer>
-        <div className="nodrag nopan pointer-events-none absolute rounded bg-bg px-1.5 py-px text-[11px] font-semibold text-hold" style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}>응답이 유도</div>
-      </EdgeLabelRenderer>
+      {data && !data.faint && (
+        <EdgeLabelRenderer>
+          <div className="nodrag nopan pointer-events-none absolute rounded bg-bg px-1.5 py-px text-[11px] font-semibold" style={{ color: data.color, transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}>{data.label}</div>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 }
-const edgeTypes = { cause: CauseEdge };
+/** A link on the way: from one step of it to the next, named, with how many steps it passes. */
+function HopEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, data }: EdgeProps<Edge<{ label: string; color: string; p?: number; skipped: number }>>) {
+  const [path, lx, ly] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      {data && (
+        <EdgeLabelRenderer>
+          <div className="nodrag nopan pointer-events-none absolute flex flex-col items-center gap-0.5" style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly - 22}px)` }}>
+            <span className="rounded bg-bg px-1.5 py-px text-[12px] font-semibold whitespace-nowrap" style={{ color: data.color }}>
+              {data.label}{data.p != null && <span className="ml-1 font-normal text-mut tabular-nums">{Math.round(data.p * 100)}%</span>}
+            </span>
+          </div>
+          {data.skipped > 0 && (
+            <div className="nodrag nopan pointer-events-none absolute rounded-full bg-chip px-1.5 text-[10.5px] text-mut tabular-nums" style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly + 20}px)` }}>+{data.skipped}</div>
+          )}
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
 
-function ToolStrip({ focus, setFocus, timeline, setTimeline }: { focus: boolean; setFocus: (v: boolean) => void; timeline: boolean; setTimeline: (v: boolean) => void }) {
+const edgeTypes = { arc: ArcEdge, hop: HopEdge };
+
+function ToolStrip({ timeline, setTimeline }: { timeline: boolean; setTimeline: (v: boolean) => void }) {
   const rf = useReactFlow();
   const btn = (label: string, icon: ReactNode, onClick?: () => void, on?: boolean) => (
     <Tip label={label} side="right" key={label}>
@@ -81,7 +110,6 @@ function ToolStrip({ focus, setFocus, timeline, setTimeline }: { focus: boolean;
   );
   return (
     <div className="absolute top-3 left-3 z-10 flex flex-col items-center gap-0.5 rounded-lg bg-panel p-1 shadow-[0_8px_24px_rgba(0,0,0,.35)]">
-      {btn("원인 길만", <Eye />, () => setFocus(!focus), focus)}
       {btn("타임라인", <ListTree />, () => setTimeline(!timeline), timeline)}
       <i className="my-1 h-px w-5 bg-white/10" />
       {btn("확대", <ZoomIn />, () => rf.zoomIn({ duration: 250 }))}
@@ -91,7 +119,7 @@ function ToolStrip({ focus, setFocus, timeline, setTimeline }: { focus: boolean;
   );
 }
 
-function Card({ s, open, onToggle, onLocate, cardRef }: { s: Step; open: boolean; onToggle: () => void; onLocate: () => void; cardRef: (el: HTMLDivElement | null) => void }) {
+function Card({ s, open, onToggle, onLocate, onWay, cardRef }: { s: Step; open: boolean; onToggle: () => void; onLocate: () => void; onWay?: () => void; cardRef: (el: HTMLDivElement | null) => void }) {
   return (
     <div ref={cardRef} className="relative pl-7">
       <span className={cx("absolute top-2 left-0 grid size-5 place-items-center rounded-md [&_svg]:size-3 [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
@@ -102,6 +130,7 @@ function Card({ s, open, onToggle, onLocate, cardRef }: { s: Step; open: boolean
             <div className="flex items-center gap-2"><span className="truncate text-[12.5px] font-semibold text-fg">{s.quote ? `"${s.name}"` : s.name}</span><VerdictChip s={s} /></div>
             <div className="text-[11px] text-mut tabular-nums">{s.type} <span className="mx-1 text-dim">|</span> {clock(s.at)}{s.text && isLong(s.text.body) && <><span className="mx-1 text-dim">|</span>{s.text.body.length.toLocaleString("ko-KR")}자</>}</div>
           </div>
+          {onWay && <Tip label="경로"><button onClick={(e) => { e.stopPropagation(); onWay(); }} className="grid size-6 place-items-center rounded-md text-mut hover:bg-white/8 hover:text-fg"><Route className="size-3.5" /></button></Tip>}
           <Tip label="그래프에서 찾기"><button onClick={(e) => { e.stopPropagation(); onLocate(); }} className="grid size-6 place-items-center rounded-md text-mut hover:bg-white/8 hover:text-fg"><MapPin className="size-3.5" /></button></Tip>
         </div>
         {open && <div className="px-3 pt-0.5 pb-3"><DetailBody s={s} /></div>}
@@ -110,56 +139,120 @@ function Card({ s, open, onToggle, onLocate, cardRef }: { s: Step; open: boolean
   );
 }
 
-/** Columns in order of the steps; a step on another lane (a subagent, a fork) sits above or below. */
-function layout(data: RecordData, picked: string | null, focus: boolean) {
-  const onPath = new Set(data.causes.flat());
+/** Columns in order of the steps; a step on another lane (a subagent, a fork) sits above or below.
+ * On 경로, the steps off the way are dimmed and only the way's links are drawn strong. */
+function layout(data: RecordData, picked: string | null, mode: Mode, way: { ids: string[]; hops: Hop[] }) {
+  const path = mode === "path" && way.ids.length > 0;
+  const on = new Set(way.ids);
   const nodes: Node<D>[] = data.steps.map((s, i) => {
-    const half = big(s) ? 32 : 11;
+    const half = bigStep(s) ? 32 : 11;
     return {
       id: s.id, type: "step", position: { x: i * 210 - half, y: (s.lane ?? 0) * 150 - half },
-      data: { step: s, picked: picked === s.id, dim: focus && !onPath.has(s.id) }, draggable: false, selectable: false,
+      data: { step: s, picked: picked === s.id, dim: path && !on.has(s.id) }, draggable: false, selectable: false,
     };
   });
-  const cause = new Set(data.causes.map(([a, b]) => `${a}>${b}`));
+  const arrow = (color: string, w = 15) => ({ type: MarkerType.ArrowClosed, color, width: w, height: w });
+  const linked = new Set(data.links.map(([a, b]) => `${a}>${b}`));
   const edges: Edge[] = data.links.map(([a, b]) => {
-    const c = cause.has(`${a}>${b}`);
+    const k = `${a}>${b}`;
+    const h = way.hops.find((x) => `${x.from}>${x.to}` === k);
+    const color = h ? TIE[h.tie].color : data.causes.some(([x, y]) => x === a && y === b) && !path ? TIE.cause.color : "#8a8a8a";
     return {
-      id: `${a}>${b}`, source: a, target: b, type: "default",
-      style: c ? { stroke: "#f2a93b", strokeWidth: 2.2 } : { stroke: "#8a8a8a", strokeWidth: 1.6, opacity: focus ? 0.25 : 1 },
-      markerEnd: { type: MarkerType.ArrowClosed, color: c ? "#f2a93b" : "#8a8a8a", width: 15, height: 15 },
+      id: k, source: a, target: b, type: "default",
+      style: { stroke: color, strokeWidth: h ? 2.6 : 1.6, opacity: path && !h ? 0.18 : 1 },
+      markerEnd: arrow(color), zIndex: h ? 4 : 0,
     };
   });
-  // A cause that is not also the next step: its own orange line, over the others.
-  for (const [a, b] of data.causes) {
-    if (data.links.some(([x, y]) => x === a && y === b)) continue;
+  // What is not the next step: an arch over the line.
+  const arcs: { from: string; to: string; color: string; label: string; strong: boolean }[] = path
+    ? way.hops.filter((h) => !linked.has(`${h.from}>${h.to}`)).map((h) => ({ from: h.from, to: h.to, color: TIE[h.tie].color, label: h.label, strong: true }))
+    : [
+        ...data.causes.filter(([a, b]) => !linked.has(`${a}>${b}`)).map(([a, b]) => ({ from: a, to: b, color: TIE.cause.color, label: TIE.cause.label, strong: true })),
+        ...(data.parents ?? []).filter((p) => !linked.has(`${p.from}>${p.prompt}`)).map((p) => ({ from: p.from, to: p.prompt, color: TIE.parent.color, label: `${PARENT_LABEL[p.via] ?? TIE.parent.label} ${Math.round(p.p * 100)}%`, strong: true })),
+      ];
+  for (const a of arcs) {
     edges.push({
-      id: `cause:${a}>${b}`, source: a, target: b, sourceHandle: "t-src", targetHandle: "t-tgt", type: "cause", zIndex: 5,
-      style: { stroke: "#f2a93b", strokeWidth: 2, opacity: 0.9 },
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#f2a93b", width: 14, height: 14 },
+      id: `arc:${a.from}>${a.to}`, source: a.from, target: a.to, sourceHandle: "t-src", targetHandle: "t-tgt", type: "arc", zIndex: 5,
+      data: { label: a.label, color: a.color }, style: { stroke: a.color, strokeWidth: 2.2, opacity: 0.95 }, markerEnd: arrow(a.color, 14),
     });
   }
   return { nodes, edges };
 }
 
+/** 경로: the way alone, its steps side by side the earliest first, each link named and counting
+ * the steps it passes over. */
+function layoutWay(data: RecordData, picked: string | null, way: { ids: string[]; hops: Hop[] }) {
+  const order = [...way.ids].reverse();
+  const index = new Map(data.steps.map((s, i) => [s.id, i]));
+  const byId = new Map(data.steps.map((s) => [s.id, s]));
+  const nodes: Node<D>[] = order.map((id, i) => ({
+    id, type: "step", position: { x: i * 270 - 32, y: -32 },
+    data: { step: byId.get(id)!, picked: picked === id, dim: false, large: true }, draggable: false, selectable: false,
+  }));
+  const edges: Edge[] = way.hops.map((h) => {
+    const color = TIE[h.tie].color;
+    const skipped = Math.max(0, Math.abs((index.get(h.to) ?? 0) - (index.get(h.from) ?? 0)) - 1);
+    return {
+      id: `hop:${h.from}>${h.to}`, source: h.from, target: h.to, type: "hop",
+      data: { label: h.label, color, p: h.p, skipped },
+      style: { stroke: color, strokeWidth: 2.4 }, markerEnd: { type: MarkerType.ArrowClosed, color, width: 15, height: 15 },
+    };
+  });
+  return { nodes, edges };
+}
+
+/** 경로 or 순서, over the graph. */
+function ModeSwitch({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
+  const item = (m: Mode, label: string, icon: ReactNode) => (
+    <button key={m} onClick={() => setMode(m)}
+      className={cx("flex h-7 items-center gap-1.5 rounded-md px-3 text-[12.5px] font-semibold transition-colors [&_svg]:size-3.5", mode === m ? "bg-white/12 text-fg" : "text-mut hover:text-fg")}>{icon}{label}</button>
+  );
+  return (
+    <div className="absolute top-3 left-1/2 z-10 flex -translate-x-1/2 gap-0.5 rounded-lg bg-panel p-1 shadow-[0_8px_24px_rgba(0,0,0,.35)]">
+      {item("path", "경로", <Route />)}
+      {item("order", "순서", <Rows3 />)}
+    </div>
+  );
+}
+
+/** Between two steps of the way on the timeline: how the one led to the next. */
+function HopMark({ h }: { h: Hop }) {
+  return (
+    <div className="relative flex items-center gap-1.5 py-0.5 pl-7 text-[11px] font-semibold" style={{ color: TIE[h.tie].color }}>
+      <i className="absolute left-[18px] size-[8px] rounded-full ring-2 ring-panel" style={{ background: TIE[h.tie].color }} />
+      {h.label}{h.p != null && <span className="font-normal text-mut tabular-nums">{Math.round(h.p * 100)}%</span>}
+    </div>
+  );
+}
+
+/** The step to open on: the latest Call caught or refused, else the first step worth a look. */
+const opening = (data: RecordData) =>
+  [...data.steps].reverse().find((s) => s.kind === "call" && flagged(s))?.id ?? data.steps.find(flagged)?.id ?? null;
+
 export function GraphView({ data }: { data: RecordData }) {
-  const first = data.steps.find(flagged)?.id ?? null;
+  const first = opening(data);
   const [picked, setPicked] = useState<string | null>(first);
-  const [focus, setFocus] = useState(false);
+  const [mode, setMode] = useState<Mode>("path");
+  const [open, setOpen] = useState<string | null>(null);
   const [timeline, setTimeline] = useState(true);
   const rf = useReactFlow();
   const refs = useRef<Record<string, HTMLDivElement | null>>({});
-  useEffect(() => { setPicked(data.steps.find(flagged)?.id ?? null); }, [data]);
+  useEffect(() => { setPicked(opening(data)); setOpen(null); }, [data]);
   useEffect(() => { if (picked) refs.current[picked]?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [picked]);
-  // Open on the first step worth a look, at a size its name can be read; the whole is a button away.
+  // On 경로, the way in view, as near as it fits; on 순서, the whole. The rest is a button away.
+  const wayKey = mode === "path" ? (picked ?? "") : "";
   useEffect(() => {
-    const id = data.steps.find(flagged)?.id;
-    const k = id ? data.steps.findIndex((s) => s.id === id) : -1;
-    requestAnimationFrame(() => {
-      if (k < 0) rf.fitView({ padding: 0.22, maxZoom: 1 });
-      else rf.setCenter(k * 210 + 120, (data.steps[k].lane ?? 0) * 150 - 70, { zoom: 0.85 });
-    });
-  }, [data, rf]);
-  const { nodes, edges } = useMemo(() => layout(data, picked, focus), [data, picked, focus]);
+    requestAnimationFrame(() => rf.fitView({ padding: mode === "path" ? 0.3 : 0.18, maxZoom: 1, duration: 300 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, rf, mode, wayKey]);
+  const way = useMemo(() => wayBack(data, picked), [data, picked]);
+  const { nodes, edges } = useMemo(
+    () => (mode === "path" && way.ids.length ? layoutWay(data, picked, way) : layout(data, picked, mode, way)),
+    [data, picked, mode, way],
+  );
+  // On 경로 the timeline holds the way alone, the earliest first, each link named between.
+  const shown = mode === "path" && way.ids.length ? [...way.ids].reverse() : data.steps.map((s) => s.id);
+  const byId = new Map(data.steps.map((s) => [s.id, s]));
   const locate = (id: string) => {
     const n = nodes.find((x) => x.id === id);
     if (n) rf.setCenter(n.position.x + 32, n.position.y + 40, { zoom: Math.max(rf.getZoom(), 0.9), duration: 500 });
@@ -170,24 +263,38 @@ export function GraphView({ data }: { data: RecordData }) {
     ["모델", sess.model], ["작업 폴더", sess.folder && <code className="font-mono text-[11px]">{sess.folder}</code>], ["세션 ID", <code className="font-mono text-[11px]">{sess.id}</code>], ["시작", sess.start], ["엔진 모드", sess.mode],
   ];
   return (
-    <Pick.Provider value={(id) => setPicked(id)}>
+    <Pick.Provider value={(id) => { setPicked(id); setOpen(null); }}>
       <div className="relative min-w-0 flex-1">
         <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} minZoom={0.2} maxZoom={1.8} proOptions={{ hideAttribution: true }} nodesConnectable={false} />
-        <ToolStrip focus={focus} setFocus={setFocus} timeline={timeline} setTimeline={setTimeline} />
-        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-panel/90 px-3 py-1 text-[12px] text-mut">마디 {data.steps.length} · 원인 {data.causes.length}</div>
+        <ToolStrip timeline={timeline} setTimeline={setTimeline} />
+        <ModeSwitch mode={mode} setMode={setMode} />
+        <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-panel/90 px-3 py-1 text-[12px] text-mut tabular-nums">
+          {mode === "path" ? (way.ids.length ? `경로 ${way.ids.length}단계 · 턴 ${way.ids.filter((id) => byId.get(id)?.kind === "prompt").length}` : "도구를 누르면 경로")
+            : `마디 ${data.steps.length} · 원인 ${data.causes.length} · 이어 물음 ${data.parents?.length ?? 0}`}
+        </div>
       </div>
       {timeline && (
         <aside className="my-3 mr-3 flex min-h-0 w-[340px] shrink-0 min-[1500px]:w-[380px] flex-col rounded-xl bg-panel shadow-[0_12px_40px_rgba(0,0,0,.45)]">
-          <div className="flex h-10 shrink-0 items-center gap-2 px-3.5"><ListTree className="size-3.5" /><h2 className="text-[13px] font-semibold">타임라인</h2><span className="rounded-full bg-chip px-2 text-[11.5px] text-mut">{data.steps.length}</span></div>
+          <div className="flex h-10 shrink-0 items-center gap-2 px-3.5"><ListTree className="size-3.5" /><h2 className="text-[13px] font-semibold">{mode === "path" && way.ids.length ? "경로" : "타임라인"}</h2><span className="rounded-full bg-chip px-2 text-[11.5px] text-mut">{shown.length}</span></div>
           <dl className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1 px-3.5 pb-3 text-[11.5px]">
             {meta.filter(([, v]) => v).map(([k, v]) => <div key={k} className="contents"><dt className="text-mut">{k}</dt><dd className="m-0 truncate text-fg/85">{v}</dd></div>)}
           </dl>
           <div className="scroll relative min-h-0 flex-1 space-y-1 overflow-auto border-t border-white/8 px-3 pt-2.5 pb-5">
             <i className="absolute top-3 bottom-2 left-[21.5px] w-px bg-white/12" />
-            {data.steps.map((s) => (
-              <Card key={s.id} s={s} open={picked === s.id} cardRef={(el) => (refs.current[s.id] = el)}
-                onToggle={() => setPicked(picked === s.id ? null : s.id)} onLocate={() => { setPicked(s.id); locate(s.id); }} />
-            ))}
+            {shown.map((id, i) => {
+              const s = byId.get(id)!;
+              const onPath = mode === "path" && way.ids.length > 0;
+              const h = onPath && i > 0 ? way.hops.find((x) => x.to === id) : undefined;
+              return (
+                <div key={id} className="space-y-1">
+                  {h && <HopMark h={h} />}
+                  <Card s={s} open={onPath ? open === id || (open === null && picked === id) : picked === id} cardRef={(el) => (refs.current[id] = el)}
+                    onToggle={() => onPath ? setOpen(open === id ? "" : id) : setPicked(picked === id ? null : id)}
+                    onLocate={() => { if (!onPath) setPicked(id); locate(id); }}
+                    onWay={onPath || s.kind === "prompt" && !data.parents?.some((p) => p.prompt === id) ? undefined : () => { setPicked(id); setOpen(null); setMode("path"); }} />
+                </div>
+              );
+            })}
           </div>
         </aside>
       )}
