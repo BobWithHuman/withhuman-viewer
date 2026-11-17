@@ -10,17 +10,24 @@ import { type Call, DIM, type Group, SEV, SEVS, groups, named, toolName } from "
 export type RankBy = "machine" | "session" | "tool";
 const NO_PROMPT = "프롬프트 없음";
 
-/** A session as a row of the ranking names it: its name over two lines at most, and under it
- * its machine and when it last had a Call worth a look. */
-function SessionName({ r }: { r: Group }) {
+/** A row's bar: as long as its weight against the heaviest, split by severity. */
+function RiskBar({ r, max, className }: { r: Group; max: number; className?: string }) {
+  return (
+    <span className={cn("flex h-1.5 overflow-hidden rounded-full bg-white/[0.05]", className)}>
+      <span className="flex h-full gap-px" style={{ width: `${Math.max(3, (r.risk / max) * 100)}%` }}>
+        {SEVS.filter((s) => r[s] > 0).map((s) => <i key={s} className="h-full first:rounded-l-full last:rounded-r-full" style={{ flex: r[s], background: SEV[s].color }} />)}
+      </span>
+    </span>
+  );
+}
+
+/** Under a session's name: its machine and when it last had a Call worth a look, and its bar. */
+function SessionLine({ r, max }: { r: Group; max: number }) {
   const last = r.calls.reduce((a, c) => Math.max(a, c.at ?? 0), 0);
   return (
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="line-clamp-2 text-[13px] leading-snug break-words" title={r.calls[0].prompt ?? undefined}>{named(r.calls[0]) ?? NO_PROMPT}</span>
-      <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-        <span className="min-w-0 truncate font-mono">{r.calls[0].machine}</span>
-        {last > 0 && <><span className="text-white/20">·</span><span className="tnum shrink-0">{ago(last)}</span></>}
-      </span>
+    <span className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate font-mono">{r.calls[0].machine}{last > 0 && <span className="font-sans"> · {ago(last)}</span>}</span>
+      <RiskBar r={r} max={max} className="w-[38%] shrink-0" />
     </span>
   );
 }
@@ -39,23 +46,20 @@ export function Ranking({ calls, by, picked, onPick }: {
             <button
               onClick={() => onPick(r.key)} aria-pressed={picked === r.key}
               className={cn(
-                "group grid grid-cols-[18px_minmax(0,1fr)] gap-x-2 gap-y-1.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent/70",
+                "group grid grid-cols-[18px_minmax(0,1fr)] gap-x-2 rounded-lg px-2 text-left transition-colors hover:bg-accent/70",
+                by === "session" ? "gap-y-0.5 py-1.5" : "gap-y-1.5 py-2",
                 picked === r.key && "bg-accent ring-1 ring-ring", picked !== undefined && picked !== r.key && "opacity-45 hover:opacity-100",
               )}
             >
               <span className={cn("tnum row-span-2 pt-px text-[12px]", i < 3 ? "font-semibold text-foreground" : "text-muted-foreground")}>{i + 1}</span>
-              <span className={cn("flex min-w-0 gap-2", by === "session" ? "items-start" : "items-baseline")}>
+              <span className="flex min-w-0 items-baseline gap-2">
                 {by === "session"
-                  ? <SessionName r={r} />
+                  ? <span className="min-w-0 flex-1 truncate text-[13px]" title={r.calls[0].prompt ?? undefined}>{named(r.calls[0]) ?? NO_PROMPT}</span>
                   : <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{by === "tool" ? toolName(r.key) || "도구 없음" : r.key}</span>}
                 {r.crit > 0 && <span className="tnum shrink-0 text-[11.5px] font-medium text-deny">치명 {r.crit}</span>}
                 <span className="tnum shrink-0 text-right text-[13px] font-semibold">{r.total.toLocaleString()}</span>
               </span>
-              <span className="flex h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
-                <span className="flex h-full gap-px" style={{ width: `${Math.max(3, (r.risk / max) * 100)}%` }}>
-                  {SEVS.filter((s) => r[s] > 0).map((s) => <i key={s} className="h-full first:rounded-l-full last:rounded-r-full" style={{ flex: r[s], background: SEV[s].color }} />)}
-                </span>
-              </span>
+              {by === "session" ? <SessionLine r={r} max={max} /> : <RiskBar r={r} max={max} className="w-full" />}
             </button>
           </TooltipTrigger>
           <TooltipContent side="left">
