@@ -56,6 +56,10 @@ export interface RecordData {
   /** Each prompt's parent: the step of the turn before that its writer built on, how sure the
    * engine is, and what it was (a tool result, the agent's message, the request before). */
   parents?: { prompt: string; from: string; p: number; via: "result" | "message" | "request" }[];
+  /** The SubGraphs the engine cut the session into: each with its steps and the one it hangs
+   * from, and how (`ask` the prompt asked for it, `cause` a tool result told it, `message`,
+   * `result` or `request` a prompt was written from it, `answer` the turn's answer). */
+  subgraphs?: { n: number; parent: number | null; via: string; p?: number | null; steps: string[] }[];
 }
 
 export const SESSION: Session = {

@@ -58,7 +58,93 @@ function StepNode({ data }: NodeProps<Node<D>>) {
     </div>
   );
 }
-const nodeTypes = { step: StepNode };
+/** A SubGraph on 순서: a box of its steps, each a row to pick. */
+type G = { n: number; steps: Step[]; picked: string | null };
+const ROW = 30, HEAD = 26, BOX = 236;
+function SgNode({ data }: NodeProps<Node<G>>) {
+  const pick = useContext(Pick);
+  const first = data.steps[0];
+  const tag = first?.kind === "prompt" ? "프롬프트" : first?.kind === "answer" ? "답변" : "도구";
+  return (
+    <div className="rounded-lg bg-panel shadow-[0_6px_18px_rgba(0,0,0,.35)] ring-1 ring-white/10" style={{ width: BOX }}>
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
+      <div className="flex items-center gap-1.5 px-2.5 text-[10.5px] text-mut" style={{ height: HEAD }}>
+        <span className="rounded bg-white/8 px-1 font-mono tabular-nums">S{data.n}</span>{tag}
+      </div>
+      <div className="px-1 pb-1">
+        {data.steps.map((s) => (
+          <button key={s.id} onClick={(e) => { e.stopPropagation(); pick(s.id); }}
+            className={cx("flex w-full items-center gap-1.5 rounded-md px-1.5 text-left", data.picked === s.id ? "bg-pick/25 ring-1 ring-pick" : "hover:bg-white/6")}
+            style={{ height: ROW }}>
+            <span className={cx("grid size-[18px] shrink-0 place-items-center rounded [&_svg]:size-[11px] [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
+            <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{s.quote ? `"${s.name}"` : s.name}</span>
+            {s.verdict && s.verdict !== "allow" && <VerdictChip s={s} />}
+            {s.catch && !s.verdict && <TriangleAlert className="size-3.5 shrink-0 fill-catch text-panel" />}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+const nodeTypes = { step: StepNode, sg: SgNode };
+
+/** The tie a SubGraph hangs from, named as its link is. */
+const SG_TIE: Record<string, { color: string; label?: string }> = {
+  ask: { color: TIE.ask.color },
+  cause: { color: TIE.cause.color, label: TIE.cause.label },
+  message: { color: TIE.parent.color, label: PARENT_LABEL.message },
+  result: { color: TIE.parent.color, label: PARENT_LABEL.result },
+  request: { color: TIE.parent.color, label: PARENT_LABEL.request },
+  answer: { color: "#6f6f6f" },
+};
+
+/** 순서 by SubGraph: each SubGraph a box in the column of how far it hangs from one with no
+ * parent (the first column holds those), joined to the one it hangs from. Laid out as a tree: a
+ * box and all that hangs from it keep a band of their own, its children (in the order made)
+ * stacked to its right from its top, so a turn and what it led to read left to right together.
+ * Where each step sits, to bring it into view. */
+function layoutTree(data: RecordData, picked: string | null) {
+  const gs = [...(data.subgraphs ?? [])].sort((a, b) => a.n - b.n);
+  const byN = new Map(gs.map((g) => [g.n, g]));
+  const step = new Map(data.steps.map((s) => [s.id, s]));
+  const stepsOf = (n: number) => (byN.get(n)?.steps ?? []).map((id) => step.get(id)).filter((s): s is Step => !!s);
+  const hangs = (g: { parent: number | null; n: number }) => g.parent != null && byN.has(g.parent) && g.parent !== g.n;
+  const children = new Map<number, number[]>();
+  for (const g of gs) if (hangs(g)) children.set(g.parent!, [...(children.get(g.parent!) ?? []), g.n]);
+  const GAP = 14;
+  const spots = new Map<string, { x: number; y: number }>();
+  const nodes: Node<G>[] = [];
+  const placed = new Set<number>();
+  /** Places a box and what hangs from it from `y`; the height of their band. */
+  const place = (n: number, depth: number, y: number): number => {
+    placed.add(n);
+    const steps = stepsOf(n);
+    const own = HEAD + steps.length * ROW + 8;
+    const x = depth * (BOX + 90);
+    nodes.push({ id: `g${n}`, type: "sg", position: { x, y }, data: { n, steps, picked }, draggable: false, selectable: false });
+    steps.forEach((s, i) => spots.set(s.id, { x: x + BOX / 2, y: y + HEAD + i * ROW + ROW / 2 }));
+    let below = y;
+    for (const c of children.get(n) ?? []) if (!placed.has(c)) below += place(c, depth + 1, below);
+    return Math.max(own + GAP, below - y);
+  };
+  let y = 0;
+  for (const g of gs) if (!hangs(g) && !placed.has(g.n)) y += place(g.n, 0, y) + GAP;
+  // What hangs in a loop has no root: placed after the rest.
+  for (const g of gs) if (!placed.has(g.n)) y += place(g.n, 0, y) + GAP;
+  const edges: Edge[] = gs.filter((g) => g.parent != null && byN.has(g.parent)).map((g) => {
+    const tie = SG_TIE[g.via] ?? SG_TIE.ask;
+    const label = tie.label && `${tie.label}${g.p ? ` ${Math.round(g.p * 100)}%` : ""}`;
+    const on = g.steps.includes(picked ?? "") || byN.get(g.parent!)?.steps.includes(picked ?? "");
+    return {
+      id: `g${g.parent}>g${g.n}`, source: `g${g.parent}`, target: `g${g.n}`, type: "default", label,
+      labelStyle: { fill: tie.color, fontSize: 11, fontWeight: 600 }, labelBgStyle: { fill: "#282828" }, labelBgPadding: [4, 2] as [number, number],
+      style: { stroke: tie.color, strokeWidth: on ? 2.6 : 1.5, opacity: on ? 1 : 0.75 },
+      markerEnd: { type: MarkerType.ArrowClosed, color: tie.color, width: 14, height: 14 }, zIndex: on ? 4 : 0,
+    };
+  });
+  return { nodes: nodes as Node[], edges, spots };
+}
 
 /** A link that is not the next step: an arch over the line, higher the farther, named. */
 function ArcEdge({ id, sourceX, sourceY, targetX, targetY, markerEnd, style, data }: EdgeProps<Edge<{ label: string; color: string; faint?: boolean }>>) {
@@ -248,23 +334,32 @@ export function GraphView({ data }: { data: RecordData }) {
   const wayKey = mode === "path" ? (sel ?? "") : "";
   useEffect(() => {
     // 순서 of many steps opens on the step picked at a size its name reads; of few, on the whole.
-    const at = mode === "order" && data.steps.length > 12 ? data.steps.findIndex((s) => s.id === sel) : -1;
-    requestAnimationFrame(() => at >= 0
-      ? rf.setCenter(at * 210 + 120, (data.steps[at].lane ?? 0) * 150 - 70, { zoom: 0.85, duration: 300 })
+    const near = mode === "order" && data.steps.length > 12 && sel ? spotOf(sel) : undefined;
+    requestAnimationFrame(() => near
+      ? rf.setCenter(near.x, near.y, { zoom: 0.85, duration: 300 })
       : rf.fitView({ padding: mode === "path" ? 0.3 : 0.18, maxZoom: 1, duration: 300 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, rf, mode, wayKey]);
   const way = useMemo(() => wayBack(data, sel), [data, sel]);
-  const { nodes, edges } = useMemo(
-    () => (mode === "path" && way.ids.length ? layoutWay(data, open || sel, way) : layout(data, sel, mode, way)),
-    [data, sel, open, mode, way],
+  const tree = mode === "order" && (data.subgraphs?.length ?? 0) > 0;
+  const { nodes, edges, spots } = useMemo(
+    (): { nodes: Node[]; edges: Edge[]; spots?: Map<string, { x: number; y: number }> } =>
+      mode === "path" && way.ids.length ? layoutWay(data, open || sel, way) : tree ? layoutTree(data, sel) : layout(data, sel, mode, way),
+    [data, sel, open, mode, way, tree],
   );
+  /** Where a step is drawn, to bring it into view. */
+  const spotOf = (id: string) => {
+    const at = spots?.get(id);
+    if (at) return at;
+    const n = nodes.find((x) => x.id === id);
+    return n && { x: n.position.x + 32, y: n.position.y + 40 };
+  };
   // On 경로 the timeline holds the way alone, the earliest first, each link named between.
   const shown = mode === "path" && way.ids.length ? [...way.ids].reverse() : data.steps.map((s) => s.id);
   const byId = new Map(data.steps.map((s) => [s.id, s]));
   const locate = (id: string) => {
-    const n = nodes.find((x) => x.id === id);
-    if (n) rf.setCenter(n.position.x + 32, n.position.y + 40, { zoom: Math.max(rf.getZoom(), 0.9), duration: 500 });
+    const at = spotOf(id);
+    if (at) rf.setCenter(at.x, at.y, { zoom: Math.max(rf.getZoom(), 0.9), duration: 500 });
   };
   // The arrow keys step: on 순서 through every step (← →) and from turn to turn (↑ ↓); on 경로
   // along the way, opening each step. Not while a text is being typed or a sheet is open.
@@ -276,8 +371,8 @@ export function GraphView({ data }: { data: RecordData }) {
       if (document.querySelector("[role=dialog]")) return;
       const by = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
       const center = (id: string) => {
-        const n = nodes.find((x) => x.id === id);
-        if (n) rf.setCenter(n.position.x + 32, n.position.y + 40, { zoom: Math.max(rf.getZoom(), 0.85), duration: 250 });
+        const at = spotOf(id);
+        if (at) rf.setCenter(at.x, at.y, { zoom: Math.max(rf.getZoom(), 0.85), duration: 250 });
       };
       if (mode === "path" && way.ids.length) {
         if (e.key === "ArrowUp" || e.key === "ArrowDown") return;
@@ -303,7 +398,8 @@ export function GraphView({ data }: { data: RecordData }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, way, sel, open, data, nodes, rf]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, way, sel, open, data, nodes, spots, rf]);
   const sess = data.session;
   const meta: [string, ReactNode][] = [
     ["단말", sess.device], ["사람", sess.person], ["에이전트", sess.agent && <span className="inline-flex items-center gap-1.5"><span className="grid size-4 place-items-center rounded bg-white"><SvcLogo s="claude" size={11} /></span>{sess.agent}</span>],

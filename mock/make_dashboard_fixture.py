@@ -442,7 +442,24 @@ def long_session(at):
                           "props": {"edge_id": f"{sid}:{seq - 1}:{seq}", "probability": 1.0, "via": "order"}})
         return seq
 
+    # As the engine cuts a session: a prompt and its intent, each Call with its result (traced
+    # to the prompt's SubGraph or to the one holding the result that told it), and each message
+    # on its own.
     subgraphs = []
+    sg_of = {}
+
+    def open_sg(parent=None):
+        props = {"number": len(subgraphs), "session_id": sid}
+        if parent is not None:
+            props.update({"parent": f"s{parent}", "parents": [f"s{parent}"]})
+        subgraphs.append({"members": [], "props": props})
+        return len(subgraphs) - 1
+
+    def into(sg, seq):
+        subgraphs[sg]["members"].insert(0, seq)
+        sg_of[seq] = sg
+        return seq
+
     for turn, (prompt, intent, parent, calls, said) in enumerate(LONG_TURNS):
         key = {"none": "none", "request": "request", "message": f"m{state['msg']}",
                "result": f"g{state['result']}p0"}[parent] if turn else None
@@ -450,40 +467,37 @@ def long_session(at):
             "key": key, "node": None, "earlier_intent": LONG_TURNS[turn - 1][1],
             "probability": 0.0 if key == "none" else round(0.7 + 0.04 * (turn % 6), 2),
             "probabilities": {}, "sources": []}}, ensure_ascii=False)
-        sg = len(subgraphs)
-        members = []
-        request = add("Request", {"prompt": prompt}, {
+        ask = open_sg()
+        request = into(ask, add("Request", {"prompt": prompt}, {
             "event_name": "UserPromptSubmit", "trace_json": trace,
-            "payload_json": json.dumps({"prompt": prompt, "kind": "user", "user_docs": []}, ensure_ascii=False)}, sg)
-        members.append(request)
-        members.append(add("Intent", {"intent": intent}, {"event_name": "Intent", "intent": intent,
-                                                         "payload_json": json.dumps({"intent": intent}, ensure_ascii=False)}, sg))
+            "payload_json": json.dumps({"prompt": prompt, "kind": "user", "user_docs": []}, ensure_ascii=False)}, ask))
+        into(ask, add("Intent", {"intent": intent}, {"event_name": "Intent", "intent": intent,
+                                                  "payload_json": json.dumps({"intent": intent}, ensure_ascii=False)}, ask))
         for tool, tin, decision, link, result in calls:
-            # A Call a result told: the latest result that tells its reader what to do.
             told = state["told"] if link == "segment" else None
-            ctrace = {"link": "segment" if told else "request", "path": [sg],
+            sg = open_sg(sg_of[told] if told else ask)
+            ctrace = {"link": "segment" if told else "request", "path": [sg_of[told] if told else ask],
                       "deviation": {"worst": "exfiltration" if decision == "DENY" else "explicit",
                                     "irreversible": 0.9 if decision != "ALLOW" else 0.03,
                                     "score": 0.6 if decision != "ALLOW" else 0.01}}
             if told:
                 ctrace["segments"] = [{"seq": told, "paragraph": 0, "probability": 0.86}]
-            seq = add("Call", {"brief": next(iter(tin.values())), "tool_name": tool}, {
+            seq = into(sg, add("Call", {"brief": next(iter(tin.values())), "tool_name": tool}, {
                 "event_name": "PreToolUse", "decided_at": clock[0] + 300, "decision": decision,
                 "decision_mode": mode, "decision_rule": "causal::instruction" if told else "intent::match",
                 "decision_reason": "도구 결과의 지시를 수행" if told else "",
                 "payload_json": json.dumps({"tool_name": tool, "tool_input": tin}, ensure_ascii=False),
-                "trace_json": json.dumps(ctrace, ensure_ascii=False)}, sg)
-            members.append(seq)
+                "trace_json": json.dumps(ctrace, ensure_ascii=False)}, sg))
             edges.append({"paragraph": 0 if told else None, "source": seq, "target": told or request, "type": "NEXT",
-                          "props": {"call_seq": seq, "kind": "cause", "parent": f"s{sg}", "probability": 0.86 if told else 0.9, "rank": 1}})
+                          "props": {"call_seq": seq, "kind": "cause", "parent": f"s{sg_of[told] if told else ask}",
+                                    "probability": 0.86 if told else 0.9, "rank": 1}})
             if result is not None:
-                r = add("Segment", {"brief": next(iter(tin.values())), "tool_name": tool, "output": result}, {
+                r = into(sg, add("Segment", {"brief": next(iter(tin.values())), "tool_name": tool, "output": result}, {
                     "event_name": "PostToolUse",
                     "payload_json": json.dumps({"tool_name": tool, "tool_response": result}, ensure_ascii=False)}, sg,
                     [{"hidden": "<!--" in result, "hidden_rules": [], "index": 0, "instructs": "<!--" in result,
-                      "source": "PostToolUse", "text": result}])
+                      "source": "PostToolUse", "text": result}]))
                 edges.append({"paragraph": None, "props": {}, "source": r, "target": seq, "type": "RESULT_OF"})
-                members.append(r)
                 state["result"] = r
                 if "<!--" in result:
                     state["told"] = r
@@ -492,10 +506,9 @@ def long_session(at):
                          "ran": result is not None, "rule": "causal::instruction" if told else "intent::match",
                          "score": 0.6 if decision != "ALLOW" else 0.01, "seq": seq, "tool_name": tool,
                          "worst": "exfiltration" if decision == "DENY" else "explicit"})
-        state["msg"] = add("Message", {"text": said}, {"event_name": "MessageDisplay",
-                                                      "payload_json": json.dumps({"text": said}, ensure_ascii=False)}, sg)
-        members.append(state["msg"])
-        subgraphs.append({"members": members[::-1], "props": {"number": sg, "session_id": sid}})
+        said_sg = open_sg()
+        state["msg"] = into(said_sg, add("Message", {"text": said}, {
+            "event_name": "MessageDisplay", "payload_json": json.dumps({"text": said}, ensure_ascii=False)}, said_sg))
     graph = {"nodes": nodes, "edges": edges, "tokens": [], "subgraphs": subgraphs}
     count = lambda d: sum(1 for r in rows if r["decision"] == d)
     row = {"allowed": count("ALLOW"), "calls": len(rows), "client": client, "created_at": at, "cwd": cwd,

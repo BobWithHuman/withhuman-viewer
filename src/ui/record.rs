@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use serde_json::{Value, json};
 
 use super::{AppState, Load};
+use crate::layout::Model;
 use crate::metro::{AskParent, Metro, ParentOf, Station, mcp_parts};
 use crate::model::Session;
 
@@ -50,7 +51,7 @@ pub fn RecordGraph() -> Element {
             Load::Ready(list) => list.iter().find(|s| Some(&s.id) == id.as_ref()).cloned(),
             _ => None,
         };
-        Some(record_data(&metro, session.as_ref(), id.as_deref().unwrap_or("")).to_string())
+        Some(record_data(model, &metro, session.as_ref(), id.as_deref().unwrap_or("")).to_string())
     });
     use_effect(move || {
         if let Some(json) = data() {
@@ -175,7 +176,7 @@ fn station_step(st: &Station) -> Value {
 
 /// The session as the page reads it: its head, its steps in order, the lines between them, and
 /// the causes the engine traced.
-fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
+fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) -> Value {
     // Requests and Calls by when they came, with the step each became.
     let mut items: Vec<(i64, i64, Value)> = Vec::new();
     for ask in &m.asks {
@@ -280,6 +281,55 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
         })
         .collect();
 
+    // The SubGraphs the engine cut the session into, each with its steps and the one it was
+    // traced to: a prompt's to what of the turn before it was written from, the others to the
+    // SubGraph their Calls were traced to (the prompt's, or one holding a tool result).
+    let mut steps_of: std::collections::BTreeMap<i64, Vec<String>> = std::collections::BTreeMap::new();
+    for (seq, _, step) in &items {
+        if let (Some(g), Some(id)) = (model.subgraph_of(*seq), step["id"].as_str()) {
+            steps_of.entry(g).or_default().push(id.to_owned());
+        }
+    }
+    let ask_in = |g: i64| m.asks.iter().position(|a| model.subgraph_of(a.seq) == Some(g));
+    let subgraphs: Vec<Value> = steps_of
+        .iter()
+        .map(|(&g, ids)| {
+            let (parent, via, p) = match ask_in(g) {
+                Some(i) => match m.asks[i].parent.as_ref() {
+                    Some(AskParent { from, probability }) => {
+                        let (to, via) = match from {
+                            ParentOf::Request => (
+                                i.checked_sub(1).and_then(|j| model.subgraph_of(m.asks[j].seq)),
+                                "request",
+                            ),
+                            ParentOf::Message(seq) => (model.subgraph_of(*seq), "message"),
+                            ParentOf::Result { result, .. } => (model.subgraph_of(*result), "result"),
+                        };
+                        (to, via, Some(*probability))
+                    }
+                    None => (None, "none", None),
+                },
+                None => match model.subgraph_parent(g) {
+                    Some(to) => (Some(to), if ask_in(to).is_some() { "ask" } else { "cause" }, None),
+                    // The engine traces no message: the agent's answer is its turn's, so it
+                    // hangs from the turn's prompt.
+                    None if ids.iter().any(|id| id == "answer" || id.starts_with('m')) => (
+                        m.asks
+                            .iter()
+                            .filter_map(|a| model.subgraph_of(a.seq))
+                            .filter(|&a| a < g)
+                            .max(),
+                        "answer",
+                        None,
+                    ),
+                    None => (None, "none", None),
+                },
+            };
+            let parent = parent.filter(|&to| to != g && steps_of.contains_key(&to));
+            json!({ "n": g, "parent": parent, "via": if parent.is_some() { via } else { "none" }, "p": p, "steps": ids })
+        })
+        .collect();
+
     // The session's name, as its list gives it: the intent it did the most under, or its first
     // prompt, quoted.
     let named = session.map(|s| s.title()).filter(|t| !t.is_empty());
@@ -309,6 +359,7 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
         "links": links,
         "causes": causes,
         "parents": parents,
+        "subgraphs": subgraphs,
     })
 }
 
@@ -340,7 +391,7 @@ mod tests {
         let data = json!({"nodes": nodes, "subgraphs": [], "edges": [{"source": 3, "target": 2, "type": "RESULT_OF", "props": {}}]});
         let model = Model::build(&serde_json::from_value(data).unwrap());
         let m = Metro::build_with(&model, &std::collections::HashSet::new());
-        let out = record_data(&m, None, "s");
+        let out = record_data(&model, &m, None, "s");
         let parents: Vec<(String, String, String)> = out["parents"]
             .as_array()
             .unwrap()
@@ -390,7 +441,7 @@ mod dump {
                 let graph = serde_json::from_value(demo.graph(&s.id).ok()?).ok()?;
                 let model = crate::layout::Model::build(&graph);
                 let m = crate::metro::Metro::build_with(&model, &std::collections::HashSet::new());
-                Some(super::record_data(&m, Some(s), &s.id))
+                Some(super::record_data(&model, &m, Some(s), &s.id))
             })
             .collect();
         std::fs::write(to, serde_json::to_string(&all).unwrap()).unwrap();
