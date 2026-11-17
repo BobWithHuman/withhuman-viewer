@@ -1905,7 +1905,7 @@ div.admin-hbar:hover { background: none; }
 
 /* ----- The security team's thin rail, where the developer's app keeps its sidebar. ----- */
 .rail { flex: none; width: 44px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; background: #1a1a1c;
-  border-right: 1px solid #000; color: #c9c9cd; z-index: 4; }
+  border-right: 0; color: #c9c9cd; z-index: 4; }
 .rail button { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; display: grid; place-items: center; }
 .rail button:hover:not(:disabled) { background: rgba(255, 255, 255, .08); color: #fff; }
 .rail button.demo { color: #f2c26b; }
@@ -1975,7 +1975,7 @@ div.admin-hbar:hover { background: none; }
 .rail { padding-top: 0; }
 .rail .rail-head { flex: none; width: 100%; height: 40px; box-sizing: border-box; }
 /* The header strip runs on across the rail: its line, and over the rail's own right edge. */
-.rail .rail-head.line { position: relative; z-index: 1; width: calc(100% + 1px); margin-right: -1px; background: #1a1a1c; border-bottom: 1px solid #000; }
+.rail .rail-head.line { position: relative; z-index: 1; width: 100%; background: #1a1a1c; border-bottom: 1px solid #000; }
 .state { font-size: 11.5px; font-weight: 600; color: #a9a9ae; }
 .state.ok { color: #6fd3a0; } .state.warn { color: #f2c26b; } .state.bad { color: #ff8b8b; } .state.muted { color: #6b6b70; }
 .admin-kill { width: 100%; min-width: 900px; display: grid; grid-template-columns: 92px 150px 120px minmax(0, 1.3fr) 80px minmax(0, 2fr) minmax(0, 1.2fr);

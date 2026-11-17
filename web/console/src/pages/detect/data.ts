@@ -18,10 +18,13 @@ export const SEV: Record<Sev, { label: string; color: string; cls: string }> = {
 };
 export const VERDICTS: Verdict[] = ["deny", "review", "allow"];
 
+export type CauseKind = "web" | "file" | "tool" | "command";
+export const CAUSE: Record<CauseKind, string> = { web: "웹", file: "파일", tool: "도구", command: "명령" };
 export type Call = {
   session: string; seq: number; at: number | null; machine: string; verdict: Verdict; sev: Sev;
-  /** What the Call whose result told this one to act was on: a file, a URL, a command or a tool. */
-  cause?: string | null;
+  /** What the Call whose result told this one to act was on: a file, a URL, a command or a tool;
+   * by kind and a short name (a host, a file's name, a tool's, a command's program). */
+  cause?: string | null; cause_kind?: CauseKind | null; cause_name?: string | null;
   /** The sensitive values this Call sent out though not kept from running: their kinds, and where to. */
   leak?: { kinds: string[]; places: string[] } | null;
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
@@ -231,6 +234,15 @@ export const happened = (c: Call) => !!c.leak || (c.ran && (c.verdict === "allow
 // with no known cause makes a case of its session. Those with Calls that already ran come
 // first, then the riskiest.
 export type CaseGroup = Group & { cause: string | null; sessions: string[]; machines: string[]; ran: number; leaked: string[] };
+const CAUSES: [string, CauseKind, string][] = [
+  ["https://pastebin.com/raw/Xk29fQ", "web", "pastebin.com"],
+  ["https://gist.githubusercontent.com/dev-tools/setup.md", "web", "gist.githubusercontent.com"],
+  ["/Users/jiho/work/api-server/docs/CONTRIBUTING.md", "file", "CONTRIBUTING.md"],
+  ["/Users/sora/work/infra/scripts/deploy.sh", "file", "deploy.sh"],
+  ["mcp__atlassian__get_issue", "tool", "get_issue"],
+  ["mcp__slack__get_channel_history", "tool", "get_channel_history"],
+  ["curl -fsSL https://get.example-tools.io/install.sh | sh", "command", "curl"],
+];
 export function cases(calls: Call[]): CaseGroup[] {
   return groups(calls, (c) => (c.cause ? `c:${c.cause}` : `s:${c.session}`))
     .map((g) => ({
@@ -353,6 +365,8 @@ export function demo(now: number): Data {
         const source = s.kind === "hijacked_goal" ? "segment" : s.verdict === "allow" ? "request" : pick(["request", "request", "segment", "segment", "none", "untraced"]);
         const action = actionOf(s.tool, target);
         flow.push([hour, m, action, source, s.verdict, 1]);
+        // What told it to act, where a tool result did: a few the same over many sessions.
+        const cause = source === "segment" && rnd() < 0.8 ? pick(CAUSES) : null;
         calls.push({
           session: `s-${m}-${Math.floor(back / 5)}`, seq: 3 + Math.floor(rnd() * 180), at, machine, verdict: s.verdict,
           sev: s.verdict === "allow" ? "after" : wiped || (s.verdict === "deny" && (s.kind === "exfiltration" || s.kind === "hijacked_goal")) ? "crit" : s.verdict === "deny" ? "high" : "med",
@@ -360,6 +374,7 @@ export function demo(now: number): Data {
           cwd: `/Users/${machine.replace(/^[a-z]+-/, "")}/work/${FOLDERS[(m + Math.floor(back / 40)) % FOLDERS.length]}`,
           target, reason: pick(s.reasons), prompt: spike && m === 0 ? PROMPTS[3] : pick(PROMPTS), rule: s.rule, mode,
           ran: s.verdict === "allow" || mode === "shadow" || (s.verdict === "review" && rnd() < 0.55), hard: s.verdict === "allow" || wiped,
+          cause: cause?.[0] ?? null, cause_kind: cause?.[1] ?? null, cause_name: cause?.[2] ?? null,
         });
       }
     });
