@@ -2011,6 +2011,10 @@ div.admin-hbar:hover { background: none; }
 .wh-record { position: relative; flex: 1; min-height: 0; min-width: 0; background: #282828; }
 .wh-record-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
 .wh-record-wait { position: absolute; inset: 0; display: grid; place-items: center; color: #8a8a8a; font-size: 13px; }
+.wh-record-fail { max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.wh-record-fail b { color: #ff8b80; font-size: 14px; font-weight: 600; }
+.wh-record-fail code { padding: 8px 12px; border-radius: 8px; background: #1e1e1e; color: #d8d8d8; font: 12px ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.wh-record-fail button { height: 28px; padding: 0 12px; border: 0; border-radius: 7px; background: #3577f6; color: #fff; font-size: 12.5px; }
 
 /* The dashboards' page (web/console) in a frame filling its screen. */
 .wh-console { position: relative; flex: 1; min-height: 0; min-width: 0; height: 100%; background: #1f1f21; }

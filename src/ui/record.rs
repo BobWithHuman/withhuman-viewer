@@ -61,9 +61,23 @@ pub fn RecordGraph() -> Element {
         }
     });
     let waiting = data().is_none();
+    // Why nothing came: the store's own words, and the way to its settings.
+    let failed = match (&*state.sessions.read(), &*state.graph.read()) {
+        (Load::Failed(e), _) | (_, Load::Failed(e)) => Some(e.clone()),
+        _ => None,
+    };
+    let mut settings = state.settings_open;
     rsx! {
         div { id: "wh-record", class: "wh-record",
-            if waiting {
+            if let Some(e) = failed {
+                div { class: "wh-record-wait",
+                    div { class: "wh-record-fail",
+                        b { "연결 안 됨" }
+                        code { "{e}" }
+                        button { onclick: move |_| settings.set(true), "연결 설정" }
+                    }
+                }
+            } else if waiting {
                 div { class: "wh-record-wait", "세션을 불러오는 중" }
             }
         }
