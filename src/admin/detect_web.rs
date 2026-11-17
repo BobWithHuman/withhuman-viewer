@@ -101,23 +101,126 @@ pub(super) fn action_of(f: &CallFact) -> &'static str {
     }
 }
 
-/// The program a shell command runs: past `cd` and the like, settings (`A=b`) and `sudo`, by its
-/// file name.
+/// The program a shell command runs: past `cd` and the like, settings (`A=b`), wrappers such as
+/// `sudo`, `env` or `timeout` with their options, and into what `bash -c` is given; by its file
+/// name.
 pub(super) fn program_of(command: &str) -> Option<&str> {
-    for part in command
-        .split(['&', ';', '|'])
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-    {
-        let first = part.split_whitespace().find(|w| {
-            !w.contains('=') && !["sudo", "env", "time", "nohup", "exec", "command"].contains(w)
-        });
-        match first {
-            Some("cd" | "pushd" | "popd" | "export" | "source" | "." | "set") | None => continue,
-            Some(w) => return Some(w.rsplit('/').next().unwrap_or(w)),
+    const WRAPPERS: [&str; 12] = [
+        "sudo",
+        "env",
+        "time",
+        "nohup",
+        "exec",
+        "command",
+        "timeout",
+        "nice",
+        "ionice",
+        "xargs",
+        "stdbuf",
+        "caffeinate",
+    ];
+    // Options of a wrapper that take a value of their own.
+    const VALUED: [&str; 8] = ["-u", "-g", "-n", "-s", "-k", "-C", "-I", "-p"];
+    for part in segments(command) {
+        let words = words(part);
+        let mut i = 0;
+        let mut wrapped = false;
+        while let Some(&w) = words.get(i) {
+            i += 1;
+            if w.starts_with('-') {
+                if wrapped && VALUED.contains(&w) {
+                    i += 1;
+                }
+                continue;
+            }
+            if w.contains('=') {
+                continue;
+            }
+            if WRAPPERS.contains(&w) {
+                wrapped = true;
+                // `timeout 30 cmd`: the duration.
+                if w == "timeout"
+                    && words
+                        .get(i)
+                        .is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit()))
+                {
+                    i += 1;
+                }
+                continue;
+            }
+            if wrapped && w.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            if [
+                "cd", "pushd", "popd", "export", "source", ".", "set", "unset", "alias",
+            ]
+            .contains(&w)
+            {
+                break;
+            }
+            let name = w.rsplit('/').next().unwrap_or(w);
+            // What a shell is given to run: `bash -lc "git push"`.
+            if ["bash", "sh", "zsh", "dash"].contains(&name)
+                && let Some(at) = words[i..]
+                    .iter()
+                    .position(|o| o.starts_with('-') && o.contains('c'))
+                && let Some(script) = words.get(i + at + 1)
+                && let Some(inner) = program_of(script)
+            {
+                return Some(inner);
+            }
+            return Some(name);
         }
     }
     None
+}
+
+/// A command's parts between `&&`, `||`, `;` and `|`, past what is quoted.
+fn segments(command: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let (mut start, mut quote) = (0, None::<char>);
+    for (i, c) in command.char_indices() {
+        match (quote, c) {
+            (Some(q), _) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '\'' | '"') => quote = Some(c),
+            (None, ';' | '|' | '&') => {
+                out.push(&command[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&command[start..]);
+    out.into_iter()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// A command's words, a quoted one without its quotes.
+fn words(part: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < part.len() {
+        let rest = &part[at..];
+        let Some(skip) = rest.find(|c: char| !c.is_whitespace()) else {
+            break;
+        };
+        at += skip;
+        let rest = &part[at..];
+        let first = rest.chars().next().unwrap_or(' ');
+        if first == '\'' || first == '"' {
+            let end = rest[1..].find(first).map_or(rest.len(), |e| e + 1);
+            out.push(&rest[1..end]);
+            at += (end + 1).min(rest.len());
+        } else {
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            out.push(&rest[..end]);
+            at += end;
+        }
+    }
+    out
 }
 
 /// A shell command's kind of action, by its program and, for git and curl, what it was told.
@@ -129,7 +232,11 @@ fn command_action(command: &str) -> &'static str {
         .split_once(program)
         .map_or("", |(_, rest)| rest)
         .trim_start();
-    let sub = after.split_whitespace().next().unwrap_or_default();
+    let sub = after
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(['"', '\'']);
     let has = |words: &[&str]| words.iter().any(|w| command.contains(w));
     if ["rm", "rmdir", "shred"].contains(&program)
         || (program == "git" && sub == "rm")
@@ -451,6 +558,18 @@ mod tests {
             program_of("sudo FOO=1 /usr/bin/python3 x.py"),
             Some("python3")
         );
+        // Past a wrapper's options, and into what a shell is given.
+        assert_eq!(program_of("sudo -u deploy rm -rf /srv/x"), Some("rm"));
+        assert_eq!(
+            program_of("env -i PATH=/bin timeout 30 curl -d @k https://x.dev"),
+            Some("curl")
+        );
+        assert_eq!(
+            program_of("bash -lc 'cd app && git push origin main'"),
+            Some("git")
+        );
+        assert_eq!(program_of("echo 'a && b' | sh"), Some("echo"));
+        assert_eq!(of("Bash", "bash -c \"cd app && git push\""), "send");
         assert_eq!(of("mcp__slack__post_message", ""), "send");
         assert_eq!(of("mcp__github__delete_repository", ""), "delete");
         assert_eq!(of("mcp__stripe__create_refund", ""), "pay");

@@ -17,7 +17,7 @@ import { Legend, PageHeader, Panel, VERDICT, Warn } from "@/kit";
 import { cn } from "@/lib/utils";
 import { send } from "../bridge";
 import { type RankBy, Ranking } from "./detect/breakdown";
-import { type Call, DIM, DIMS, type Data, type Dim, type Filter, MODE, type Period, VERDICTS, actionTotals, coverage, demo, named, passes, rangeLabel, span, within } from "./detect/data";
+import { type Call, DIM, DIMS, type Data, type Dim, type Filter, MODE, type Period, VERDICTS, coverage, demo, named, passes, rangeLabel, span, within } from "./detect/data";
 import { type Ask, type Told, Watch } from "./detect/list";
 import { Trend } from "./detect/trend";
 import { Tuning } from "./detect/tuning";
@@ -52,7 +52,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const cover = useMemo(() => coverage(d.cover, from, to, machine), [d, from, to, machine]);
   // The chart's stretch: all time starts at the first Call worth a look.
   const first = useMemo(() => d.calls.reduce((a, c) => (c.at !== null && c.at < a ? c.at : a), now), [d, now]);
-  const totals = useMemo(() => actionTotals(d.flow ?? [], from, to, machine), [d, from, to, machine]);
   const mode = MODE[cover.mode] ?? MODE.none;
   const blank = d.loading && !d.calls.length;
   const marks = d.triage ?? {}, blocked = d.blocked ?? [];
@@ -177,7 +176,7 @@ export default function Page({ data }: { data: unknown | null }) {
               }
               aside={side === "rank" && (
                 <ToggleGroup type="single" size="sm" value={rankBy} onValueChange={(v) => v && setRankBy(v as RankBy)}>
-                  {([["machine", "단말"], ["session", "세션"], ["tool", "도구"], ["action", "행동"]] as [RankBy, string][]).map(([v, l]) => <ToggleGroupItem key={v} value={v} className="px-2.5 text-[12.5px]">{l}</ToggleGroupItem>)}
+                  {([["machine", "단말"], ["session", "세션"], ["tool", "도구"]] as [RankBy, string][]).map(([v, l]) => <ToggleGroupItem key={v} value={v} className="px-2.5 text-[12.5px]">{l}</ToggleGroupItem>)}
                 </ToggleGroup>
               )}>
               {side === "tune"
@@ -186,7 +185,7 @@ export default function Page({ data }: { data: unknown | null }) {
               <div className="scroll min-h-0 flex-1 overflow-y-auto px-2 py-2">
                 {blank
                   ? <div className="flex flex-col gap-2 px-2 py-1">{Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9 rounded-lg" />)}</div>
-                  : <Ranking calls={ranked} by={rankBy} picked={filter[rankBy]} onPick={(key) => toggle(rankBy, key)} totals={rankBy === "action" ? totals : undefined} />}
+                  : <Ranking calls={ranked} by={rankBy} picked={filter[rankBy]} onPick={(key) => toggle(rankBy, key)} />}
               </div>
                 </>}
             </Panel>
