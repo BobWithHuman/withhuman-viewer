@@ -278,11 +278,6 @@ pub fn Main() -> Element {
                             marked += 1;
                         });
                     }
-                    (Some("copy"), _) => {
-                        let text = serde_json::to_string(m.get("text").and_then(Value::as_str).unwrap_or_default()).unwrap_or_default();
-                        document::eval(&format!("navigator.clipboard.writeText({text})"));
-                        saved.set(Some("복사됨".into()));
-                    }
                     // A source distrusted, or trusted again (`on` false).
                     (Some("source"), call) => {
                         if let Some(source) = m.get("source").and_then(Value::as_str).map(str::to_owned) {
