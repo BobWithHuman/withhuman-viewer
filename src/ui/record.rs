@@ -45,7 +45,7 @@ pub fn RecordGraph() -> Element {
         let Load::Ready(model) = &*state.graph.read() else {
             return None;
         };
-        let metro = Metro::build_with(model, &std::collections::HashSet::new());
+        let metro = unfolded(model);
         let id = (state.current)();
         let session = match &*state.sessions.read() {
             Load::Ready(list) => list.iter().find(|s| Some(&s.id) == id.as_ref()).cloned(),
@@ -82,6 +82,17 @@ pub fn RecordGraph() -> Element {
             }
         }
     }
+}
+
+/// The session laid out with every Call its own step: 기록 lists each one, none folded.
+fn unfolded(model: &Model) -> Metro {
+    let calls = model
+        .nodes
+        .iter()
+        .filter(|n| n.kind == "Call")
+        .map(|n| n.seq())
+        .collect();
+    Metro::build_with(model, &calls)
 }
 
 /// When, as the timeline writes it: the date and the time.
@@ -454,7 +465,7 @@ mod dump {
             .filter_map(|s| {
                 let graph = serde_json::from_value(demo.graph(&s.id).ok()?).ok()?;
                 let model = crate::layout::Model::build(&graph);
-                let m = crate::metro::Metro::build_with(&model, &std::collections::HashSet::new());
+                let m = super::unfolded(&model);
                 Some(super::record_data(&model, &m, Some(s), &s.id))
             })
             .collect();

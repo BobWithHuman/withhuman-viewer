@@ -68,8 +68,12 @@ function SgNode({ data }: NodeProps<Node<G>>) {
   const ns = data.ns.length > 1 ? `S${data.ns[0]}–${data.ns[data.ns.length - 1]}` : `S${data.n}`;
   return (
     <div className="rounded-lg bg-panel shadow-[0_6px_18px_rgba(0,0,0,.35)] ring-1 ring-white/10" style={{ width: BOX }}>
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+      {data.steps.map((s, i) => (
+        <span key={s.id}>
+          <Handle id={`i${s.id}`} type="target" position={Position.Left} style={{ top: HEAD + i * ROW + ROW / 2 }} />
+          <Handle id={`o${s.id}`} type="source" position={Position.Right} style={{ top: HEAD + i * ROW + ROW / 2 }} />
+        </span>
+      ))}
       <div className="flex items-center gap-1.5 px-2.5 text-[10.5px] text-mut" style={{ height: HEAD }}>
         <span className="rounded bg-white/8 px-1 font-mono tabular-nums">{ns}</span>{tag}
       </div>
@@ -100,11 +104,6 @@ const SG_TIE: Record<string, { color: string; label?: string }> = {
   answer: { color: "#6f6f6f" },
 };
 
-/** 순서 by SubGraph: each SubGraph a box in the column of how far it hangs from one with no
- * parent (the first column holds those), joined to the one it hangs from. Laid out as a tree: a
- * box and all that hangs from it keep a band of their own, its children (in the order made)
- * stacked to its right from its top, so a turn and what it led to read left to right together.
- * Where each step sits, to bring it into view. */
 /** The SubGraphs as boxes: the agent's steps that hang the same way from one SubGraph (the
  * tools a prompt asked for, one by one, and the turn's answer) share a box; what a tool result
  * told and a prompt written from the turn before keep their own, where the line branches. */
@@ -140,42 +139,56 @@ function boxes(data: RecordData) {
   return [...out.values()];
 }
 
+/** 순서 by SubGraph: the boxes top to bottom in the order their first step was made, each in
+ * the column of how far it hangs from one with no parent (the first column holds those), and
+ * joined from the step it hangs from (the prompt that asked, the Call whose result told it, the
+ * answer or result a prompt was written from) to its first. Where each step sits, to bring it
+ * into view. */
 function layoutTree(data: RecordData, picked: string | null) {
-  const gs = boxes(data);
+  const order = new Map(data.steps.map((s, i) => [s.id, i]));
+  const gs = boxes(data).sort((a, b) => (order.get(a.steps[0]) ?? 0) - (order.get(b.steps[0]) ?? 0));
   const byN = new Map(gs.map((g) => [g.n, g]));
   const step = new Map(data.steps.map((s) => [s.id, s]));
-  const stepsOf = (n: number) => (byN.get(n)?.steps ?? []).map((id) => step.get(id)).filter((s): s is Step => !!s);
   const hangs = (g: { parent: number | null; n: number }) => g.parent != null && byN.has(g.parent) && g.parent !== g.n;
-  const children = new Map<number, number[]>();
-  for (const g of gs) if (hangs(g)) children.set(g.parent!, [...(children.get(g.parent!) ?? []), g.n]);
-  const GAP = 14;
-  const spots = new Map<string, { x: number; y: number }>();
-  const nodes: Node<G>[] = [];
-  const placed = new Set<number>();
-  /** Places a box and what hangs from it from `y`; the height of their band. */
-  const place = (n: number, depth: number, y: number): number => {
-    placed.add(n);
-    const steps = stepsOf(n);
-    const own = HEAD + steps.length * ROW + 8;
-    const x = depth * (BOX + 90);
-    nodes.push({ id: `g${n}`, type: "sg", position: { x, y }, data: { n, ns: byN.get(n)?.ns ?? [n], steps, picked }, draggable: false, selectable: false });
-    steps.forEach((s, i) => spots.set(s.id, { x: x + BOX / 2, y: y + HEAD + i * ROW + ROW / 2 }));
-    let below = y;
-    for (const c of children.get(n) ?? []) if (!placed.has(c)) below += place(c, depth + 1, below);
-    return Math.max(own + GAP, below - y);
+  const depth = new Map<number, number>();
+  const depthOf = (n: number, seen: Set<number> = new Set()): number => {
+    if (depth.has(n)) return depth.get(n)!;
+    const g = byN.get(n)!;
+    seen.add(n);
+    const d = hangs(g) && !seen.has(g.parent!) ? depthOf(g.parent!, seen) + 1 : 0;
+    depth.set(n, d);
+    return d;
   };
+  const GAP = 12, COL = BOX + 64;
+  const spots = new Map<string, { x: number; y: number }>();
   let y = 0;
-  for (const g of gs) if (!hangs(g) && !placed.has(g.n)) y += place(g.n, 0, y) + GAP;
-  // What hangs in a loop has no root: placed after the rest.
-  for (const g of gs) if (!placed.has(g.n)) y += place(g.n, 0, y) + GAP;
-  const edges: Edge[] = gs.filter((g) => g.parent != null && byN.has(g.parent)).map((g) => {
+  const nodes: Node<G>[] = gs.map((g) => {
+    const steps = g.steps.map((id) => step.get(id)).filter((s): s is Step => !!s);
+    const x = depthOf(g.n) * COL;
+    const at = y;
+    steps.forEach((s, i) => spots.set(s.id, { x: x + BOX / 2, y: at + HEAD + i * ROW + ROW / 2 }));
+    y += HEAD + steps.length * ROW + 8 + GAP;
+    return { id: `g${g.n}`, type: "sg", position: { x, y: at }, data: { n: g.n, ns: g.ns, steps, picked }, draggable: false, selectable: false };
+  });
+  /** The step of the parent box a box hangs from. */
+  const from = (g: (typeof gs)[number]): string | undefined => {
+    const parent = byN.get(g.parent!)!;
+    const inParent = (id: string) => parent.steps.includes(id);
+    if (g.via === "cause") return data.causes.find(([a, b]) => g.steps.includes(b) && inParent(a))?.[0];
+    if (g.via === "message" || g.via === "result" || g.via === "request")
+      return data.parents?.find((p) => g.steps.includes(p.prompt) && inParent(p.from))?.from;
+    return parent.steps.find((id) => step.get(id)?.kind === "prompt") ?? parent.steps[0];
+  };
+  const edges: Edge[] = gs.filter(hangs).map((g) => {
     const tie = SG_TIE[g.via] ?? SG_TIE.ask;
     const label = tie.label && `${tie.label}${g.p ? ` ${Math.round(g.p * 100)}%` : ""}`;
-    const on = g.steps.includes(picked ?? "") || byN.get(g.parent!)?.steps.includes(picked ?? "");
+    const src = from(g) ?? byN.get(g.parent!)!.steps[0];
+    const on = picked != null && (g.steps.includes(picked) || src === picked);
     return {
-      id: `g${g.parent}>g${g.n}`, source: `g${g.parent}`, target: `g${g.n}`, type: "default", label,
+      id: `g${g.parent}>g${g.n}`, source: `g${g.parent}`, target: `g${g.n}`, sourceHandle: `o${src}`, targetHandle: `i${g.steps[0]}`,
+      type: "default", label,
       labelStyle: { fill: tie.color, fontSize: 11, fontWeight: 600 }, labelBgStyle: { fill: "#282828" }, labelBgPadding: [4, 2] as [number, number],
-      style: { stroke: tie.color, strokeWidth: on ? 2.6 : 1.5, opacity: on ? 1 : 0.75 },
+      style: { stroke: tie.color, strokeWidth: on ? 2.6 : 1.5, opacity: on ? 1 : 0.8 },
       markerEnd: { type: MarkerType.ArrowClosed, color: tie.color, width: 14, height: 14 }, zIndex: on ? 4 : 0,
     };
   });
