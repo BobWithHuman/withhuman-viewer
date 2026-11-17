@@ -19,6 +19,8 @@ export interface Step {
   verdict?: Verdict;
   /** A Call the engine did not decide (nor trace). */
   undecided?: boolean;
+  /** A prompt the engine judged written from nothing of the turn before: a new request. */
+  fresh?: boolean;
   /** What the engine caught here, and how sure. */
   catch?: { name: string; sub: string; score: number };
   /** For a fold of quiet steps: what is inside. */

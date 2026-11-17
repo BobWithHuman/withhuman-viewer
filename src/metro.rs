@@ -265,6 +265,8 @@ pub struct Ask {
     pub at: Option<i64>,
     /// What of the turn before made the user write it, as the engine judged.
     pub parent: Option<AskParent>,
+    /// The engine judged it written from nothing of the turn before (`none`): a new request.
+    pub fresh: bool,
 }
 
 /// A prompt's parent: the step of the turn before its writer built on, and how sure the engine
@@ -298,9 +300,15 @@ fn ask_parent(model: &Model, trace: &Value) -> Option<AskParent> {
         ParentOf::Message(number(rest)?)
     } else {
         let result = number(key.strip_prefix('g')?)?;
-        ParentOf::Result { call: *model.call_of.get(&result)?, result }
+        ParentOf::Result {
+            call: *model.call_of.get(&result)?,
+            result,
+        }
     };
-    Some(AskParent { from, probability: parent["probability"].as_f64().unwrap_or(0.0) })
+    Some(AskParent {
+        from,
+        probability: parent["probability"].as_f64().unwrap_or(0.0),
+    })
 }
 
 /// Kept for the drawing, which no longer needs bands: a branch is its subagent.
@@ -1166,6 +1174,7 @@ impl Metro {
             match node.kind.as_str() {
                 "Request" => {
                     let prompt = text(&node.summary.prompt);
+                    let trace = parse_json(node.props.get("trace_json"));
                     items.push(Item::Ask(Ask {
                         seq: node.seq(),
                         x: 0.0,
@@ -1173,7 +1182,8 @@ impl Metro {
                         text: prompt,
                         intent: None,
                         at: node.props.get("observed_at").and_then(Value::as_i64),
-                        parent: ask_parent(model, &parse_json(node.props.get("trace_json"))),
+                        parent: ask_parent(model, &trace),
+                        fresh: trace["request_parent"]["key"] == "none",
                     }));
                 }
                 "Intent" => {

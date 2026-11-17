@@ -86,6 +86,7 @@ function SgNode({ data }: NodeProps<Node<G>>) {
             <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{s.quote ? `"${s.name}"` : s.name}</span>
             {s.verdict && s.verdict !== "allow" && <VerdictChip s={s} />}
             {s.undecided && <span className="shrink-0 rounded-md bg-white/6 px-1.5 py-0.5 text-[11px] text-mut">판정 없음</span>}
+            {s.fresh && <span className="shrink-0 rounded-md bg-act/15 px-1.5 py-0.5 text-[11px] font-semibold text-act">새 요청</span>}
             {s.catch && !s.verdict && <TriangleAlert className="size-3.5 shrink-0 fill-catch text-panel" />}
           </button>
         ))}

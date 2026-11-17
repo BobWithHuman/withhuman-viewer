@@ -219,6 +219,7 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
                     .map_or_else(|| clip(&ask.text, 30), |i| clip(i, 40)),
                 "quote": ask.intent.as_deref().map(crate::model::short_intent).is_none_or(str::is_empty),
                 "type": if ask.agent.is_some() { "보고" } else { "프롬프트" },
+                "fresh": ask.fresh,
                 "at": ask.at,
                 "detail": ask.intent.iter().map(|i| json!(["의도", i])).collect::<Vec<_>>(),
                 "text": { "label": "입력 프롬프트", "body": ask.text },
@@ -228,16 +229,30 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
     for st in &m.stations {
         items.push((st.seq, lane(st.line), station_step(st)));
     }
-    // The agent's messages a later prompt was written from, as steps of their own; the last
-    // message is the answer already.
+    // The agent's messages as steps of their own: each turn's answer (its last message), and
+    // any a later prompt was written from; the session's last is the answer already.
     let last = m.last_word.as_ref().map(|(seq, _)| *seq);
-    for ask in &m.asks {
-        if let Some(AskParent {
-            from: ParentOf::Message(seq),
-            ..
-        }) = &ask.parent
-            && Some(*seq) != last
-            && !items.iter().any(|(_, _, s)| s["id"] == format!("m{seq}"))
+    let mut said: Vec<i64> = m
+        .asks
+        .iter()
+        .filter_map(|a| match &a.parent {
+            Some(AskParent {
+                from: ParentOf::Message(seq),
+                ..
+            }) => Some(*seq),
+            _ => None,
+        })
+        .collect();
+    for (i, ask) in m.asks.iter().enumerate() {
+        let until = m.asks.get(i + 1).map_or(i64::MAX, |next| next.seq);
+        if let Some(end) = m.says.iter().filter(|s| s.seq > ask.seq && s.seq < until).map(|s| s.seq).max() {
+            said.push(end);
+        }
+    }
+    said.sort_unstable();
+    said.dedup();
+    for seq in &said {
+        if Some(*seq) != last
             && let Some(said) = m.says.iter().find(|s| s.seq == *seq)
         {
             items.push((
