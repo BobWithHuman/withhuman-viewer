@@ -394,7 +394,7 @@ function Whys({ whys }: { whys: Partial<Record<Why, number>> }) {
   const shown = WHYS.filter((w) => (whys[w] ?? 0) > 0);
   if (!shown.length) return null;
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
+    <span className="flex min-w-0 items-center gap-1">
       {shown.map((w) => (
         <span key={w} className={cn("tnum inline-flex shrink-0 items-center gap-1 rounded px-1.5 text-[11px] leading-[19px] font-medium", WHY[w].cls, WHY[w].mono && "font-mono")}>
           {WHY[w].label}{(whys[w] ?? 0) > 1 && <span className="opacity-70">{whys[w]}</span>}
@@ -509,7 +509,7 @@ function Sent({ ran, held }: { ran: number; held: number }) {
 /** A session that tried to send values out: what it is, where to, the Call that carried them,
  * which values, and how its sends ended. */
 const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
-  { id: "status", header: "결과", size: 200, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <span className="flex min-w-0 items-center gap-1.5"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /><Whys whys={a.whys} /></span> },
+  { id: "status", header: "결과", size: 170, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <span className="flex min-w-0 items-center gap-1.5"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /><Whys whys={a.whys} /></span> },
   { id: "from", header: "출처", size: 200, accessorFn: (a) => a.trails.map(originOf).join(" "), cell: ({ row: { original: a } }) => {
     const from = [...new Set(a.trails.map(originOf))].sort((x, y) => Number(x === "agent") - Number(y === "agent"));
     return <FirstOf list={from} show={(o) => <OriginName origin={o} />} />;

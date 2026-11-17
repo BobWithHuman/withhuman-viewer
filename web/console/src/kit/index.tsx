@@ -190,22 +190,29 @@ export function Empty({ children = "없음" }: { children?: ReactNode }) {
 }
 
 // ---------------------------------------------------------------- the table
-/** A sortable table over shadcn's Table; a row can be pressed. */
+/** A sortable table over shadcn's Table; a row can be pressed. Its columns give way to the
+ * width there is: one made wide (180px or more) or given no width holds text and takes a share of
+ * what is left, as large as its width, its text cut short at the end; any other is as wide as
+ * what it holds, up to its width. So the table never runs past its side. */
 export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense }: {
   columns: ColumnDef<T>[]; rows: T[]; onRow?: (row: T) => void; picked?: (row: T) => boolean; initialSort?: SortingState; dense?: boolean;
 }) {
   const [sorting, setSorting] = useState<SortingState>(initialSort ?? []);
   const table = useReactTable({ data: rows, columns, state: { sorting }, onSortingChange: setSorting, getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel() });
+  const widthOf = (c: ColumnDef<T>) => (c.size && c.size !== 150 ? c.size : undefined);
+  const grows = (c: ColumnDef<T>) => { const w = widthOf(c); return w === undefined || w >= 180; };
+  const shareOf = (c: ColumnDef<T>) => widthOf(c) ?? 260;
+  const total = columns.filter(grows).reduce((a, c) => a + shareOf(c), 0) || 1;
+  const head = (c: ColumnDef<T>) => (grows(c) ? { width: `${(shareOf(c) / total) * 100}%` } : { width: 1 });
   return (
-    <Table className="table-fixed">
+    <Table>
       <TableHeader className="sticky top-0 z-10 bg-card">
         {table.getHeaderGroups().map((g) => (
           <TableRow key={g.id} className="hover:bg-transparent">
             {g.headers.map((h) => {
               const sort = h.column.getIsSorted();
-              const w = h.column.columnDef.size;
               return (
-                <TableHead key={h.id} className="h-9 text-[12px] font-normal text-muted-foreground" style={w && w !== 150 ? { width: w } : undefined}>
+                <TableHead key={h.id} className="h-9 text-[12px] font-normal whitespace-nowrap text-muted-foreground" style={head(h.column.columnDef)}>
                   {h.column.getCanSort() ? (
                     <button onClick={h.column.getToggleSortingHandler()} className="inline-flex items-center gap-1 hover:text-foreground">
                       {flexRender(h.column.columnDef.header, h.getContext())}
@@ -221,7 +228,13 @@ export function DataTable<T>({ columns, rows, onRow, picked, initialSort, dense 
       <TableBody>
         {table.getRowModel().rows.map((r) => (
           <TableRow key={r.id} onClick={() => onRow?.(r.original)} data-state={picked?.(r.original) ? "selected" : undefined} className={cn(onRow && "cursor-pointer")}>
-            {r.getVisibleCells().map((c) => <TableCell key={c.id} className={cn("truncate", dense ? "py-1.5" : "py-2.5")}>{flexRender(c.column.columnDef.cell, c.getContext())}</TableCell>)}
+            {r.getVisibleCells().map((c) => {
+              const def = c.column.columnDef;
+              const content = flexRender(def.cell, c.getContext());
+              return grows(def)
+                ? <TableCell key={c.id} className={cn("max-w-0 truncate", dense ? "py-1.5" : "py-2.5")}>{content}</TableCell>
+                : <TableCell key={c.id} className={cn("whitespace-nowrap", dense ? "py-1.5" : "py-2.5")}><div className="truncate" style={{ maxWidth: widthOf(def) }}>{content}</div></TableCell>;
+            })}
           </TableRow>
         ))}
         {!rows.length && <TableRow className="hover:bg-transparent"><TableCell colSpan={columns.length}><Empty /></TableCell></TableRow>}
