@@ -28,6 +28,7 @@ pub fn head_script() -> String {
              f = document.createElement('iframe'); f.className = 'wh-record-frame';\n\
              f.addEventListener('load', () => window.__whFontInto && window.__whFontInto(f.contentDocument));\n\
              f.addEventListener('load', () => f.contentWindow.WHRecord && f.contentWindow.WHRecord.render(window.__whRecordData));\n\
+             f.addEventListener('load', () => f.contentWindow.focus());\n\
              f.srcdoc = window.__WH_RECORD_HTML; host.appendChild(f); return;\n\
            }}\n\
            if (f.contentWindow && f.contentWindow.WHRecord) f.contentWindow.WHRecord.render(d);\n\

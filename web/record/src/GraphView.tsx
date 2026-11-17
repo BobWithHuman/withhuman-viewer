@@ -256,8 +256,8 @@ export function GraphView({ data }: { data: RecordData }) {
   }, [data, rf, mode, wayKey]);
   const way = useMemo(() => wayBack(data, sel), [data, sel]);
   const { nodes, edges } = useMemo(
-    () => (mode === "path" && way.ids.length ? layoutWay(data, sel, way) : layout(data, sel, mode, way)),
-    [data, sel, mode, way],
+    () => (mode === "path" && way.ids.length ? layoutWay(data, open || sel, way) : layout(data, sel, mode, way)),
+    [data, sel, open, mode, way],
   );
   // On 경로 the timeline holds the way alone, the earliest first, each link named between.
   const shown = mode === "path" && way.ids.length ? [...way.ids].reverse() : data.steps.map((s) => s.id);
@@ -266,6 +266,44 @@ export function GraphView({ data }: { data: RecordData }) {
     const n = nodes.find((x) => x.id === id);
     if (n) rf.setCenter(n.position.x + 32, n.position.y + 40, { zoom: Math.max(rf.getZoom(), 0.9), duration: 500 });
   };
+  // The arrow keys step: on 순서 through every step (← →) and from turn to turn (↑ ↓); on 경로
+  // along the way, opening each step. Not while a text is being typed or a sheet is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key) || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (document.querySelector("[role=dialog]")) return;
+      const by = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1;
+      const center = (id: string) => {
+        const n = nodes.find((x) => x.id === id);
+        if (n) rf.setCenter(n.position.x + 32, n.position.y + 40, { zoom: Math.max(rf.getZoom(), 0.85), duration: 250 });
+      };
+      if (mode === "path" && way.ids.length) {
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") return;
+        const order = [...way.ids].reverse();
+        const at = order.indexOf(open || sel || "");
+        const next = order[Math.min(order.length - 1, Math.max(0, (at < 0 ? order.length - 1 : at) + by))];
+        e.preventDefault();
+        setOpen(next);
+        center(next);
+        return;
+      }
+      const steps = data.steps;
+      const at = steps.findIndex((x) => x.id === sel);
+      let i = at < 0 ? (by > 0 ? 0 : steps.length - 1) : at + by;
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        while (i >= 0 && i < steps.length && steps[i].kind !== "prompt") i += by;
+      }
+      if (i < 0 || i >= steps.length) return;
+      e.preventDefault();
+      setPicked(steps[i].id);
+      setOpen(null);
+      center(steps[i].id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mode, way, sel, open, data, nodes, rf]);
   const sess = data.session;
   const meta: [string, ReactNode][] = [
     ["단말", sess.device], ["사람", sess.person], ["에이전트", sess.agent && <span className="inline-flex items-center gap-1.5"><span className="grid size-4 place-items-center rounded bg-white"><SvcLogo s="claude" size={11} /></span>{sess.agent}</span>],
@@ -280,6 +318,11 @@ export function GraphView({ data }: { data: RecordData }) {
         <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-panel/90 px-3 py-1 text-[12px] text-mut tabular-nums">
           {mode === "path" ? (way.ids.length ? `경로 ${way.ids.length}단계 · 턴 ${way.ids.filter((id) => byId.get(id)?.kind === "prompt").length}` : "도구를 누르면 경로")
             : `마디 ${data.steps.length} · 원인 ${data.causes.length} · 이어 물음 ${data.parents?.length ?? 0}`}
+          <span className="ml-2.5 inline-flex gap-0.5 align-middle">
+            {(mode === "path" && way.ids.length ? ["←", "→"] : ["←", "→", "↑", "↓"]).map((k) => (
+              <kbd key={k} className="grid size-[17px] place-items-center rounded border border-white/15 bg-white/5 font-sans text-[10.5px] text-fg/70">{k}</kbd>
+            ))}
+          </span>
         </div>
       </div>
       {timeline && (
