@@ -4,6 +4,7 @@ import {
 import { ChevronRight, Eye, ListTree, MapPin, Plus, Scan, TriangleAlert, ZoomIn, ZoomOut } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { RecordData, Step } from "./data";
+import { isLong } from "./longtext";
 import { DetailBody, KIND_ICON, LogoDisc, SvcLogo, Tip, VerdictChip, cx, flagged, tone } from "./parts";
 
 // 기록's graph: what the agent asked for and what came back, left to right. A step that was
@@ -46,7 +47,7 @@ function StepNode({ data }: NodeProps<Node<D>>) {
       {s.catch && <span className="absolute -top-1.5 -right-2 grid size-6 place-items-center rounded-full bg-catch text-[#1d1d1d] shadow-[0_0_0_2px_#282828]"><TriangleAlert className="size-3.5" strokeWidth={2.6} /></span>}
       {big(s) && <span className="absolute -right-1.5 -bottom-1 grid size-[18px] place-items-center rounded-full border border-act bg-bg text-act"><Plus className="size-3" strokeWidth={2.4} /></span>}
       <div className="pointer-events-none absolute left-1/2 w-[190px] -translate-x-1/2 text-center" style={{ top: size + 10 }}>
-        <div className={cx("truncate", big(s) ? "text-[14px] font-semibold text-fg" : "text-[12px] text-mut")}>{s.kind === "prompt" ? `"${s.name}"` : s.name}</div>
+        <div className={cx("truncate", big(s) ? "text-[14px] font-semibold text-fg" : "text-[12px] text-mut")}>{s.quote ? `"${s.name}"` : s.name}</div>
         {big(s) && <div className="mt-1 flex justify-center"><VerdictChip s={s} /></div>}
       </div>
     </div>
@@ -98,8 +99,8 @@ function Card({ s, open, onToggle, onLocate, cardRef }: { s: Step; open: boolean
         <div className="flex cursor-pointer items-start gap-1.5 px-2 py-1.5" onClick={onToggle}>
           <ChevronRight className={cx("mt-0.5 size-3.5 shrink-0 text-mut transition-transform", open && "rotate-90")} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2"><span className="truncate text-[12.5px] font-semibold text-fg">{s.kind === "prompt" ? `"${s.name}"` : s.name}</span><VerdictChip s={s} /></div>
-            <div className="text-[11px] text-mut">{s.type} <span className="mx-1 text-dim">|</span> {clock(s.at)}</div>
+            <div className="flex items-center gap-2"><span className="truncate text-[12.5px] font-semibold text-fg">{s.quote ? `"${s.name}"` : s.name}</span><VerdictChip s={s} /></div>
+            <div className="text-[11px] text-mut tabular-nums">{s.type} <span className="mx-1 text-dim">|</span> {clock(s.at)}{s.text && isLong(s.text.body) && <><span className="mx-1 text-dim">|</span>{s.text.body.length.toLocaleString("ko-KR")}자</>}</div>
           </div>
           <Tip label="그래프에서 찾기"><button onClick={(e) => { e.stopPropagation(); onLocate(); }} className="grid size-6 place-items-center rounded-md text-mut hover:bg-white/8 hover:text-fg"><MapPin className="size-3.5" /></button></Tip>
         </div>

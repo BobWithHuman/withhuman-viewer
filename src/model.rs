@@ -348,7 +348,7 @@ pub struct CallRow {
 }
 
 /// An intent as a name: its first sentence, without the agent's `(확신도: …)`.
-fn short_intent(intent: &str) -> &str {
+pub fn short_intent(intent: &str) -> &str {
     let mut t = intent.trim();
     if let Some(i) = t.find("(확신도") {
         t = t[..i].trim_end();

@@ -3,6 +3,7 @@ import { Bot, CircleDot, FileText, Laptop, Layers, MessageSquareText, SquareTerm
 import type { ReactNode } from "react";
 import { siClaude, siGithub, siNotion, siPostgresql } from "simple-icons";
 import type { Kind, Step, Svc, Verdict } from "./data";
+import { isLong, LongText } from "./longtext";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
@@ -78,7 +79,9 @@ export function Mono({ text, mark }: { text: string; mark?: string }) {
 export function DetailBody({ s }: { s: Step }) {
   return (
     <div className="space-y-3">
-      {s.text && <div><div className="mb-1.5 text-[11.5px] text-mut">{s.text.label}</div><Mono text={s.text.body} mark={s.text.mark} /></div>}
+      {s.text && (isLong(s.text.body)
+        ? <LongText label={s.text.label} text={s.text.body} mark={s.text.mark} />
+        : <div><div className="mb-1.5 text-[11.5px] text-mut">{s.text.label}</div><Mono text={s.text.body} mark={s.text.mark} /></div>)}
       <dl className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1 text-[11.5px]">
         {s.catch && <><dt className="text-mut">위험 점수</dt><dd className="m-0 flex items-center gap-1.5 text-fg"><TriangleAlert className="size-3.5 fill-catch text-[#282828]" />{s.catch.score}</dd></>}
         {s.detail.map(([k, v], i) => (

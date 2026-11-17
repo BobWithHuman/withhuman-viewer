@@ -10,6 +10,8 @@ export interface Step {
   id: string;
   kind: Kind;
   name: string;
+  /** The name is the prompt's own words, shown quoted, rather than its intent. */
+  quote?: boolean;
   type: string;
   /** When, in milliseconds since the epoch, or already written out. */
   at?: number | string;
@@ -66,11 +68,43 @@ export const SESSION: Session = {
   mode: "적용",
 };
 
+/** A prompt with a document, a log and some code pasted in, as people write them. */
+const LONG_PROMPT = `결제 장애 회고 문서 정리해서 요약해 줘. 지난달 Notion에 모아 둔 거.
+아래에 내가 갖고 있던 메모랑 로그도 붙일게. 요약은 팀 채널에 올릴 수 있게 짧게.
+
+## Q3 결제 장애 회고 (초안)
+- 기간: 10/02 ~ 10/04
+- 영향: 환불 지연 3건, 부분 환불 중복 1건
+- 원인 후보: 배치 타임아웃, 재시도 정책
+- 담당: 결제팀 · 정산팀
+
+> 고객 문의는 CS 채널로 먼저 들어왔고, 알림은 40분 늦게 왔다.
+
+2026-10-02 03:14:07 ERROR refund-batch job=nightly-refund timeout after 300s
+2026-10-02 03:14:07 WARN  retry scheduled attempt=2 backoff=60s
+2026-10-02 03:19:12 ERROR refund-batch job=nightly-refund timeout after 300s
+2026-10-02 03:19:12 INFO  pager notified team=payments
+
+\`\`\`python
+def refund(order, amount):
+    if amount > order.paid - order.refunded:
+        raise ValueError("over refund")
+    order.refunded += amount
+    return gateway.refund(order.id, amount)
+\`\`\`
+
+스테이징 DB 접속은 이걸로 해: password: sk_t…9f2a
+운영엔 절대 쓰지 말고.
+
+그리고 지난번 회고 템플릿처럼 "무슨 일이 있었나 / 왜 / 다음엔" 세 칸으로 나눠 줘.
+가능하면 타임라인도 표로 넣어 주고, 숫자는 위 로그 기준으로 맞춰 줘.
+요약 끝에는 후속 조치 담당자 이름도 적어 줘.`;
+
 export const STEPS: Step[] = [
   { id: "d", kind: "device", name: "dev-mac-15", type: "단말", at: "18:26:12", detail: [["사람", "dev.jung"], ["팀", "웹팀"], ["OS", "macOS 15.4"], ["훅", "관리형 · 켜짐"]] },
   { id: "a", kind: "agent", name: "Claude Code", type: "에이전트", at: "18:26:12", svc: "claude", detail: [["버전", "2.4.1"], ["권한 모드", "default"], ["작업 폴더", "~/src/payments-retro"]] },
-  { id: "p", kind: "prompt", name: "결제 장애 회고 문서 정리해서…", type: "프롬프트", at: "18:26:14", turn: 1,
-    detail: [["의도", "회고 문서 요약"], ["턴", "1"]], text: { label: "입력 프롬프트", body: "결제 장애 회고 문서 정리해서 요약해 줘. 지난달 Notion에 모아 둔 거." } },
+  { id: "p", kind: "prompt", name: "회고 문서 요약", type: "프롬프트", at: "18:26:14", turn: 1,
+    detail: [["의도", "회고 문서 요약"], ["턴", "1"]], text: { label: "입력 프롬프트", body: LONG_PROMPT } },
   { id: "m1", kind: "model", name: "Claude Sonnet 5.5", type: "모델", at: "18:26:15", detail: [["입력 토큰", "12,480"], ["출력 토큰", "312"], ["걸린 시간", "1.4초"]] },
   { id: "g1", kind: "group", name: "읽기 3", type: "허용 · 접힘", at: "18:26:16", svc: "notion", verdict: "allow", inside: ["notion · search", "notion · fetch", "Read"],
     detail: [["호출", "notion · search · 결제 장애 회고"], ["호출", "notion · fetch · 2026-10 회고"], ["호출", "Read · docs/retro-template.md"]] },

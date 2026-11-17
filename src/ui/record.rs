@@ -184,7 +184,10 @@ fn record_data(m: &Metro, session: Option<&Session>, id: &str) -> Value {
             json!({
                 "id": format!("a{}", ask.seq),
                 "kind": "prompt",
-                "name": clip(&ask.text, 30),
+                // Named by its intent, or quoted by its first words.
+                "name": ask.intent.as_deref().map(crate::model::short_intent).filter(|i| !i.is_empty())
+                    .map_or_else(|| clip(&ask.text, 30), |i| clip(i, 40)),
+                "quote": ask.intent.as_deref().map(crate::model::short_intent).is_none_or(str::is_empty),
                 "type": if ask.agent.is_some() { "보고" } else { "프롬프트" },
                 "at": ask.at,
                 "detail": ask.intent.iter().map(|i| json!(["의도", i])).collect::<Vec<_>>(),
