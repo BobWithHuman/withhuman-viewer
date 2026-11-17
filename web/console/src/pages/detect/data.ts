@@ -239,10 +239,11 @@ export function cases(calls: Call[]): CaseGroup[] {
       ran: g.calls.filter(happened).length,
       leaked: [...new Set(g.calls.flatMap((c) => c.leak?.kinds ?? []))],
     }))
-    // The worst severity first; then the most allowed though risky, the most stopped, the newest.
+    // The worst severity first; then the most allowed though risky, the most stopped, the most
+    // held, the newest.
     .sort((a, b) => {
       const n = (g: Group, v: string) => g.calls.filter((c) => c.verdict === v).length;
-      return SEVS.indexOf(worst(a)) - SEVS.indexOf(worst(b)) || n(b, "allow") - n(a, "allow") || n(b, "deny") - n(a, "deny") || (b.calls[0].at ?? 0) - (a.calls[0].at ?? 0);
+      return SEVS.indexOf(worst(a)) - SEVS.indexOf(worst(b)) || n(b, "allow") - n(a, "allow") || n(b, "deny") - n(a, "deny") || n(b, "review") - n(a, "review") || (b.calls[0].at ?? 0) - (a.calls[0].at ?? 0);
     });
 }
 // A case's state: its sessions' common mark, `mixed` when they differ, none when none is marked.
