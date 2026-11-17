@@ -14,6 +14,7 @@ use crate::flow::{
 };
 use crate::layout::clip;
 use crate::metro::Metro;
+use crate::model::Session;
 
 /// The width of the card over the map, with its margin: kept in step with `.fx-main > .route-panel`.
 const CARD_W: f64 = 328.0;
@@ -134,8 +135,9 @@ pub fn FlowMap() -> Element {
                if (!id) return; const b = document.getElementById(id); if (b && !b.disabled) { e.preventDefault(); b.click(); } }); }",
         );
     });
+    // The security team's app lists the sessions from its top bar ([`SessionDrop`]).
     let pick_list = rsx! {
-        if picking() {
+        if picking() && !cfg!(feature = "admin") {
             div { class: "fx-pick-shade", onclick: move |_| picking.set(false) }
             div {
                 class: "fx-pick-pop",
@@ -495,6 +497,106 @@ pub fn SessionPick(class: &'static str) -> Element {
             onclick: move |_| picking.toggle(),
             span { class: "lb", "{label}" }
             span { class: "act", "바꾸기" span { class: "chev", "▾" } }
+        }
+    }
+}
+
+/// The security team's session list, dropped from the session's name in the top bar: the
+/// sessions the newest first, narrowed by what is typed, each with its folder, machine, when, and
+/// the Calls blocked and held; the one open marked. Pressing one opens it.
+#[component]
+pub fn SessionDrop() -> Element {
+    let state = use_context::<AppState>();
+    let mut picking = use_context::<Picking>().0;
+    let mut query = use_signal(String::new);
+    use_effect(move || {
+        if picking() {
+            query.set(String::new());
+            document::eval(
+                "requestAnimationFrame(() => document.getElementById('tb-drop-find')?.focus())",
+            );
+        }
+    });
+    if !picking() {
+        return rsx! {};
+    }
+    let current = state.current.read().clone().unwrap_or_default();
+    let q = query().trim().to_lowercase();
+    let list: Vec<Session> = match &*state.sessions.read() {
+        Load::Ready(list) => list
+            .iter()
+            .filter(|s| {
+                q.is_empty()
+                    || [
+                        s.title(),
+                        s.folder().as_str(),
+                        s.client.as_deref().unwrap_or(""),
+                        s.id.as_str(),
+                    ]
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&q))
+            })
+            .take(80)
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
+    let first = list.first().map(|s| s.id.clone());
+    rsx! {
+        div { class: "tb-drop-shade", onclick: move |_| picking.set(false) }
+        div {
+            class: "tb-drop",
+            onkeydown: move |e: KeyboardEvent| if e.key() == Key::Escape { picking.set(false) },
+            input {
+                id: "tb-drop-find",
+                class: "tb-drop-find",
+                value: "{query}",
+                placeholder: "세션·폴더·단말",
+                oninput: move |e| query.set(e.value()),
+                onkeydown: move |e| {
+                    if let (Key::Enter, Some(id)) = (e.key(), first.clone()) {
+                        state.open_session(id);
+                        picking.set(false);
+                    }
+                },
+            }
+            div { class: "tb-drop-list",
+                if list.is_empty() { div { class: "tb-drop-none", "없음" } }
+                for s in list {
+                    {
+                        let id = s.id.clone();
+                        let on = id == current;
+                        let tone = if s.denied > 0 { "red" } else if s.reviewed > 0 { "amber" } else { "plain" };
+                        let place = [s.folder(), s.client.clone().unwrap_or_default()]
+                            .into_iter()
+                            .filter(|t| !t.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(" · ");
+                        let when = day_time(s.last_at.or(s.created_at));
+                        rsx! {
+                            button {
+                                key: "{id}",
+                                class: if on { "tb-drop-row on" } else { "tb-drop-row" },
+                                title: "{s.title()}",
+                                onclick: move |_| {
+                                    state.open_session(id.clone());
+                                    picking.set(false);
+                                },
+                                i { class: "dot {tone}" }
+                                span { class: "main",
+                                    span { class: "t", "{clip(s.title(), 60)}" }
+                                    span { class: "p", "{place}" }
+                                }
+                                span { class: "side",
+                                    if s.denied > 0 { span { class: "n red", "차단 {s.denied}" } }
+                                    if s.reviewed > 0 { span { class: "n amber", "확인 {s.reviewed}" } }
+                                    span { class: "w", "{when}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

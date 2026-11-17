@@ -92,18 +92,18 @@ function ToolStrip({ focus, setFocus, timeline, setTimeline }: { focus: boolean;
 
 function Card({ s, open, onToggle, onLocate, cardRef }: { s: Step; open: boolean; onToggle: () => void; onLocate: () => void; cardRef: (el: HTMLDivElement | null) => void }) {
   return (
-    <div ref={cardRef} className="relative pl-9">
-      <span className={cx("absolute top-3 left-0 grid size-6 place-items-center rounded-md [&_svg]:size-3.5 [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
+    <div ref={cardRef} className="relative pl-7">
+      <span className={cx("absolute top-2 left-0 grid size-5 place-items-center rounded-md [&_svg]:size-3 [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
       <div className={cx("rounded-lg border bg-bg transition-colors", open ? "border-pick shadow-[0_0_0_1px_#6488b4]" : "border-transparent hover:border-white/10")}>
-        <div className="flex cursor-pointer items-start gap-2 px-3 py-2.5" onClick={onToggle}>
-          <ChevronRight className={cx("mt-0.5 size-4 shrink-0 text-mut transition-transform", open && "rotate-90")} />
+        <div className="flex cursor-pointer items-start gap-1.5 px-2 py-1.5" onClick={onToggle}>
+          <ChevronRight className={cx("mt-0.5 size-3.5 shrink-0 text-mut transition-transform", open && "rotate-90")} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2"><span className="truncate text-[14px] font-semibold text-fg">{s.kind === "prompt" ? `"${s.name}"` : s.name}</span><VerdictChip s={s} /></div>
-            <div className="mt-0.5 text-[12px] text-mut">{s.type} <span className="mx-1 text-dim">|</span> {clock(s.at)}</div>
+            <div className="flex items-center gap-2"><span className="truncate text-[12.5px] font-semibold text-fg">{s.kind === "prompt" ? `"${s.name}"` : s.name}</span><VerdictChip s={s} /></div>
+            <div className="text-[11px] text-mut">{s.type} <span className="mx-1 text-dim">|</span> {clock(s.at)}</div>
           </div>
-          <Tip label="그래프에서 찾기"><button onClick={(e) => { e.stopPropagation(); onLocate(); }} className="grid size-7 place-items-center rounded-md text-mut hover:bg-white/8 hover:text-fg"><MapPin className="size-4" /></button></Tip>
+          <Tip label="그래프에서 찾기"><button onClick={(e) => { e.stopPropagation(); onLocate(); }} className="grid size-6 place-items-center rounded-md text-mut hover:bg-white/8 hover:text-fg"><MapPin className="size-3.5" /></button></Tip>
         </div>
-        {open && <div className="px-4 pt-1 pb-4"><DetailBody s={s} /></div>}
+        {open && <div className="px-3 pt-0.5 pb-3"><DetailBody s={s} /></div>}
       </div>
     </div>
   );
@@ -166,7 +166,7 @@ export function GraphView({ data }: { data: RecordData }) {
   const sess = data.session;
   const meta: [string, ReactNode][] = [
     ["단말", sess.device], ["사람", sess.person], ["에이전트", sess.agent && <span className="inline-flex items-center gap-1.5"><span className="grid size-4 place-items-center rounded bg-white"><SvcLogo s="claude" size={11} /></span>{sess.agent}</span>],
-    ["모델", sess.model], ["작업 폴더", sess.folder && <code className="font-mono text-[12px]">{sess.folder}</code>], ["세션 ID", <code className="font-mono text-[12px]">{sess.id}</code>], ["시작", sess.start], ["엔진 모드", sess.mode],
+    ["모델", sess.model], ["작업 폴더", sess.folder && <code className="font-mono text-[11px]">{sess.folder}</code>], ["세션 ID", <code className="font-mono text-[11px]">{sess.id}</code>], ["시작", sess.start], ["엔진 모드", sess.mode],
   ];
   return (
     <Pick.Provider value={(id) => setPicked(id)}>
@@ -176,13 +176,13 @@ export function GraphView({ data }: { data: RecordData }) {
         <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-panel/90 px-3 py-1 text-[12px] text-mut">마디 {data.steps.length} · 원인 {data.causes.length}</div>
       </div>
       {timeline && (
-        <aside className="my-3 mr-3 flex min-h-0 w-[480px] shrink-0 flex-col rounded-xl bg-panel shadow-[0_12px_40px_rgba(0,0,0,.45)]">
-          <div className="flex h-12 shrink-0 items-center gap-2 px-4"><ListTree className="size-4" /><h2 className="text-[15px] font-semibold">타임라인</h2><span className="rounded-full bg-chip px-2 text-[11.5px] text-mut">{data.steps.length}</span></div>
-          <dl className="grid grid-cols-[84px_1fr] gap-x-4 gap-y-2 px-5 pb-4 text-[13px]">
-            {meta.filter(([, v]) => v).map(([k, v]) => <div key={k} className="contents"><dt className="text-right font-semibold">{k}</dt><dd className="m-0 truncate text-mut">{v}</dd></div>)}
+        <aside className="my-3 mr-3 flex min-h-0 w-[340px] shrink-0 min-[1500px]:w-[380px] flex-col rounded-xl bg-panel shadow-[0_12px_40px_rgba(0,0,0,.45)]">
+          <div className="flex h-10 shrink-0 items-center gap-2 px-3.5"><ListTree className="size-3.5" /><h2 className="text-[13px] font-semibold">타임라인</h2><span className="rounded-full bg-chip px-2 text-[11.5px] text-mut">{data.steps.length}</span></div>
+          <dl className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1 px-3.5 pb-3 text-[11.5px]">
+            {meta.filter(([, v]) => v).map(([k, v]) => <div key={k} className="contents"><dt className="text-mut">{k}</dt><dd className="m-0 truncate text-fg/85">{v}</dd></div>)}
           </dl>
-          <div className="scroll relative min-h-0 flex-1 space-y-2.5 overflow-auto border-t border-white/8 px-4 pt-3 pb-6">
-            <i className="absolute top-3 bottom-2 left-[27px] w-px bg-white/12" />
+          <div className="scroll relative min-h-0 flex-1 space-y-1 overflow-auto border-t border-white/8 px-3 pt-2.5 pb-5">
+            <i className="absolute top-3 bottom-2 left-[21.5px] w-px bg-white/12" />
             {data.steps.map((s) => (
               <Card key={s.id} s={s} open={picked === s.id} cardRef={(el) => (refs.current[s.id] = el)}
                 onToggle={() => setPicked(picked === s.id ? null : s.id)} onLocate={() => { setPicked(s.id); locate(s.id); }} />
