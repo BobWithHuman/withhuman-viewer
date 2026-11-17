@@ -76,7 +76,7 @@ export const SESSION: Session = {
   agent: "Claude Code 2.4.1",
   id: "4f81d0da-e4ef-72f9-27f0-eafd4371dfee",
   start: "2026년 11월 14일 18:26:12",
-  mode: "적용",
+  mode: "enforce",
 };
 
 /** A prompt with a document, a log and some code pasted in, as people write them. */

@@ -566,8 +566,8 @@ pub fn SessionDrop() -> Element {
                         name_of(&key).as_str(),
                         s.id.as_str(),
                     ]
-                        .iter()
-                        .any(|t| t.to_lowercase().contains(&q))
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(&q))
             })
             .cloned()
             .collect(),
@@ -581,21 +581,37 @@ pub fn SessionDrop() -> Element {
         match machines.iter_mut().find(|m| m.key == key) {
             Some(m) => m.add(s, at),
             None => {
-                let mut m = Shelf { name: name_of(&key), key, ..Shelf::default() };
+                let mut m = Shelf {
+                    name: name_of(&key),
+                    key,
+                    ..Shelf::default()
+                };
                 m.add(s, at);
                 machines.push(m);
             }
         }
     }
-    machines.sort_by(|a, b| (a.key == NONE).cmp(&(b.key == NONE)).then(b.last.cmp(&a.last)));
-    let mut all = Shelf { key: ALL.into(), name: name_of(ALL), ..Shelf::default() };
+    machines.sort_by(|a, b| {
+        (a.key == NONE)
+            .cmp(&(b.key == NONE))
+            .then(b.last.cmp(&a.last))
+    });
+    let mut all = Shelf {
+        key: ALL.into(),
+        name: name_of(ALL),
+        ..Shelf::default()
+    };
     for s in &found {
         all.add(s, s.last_at.or(s.created_at).unwrap_or(0));
     }
     machines.insert(0, all);
     // A machine with nothing found gives way to the first that has some.
     let picked = machine();
-    let picked = if machines.iter().any(|m| m.key == picked) { picked } else { ALL.into() };
+    let picked = if machines.iter().any(|m| m.key == picked) {
+        picked
+    } else {
+        ALL.into()
+    };
     let list: Vec<Session> = found
         .into_iter()
         .filter(|s| picked == ALL || machine_of(s) == picked)
@@ -710,7 +726,10 @@ const NONE: &str = "?";
 
 /// The machine a session came from, as the picker keys it.
 fn machine_of(s: &Session) -> String {
-    s.client.clone().filter(|c| !c.is_empty()).unwrap_or_else(|| NONE.into())
+    s.client
+        .clone()
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| NONE.into())
 }
 
 /// A machine in the session picker: its sessions and their Calls blocked and held, and when it

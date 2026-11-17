@@ -12,7 +12,7 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { VerdictBadge, Warn, ago, clock } from "@/kit";
 import { cn } from "@/lib/utils";
-import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, hostOf, toolName } from "./data";
+import { ACTION, type Blocked, type Call, type Case, type CaseGroup, DIM, MARK, MARKS, MODE, type Mark, SEV, hostOf, named, toolName } from "./data";
 import type { Ask } from "./list";
 
 const Mono = ({ children, className }: { children: ReactNode; className?: string }) => <code className={cn("font-mono text-[12px]", className)}>{children}</code>;
@@ -175,7 +175,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
               <Rows>{reached.slice(0, 12).map((list) => (
                 <button key={list[0].session} onClick={() => onCall(list[0])} className={rowCls}>
                   <span className="grid min-w-0 flex-1 gap-0.5">
-                    <span className="truncate">{list[0].prompt ?? "프롬프트 없음"}</span>
+                    <span className="truncate">{named(list[0]) ?? "프롬프트 없음"}</span>
                     <span className="flex items-center gap-2 text-[11.5px] text-muted-foreground"><Mono className="truncate text-[11px]">{list[0].machine}</Mono><span className="tnum shrink-0">{ago(list[0].at)}</span></span>
                   </span>
                   {marks[list[0].session] && <span className={cn("shrink-0 rounded px-1.5 text-[11px] leading-[19px] font-semibold", MARK[marks[list[0].session].state].cls)}>{MARK[marks[list[0].session].state].label}</span>}
@@ -192,7 +192,7 @@ export function CaseView({ call, group, data, marks, blocked, ask, onCall }: {
               <Rows>{read.elsewhere.map((e) => (
                 <button key={e.session} onClick={() => ask({ do: "open", session: e.session, seq: e.seq })} className={rowCls}>
                   <span className="grid min-w-0 flex-1 gap-0.5">
-                    <span className="truncate">{e.prompt ?? "프롬프트 없음"}</span>
+                    <span className="truncate">{e.title ?? e.prompt ?? "프롬프트 없음"}</span>
                     <span className="flex items-center gap-2 text-[11.5px] text-muted-foreground"><Mono className="truncate text-[11px]">{e.machine}</Mono><span className="tnum shrink-0">{ago(e.at)}</span></span>
                   </span>
                   {e.flagged > 0 ? <span className="tnum inline-flex shrink-0 items-center gap-1 rounded bg-deny/15 px-1.5 text-[11.5px] leading-[20px] font-medium text-deny"><Hand className="size-3" />{e.flagged}</span> : <span className="shrink-0 text-[11.5px] text-muted-foreground">탐지 없음</span>}

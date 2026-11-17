@@ -1,7 +1,7 @@
 // What 보안 현황 is given and how it counts: the Calls worth a look, the filter the page keeps,
 // the period's time axis, and the demo shown when the page is opened on its own.
 
-import { CreditCard, Ellipsis, FilePen, type LucideIcon, Send, Share2, SquareTerminal, Trash2, Workflow } from "lucide-react";
+import { BookOpen, CreditCard, Ellipsis, FilePen, type LucideIcon, Send, Share2, SquareTerminal, Trash2, Workflow } from "lucide-react";
 import { SEVERITY, VERDICT, type Verdict } from "@/kit";
 
 export const HOUR = 3_600_000;
@@ -25,6 +25,10 @@ export type Call = {
   /** The sensitive values this Call sent out though not kept from running: their kinds, and where to. */
   leak?: { kinds: string[]; places: string[] } | null;
   kind: string | null; action: string; source: string; tool: string | null; folder: string; cwd: string | null;
+  /** A shell command's program, which the tools are told apart by. */
+  program?: string | null;
+  /** The session's short name, as 기록's list gives it. */
+  title?: string | null;
   target: string | null; reason: string | null; prompt: string | null; rule: string | null;
   mode: string | null; ran: boolean; hard: boolean;
 };
@@ -66,17 +70,18 @@ export type Case = {
   request?: { seq: number; text: string; intent: string | null; at: number | null } | null;
   told?: { seq: number; tool: string | null; target: string | null; at: number | null; quote: string | null; paragraph: number | null; probability: number; error: boolean } | null;
   traced?: boolean;
-  elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; flagged: number }[];
+  elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; title?: string | null; flagged: number }[];
   elsewhere_total?: number;
   machine_recent?: { session: string; seq: number; at: number | null; tool: string | null; target: string | null; verdict: string }[];
 };
 
 // The kinds of action, as the engine's questions divide them.
-export const ACTIONS = ["file", "service", "send", "delete", "pay", "grant", "run", "other"];
+export const ACTIONS = ["read", "file", "service", "send", "delete", "pay", "grant", "run", "other"];
 export const ACTION: Record<string, { label: string; icon: LucideIcon }> = {
+  read: { label: "읽기·조회", icon: BookOpen },
   file: { label: "파일 수정", icon: FilePen },
   service: { label: "서비스 수정·위임", icon: Workflow },
-  send: { label: "메일·메시지 전송", icon: Send },
+  send: { label: "외부 전송", icon: Send },
   delete: { label: "삭제", icon: Trash2 },
   pay: { label: "송금·결제", icon: CreditCard },
   grant: { label: "권한 부여·공유", icon: Share2 },
@@ -108,9 +113,9 @@ const KIND: Record<string, string> = {
 };
 const SOURCE: Record<string, string> = { segment: "도구 응답", request: "사용자 요청", none: "찾지 못함", untraced: "추적 없음" };
 export const MODE: Record<string, { label: string; cls: string }> = {
-  enforce: { label: "엔진 차단 중", cls: "bg-allow/15 text-allow" },
-  shadow: { label: "엔진 시범 운영", cls: "bg-review/15 text-review" },
-  record: { label: "엔진 기록만", cls: "bg-review/15 text-review" },
+  enforce: { label: "enforce", cls: "bg-allow/15 text-allow font-mono" },
+  shadow: { label: "shadow", cls: "bg-review/15 text-review font-mono" },
+  record: { label: "record", cls: "bg-review/15 text-review font-mono" },
   none: { label: "판정 기록 없음", cls: "bg-white/8 text-muted-foreground" },
 };
 
@@ -124,7 +129,8 @@ export const DIM: Record<Dim, { label: string; of: (c: Call) => string; name: (k
   source: { label: "원인", of: (c) => c.source, name: (k) => SOURCE[k] ?? k },
   session: { label: "세션", of: (c) => c.session, name: (k) => k.slice(0, 8) },
   machine: { label: "단말", of: (c) => c.machine, name: (k) => k },
-  tool: { label: "도구", of: (c) => c.tool ?? "", name: (k) => k || "도구 없음" },
+  // A shell command goes by its program: `Bash · git`, `Bash · rm`.
+  tool: { label: "도구", of: (c) => (c.tool === "Bash" && c.program ? `Bash · ${c.program}` : c.tool ?? ""), name: (k) => k || "도구 없음" },
   folder: { label: "폴더", of: (c) => c.folder, name: (k) => k || "폴더 없음" },
 };
 
@@ -197,6 +203,8 @@ export const rangeLabel = ([from, to]: [number, number]) => {
 // How much a Call worth a look weighs when things are ranked by risk.
 export const RISK: Record<Sev, number> = { crit: 8, high: 4, med: 2, after: 1 };
 // A tool's name as a row has room for: an MCP tool as its server and its tool.
+/** A Call's session by its short name, as 기록's list gives it, else the prompt before the Call. */
+export const named = (c: Call | undefined) => c?.title ?? c?.prompt ?? undefined;
 export const toolName = (tool: string | null) => (tool ?? "").replace(/^mcp__/, "").replace(/__/g, " · ");
 
 // The Calls gathered by a key, each group with its Calls by severity and its risk (the sum of
@@ -302,10 +310,12 @@ export function demo(now: number): Data {
   const flow: FlowCount[] = [];
   // The kind of action, read off the tool and target as the app does.
   const actionOf = (tool: string, target: string) =>
-    tool === "Edit" ? "file" : tool.includes("post_message") ? "send" : tool.includes("merge") ? "service"
-      : tool === "Bash" ? (/^rm |DROP TABLE| destroy| delete /.test(target) ? "delete" : /^(npm|python|chmod|pip|vercel|docker|terraform)|\| sh/.test(target) ? "run" : /slack chat send/.test(target) ? "send" : "other") : "other";
+    tool === "Edit" ? "file" : tool === "Read" || tool === "WebFetch" ? "read" : tool.includes("post_message") ? "send" : tool.includes("merge") ? "service"
+      : tool === "Bash" ? (/^rm |DROP TABLE| destroy| delete /.test(target) ? "delete" : /^(npm|python|pip)|\| sh/.test(target) ? "run"
+        : /^(scp|rsync)|^git push|slack chat send|curl .*(-d |--data|-F )/.test(target) ? "send" : /^(gh|vercel|docker|terraform|kubectl|aws)/.test(target) ? "service"
+        : /^(chmod|mkdir|cp|mv|git (add|commit))/.test(target) ? "file" : /^(cat|ls|grep|find|curl|psql|git (status|log|diff))/.test(target) ? "read" : "other") : "other";
   // What the plain allowed Calls of an hour are, out of 100.
-  const PLAIN: [string, number][] = [["other", 46], ["file", 24], ["run", 17], ["service", 5], ["send", 3], ["delete", 2], ["grant", 2], ["pay", 1]];
+  const PLAIN: [string, number][] = [["read", 40], ["file", 24], ["run", 17], ["other", 6], ["service", 5], ["send", 3], ["delete", 2], ["grant", 2], ["pay", 1]];
   const thisHour = now - (now % HOUR);
   const poisoned = new Date(now - 3 * DAY).setHours(13, 0, 0, 0);
   for (let back = 30 * 24; back >= 0; back--) {
@@ -342,7 +352,7 @@ export function demo(now: number): Data {
         calls.push({
           session: `s-${m}-${Math.floor(back / 5)}`, seq: 3 + Math.floor(rnd() * 180), at, machine, verdict: s.verdict,
           sev: s.verdict === "allow" ? "after" : wiped || (s.verdict === "deny" && (s.kind === "exfiltration" || s.kind === "hijacked_goal")) ? "crit" : s.verdict === "deny" ? "high" : "med",
-          kind: s.kind, action, source, tool: s.tool, folder: FOLDERS[(m + Math.floor(back / 40)) % FOLDERS.length],
+          kind: s.kind, action, source, tool: s.tool, program: s.tool === "Bash" ? target.split(/\s+/)[0] : null, folder: FOLDERS[(m + Math.floor(back / 40)) % FOLDERS.length],
           cwd: `/Users/${machine.replace(/^[a-z]+-/, "")}/work/${FOLDERS[(m + Math.floor(back / 40)) % FOLDERS.length]}`,
           target, reason: pick(s.reasons), prompt: spike && m === 0 ? PROMPTS[3] : pick(PROMPTS), rule: s.rule, mode,
           ran: s.verdict === "allow" || mode === "shadow" || (s.verdict === "review" && rnd() < 0.55), hard: s.verdict === "allow" || wiped,
@@ -359,29 +369,3 @@ export const hostOf = (target: string | null) => {
   const m = /https?:\/\/([^/\s:?'"]+)|@([A-Za-z0-9.-]+):/.exec(target ?? "");
   return m ? m[1] ?? m[2] : null;
 };
-
-// What the decisions suggest changing: how often a marked session was nothing wrong, the tools
-// stopped most, and the kinds of Calls held that people nearly always let run.
-export function tuning(calls: Call[], marks: Record<string, Mark>) {
-  const sessions = [...new Set(calls.map((c) => c.session))];
-  const marked = sessions.filter((s) => marks[s]);
-  const judged = marked.filter((s) => marks[s].state === "attack" || marks[s].state === "benign");
-  const benign = judged.filter((s) => marks[s].state === "benign").length;
-  const tools = new Map<string, number>();
-  for (const c of calls) if (c.verdict === "deny" && c.tool) tools.set(c.tool, (tools.get(c.tool) ?? 0) + 1);
-  const held = new Map<string, { n: number; ran: number }>();
-  for (const c of calls) {
-    if (c.verdict !== "review") continue;
-    const key = DIM.kind.of(c), row = held.get(key) ?? { n: 0, ran: 0 };
-    row.n++;
-    if (c.ran) row.ran++;
-    held.set(key, row);
-  }
-  return {
-    marked: judged.length, benign, attacks: judged.length - benign,
-    tools: [...tools.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
-    // Held at least five times and let run nine times in ten: a candidate to loosen.
-    loosen: [...held.entries()].map(([kind, r]) => ({ kind, ...r, share: r.ran / r.n })).filter((r) => r.n >= 5 && r.share >= 0.8).sort((a, b) => b.share - a.share || b.n - a.n),
-    held: [...held.entries()].map(([kind, r]) => ({ kind, ...r, share: r.ran / r.n })).sort((a, b) => b.n - a.n),
-  };
-}

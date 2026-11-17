@@ -245,7 +245,13 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
         .collect();
     for (i, ask) in m.asks.iter().enumerate() {
         let until = m.asks.get(i + 1).map_or(i64::MAX, |next| next.seq);
-        if let Some(end) = m.says.iter().filter(|s| s.seq > ask.seq && s.seq < until).map(|s| s.seq).max() {
+        if let Some(end) = m
+            .says
+            .iter()
+            .filter(|s| s.seq > ask.seq && s.seq < until)
+            .map(|s| s.seq)
+            .max()
+        {
             said.push(end);
         }
     }
@@ -327,13 +333,18 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
     // The SubGraphs the engine cut the session into, each with its steps and the one it was
     // traced to: a prompt's to what of the turn before it was written from, the others to the
     // SubGraph their Calls were traced to (the prompt's, or one holding a tool result).
-    let mut steps_of: std::collections::BTreeMap<i64, Vec<String>> = std::collections::BTreeMap::new();
+    let mut steps_of: std::collections::BTreeMap<i64, Vec<String>> =
+        std::collections::BTreeMap::new();
     for (seq, _, step) in &items {
         if let (Some(g), Some(id)) = (model.subgraph_of(*seq), step["id"].as_str()) {
             steps_of.entry(g).or_default().push(id.to_owned());
         }
     }
-    let ask_in = |g: i64| m.asks.iter().position(|a| model.subgraph_of(a.seq) == Some(g));
+    let ask_in = |g: i64| {
+        m.asks
+            .iter()
+            .position(|a| model.subgraph_of(a.seq) == Some(g))
+    };
     let undecided: std::collections::HashSet<&str> = items
         .iter()
         .filter(|(_, _, s)| s["undecided"] == true)
@@ -407,12 +418,7 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
             "folder": session.and_then(|s| s.cwd.clone()),
             "id": id,
             "start": stamp(session.and_then(|s| s.created_at)),
-            "mode": session.and_then(|s| s.mode.clone()).map(|m| match m.as_str() {
-                "enforce" => "적용".to_owned(),
-                "shadow" => "그림자".to_owned(),
-                "record" => "기록만".to_owned(),
-                _ => m,
-            }),
+            "mode": session.and_then(|s| s.mode.clone()),
         },
         "steps": items.into_iter().map(|(_, _, s)| s).collect::<Vec<_>>(),
         "links": links,

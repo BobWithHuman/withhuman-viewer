@@ -311,6 +311,8 @@ pub struct SecretMention {
     /// The value, masked.
     pub text: Option<String>,
     pub decision: Option<String>,
+    /// How the engine enforced its decision: `enforce`, `shadow` or `record`.
+    pub mode: Option<String>,
     pub client: Option<String>,
     pub at: Option<i64>,
     pub tool: Option<String>,
@@ -326,6 +328,78 @@ pub struct SecretMention {
     /// For a tool result, the tool and target of the Call it answered.
     pub by_tool: Option<String>,
     pub by_target: Option<String>,
+}
+
+/// The arguments a tool names whom it sends to by, the first found winning.
+pub const RECIPIENT_KEYS: [&str; 8] = [
+    "recipient",
+    "to",
+    "email",
+    "channel",
+    "channel_name",
+    "channel_id",
+    "account",
+    "iban",
+];
+
+/// The arguments a tool names where it sends to by, after a repository (`owner/repo`).
+pub const PLACE_KEYS: [&str; 26] = [
+    "full_name",
+    "project",
+    "project_slug",
+    "project_id",
+    "organization_slug",
+    "page_id",
+    "parent_id",
+    "database_id",
+    "space",
+    "space_key",
+    "workspace",
+    "team",
+    "team_id",
+    "board",
+    "list_id",
+    "spreadsheet_id",
+    "document_id",
+    "file_id",
+    "folder_id",
+    "bucket",
+    "url",
+    "webhook_url",
+    "endpoint",
+    "domain",
+    "phone",
+    "username",
+];
+
+/// Whom or where a tool's arguments name to send to, as [`RECIPIENT_KEYS`] and [`PLACE_KEYS`]
+/// find it in the store.
+pub fn recipient_of(input: &Value) -> Option<String> {
+    let text = |k: &str| {
+        input[k]
+            .as_str()
+            .filter(|t| !t.trim().is_empty())
+            .map(str::to_owned)
+    };
+    let first = |k: &str| {
+        input[k]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    RECIPIENT_KEYS
+        .iter()
+        .find_map(|k| text(k))
+        .or_else(|| first("recipients").or_else(|| first("to")))
+        .or_else(|| {
+            let repo = text("repo").or_else(|| text("repository"))?;
+            Some(match text("owner") {
+                Some(owner) => format!("{owner}/{repo}"),
+                None => repo,
+            })
+        })
+        .or_else(|| PLACE_KEYS.iter().find_map(|k| text(k)))
 }
 
 /// A JSON document stored as a string property; anything unreadable reads as nothing.
@@ -376,6 +450,25 @@ pub fn short_intent(intent: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+
+    // Whom first, then where: a repository as owner/repo, then the other places tools name.
+    #[test]
+    fn a_tools_arguments_name_where_it_sends() {
+        let of = |v: serde_json::Value| super::recipient_of(&v);
+        assert_eq!(
+            of(serde_json::json!({"to": "a@x.com", "repo": "r"})).as_deref(),
+            Some("a@x.com")
+        );
+        assert_eq!(
+            of(serde_json::json!({"owner": "acme", "repo": "api", "title": "t"})).as_deref(),
+            Some("acme/api")
+        );
+        assert_eq!(
+            of(serde_json::json!({"project_slug": "web", "body": "b"})).as_deref(),
+            Some("web")
+        );
+        assert_eq!(of(serde_json::json!({"text": "hi"})), None);
+    }
 
     #[test]
     fn a_session_is_named_by_the_intent_it_did_the_most_under() {

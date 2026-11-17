@@ -117,11 +117,15 @@ impl Demo {
             return;
         };
         for key in ["graphs", "nodes", "calls"] {
-            if let (Some(to), Some(from)) = (self.data[key].as_object_mut(), more[key].as_object()) {
+            if let (Some(to), Some(from)) = (self.data[key].as_object_mut(), more[key].as_object())
+            {
                 to.extend(from.clone());
             }
         }
-        if let (Some(to), Some(from)) = (self.data["sessions"].as_array_mut(), more["sessions"].as_array()) {
+        if let (Some(to), Some(from)) = (
+            self.data["sessions"].as_array_mut(),
+            more["sessions"].as_array(),
+        ) {
             to.extend(from.iter().cloned());
             to.sort_by_key(|s| std::cmp::Reverse(s["created_at"].as_i64()));
         }
@@ -275,10 +279,12 @@ impl Demo {
                     "category": category,
                     "text": t["text"],
                     "decision": props.and_then(|p| p.get("decision")),
+                    "mode": props.and_then(|p| p.get("decision_mode")),
                     "client": props.and_then(|p| p.get("client_id")),
                     "at": props.and_then(|p| p.get("decided_at").filter(|v| v.is_i64()).or(p.get("observed_at"))),
                     "tool": payload["tool_name"],
                     "target": target,
+                    "recipient": crate::model::recipient_of(input),
                     "ran": ran.contains(&seq),
                 }));
             }

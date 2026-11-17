@@ -89,9 +89,10 @@ export type Data = {
 
 // ---------------------------------------------------------------- words and colours
 export const ENGINE: Record<string, { label: string; color: string; icon: LucideIcon }> = {
-  enforce: { label: "차단", color: "var(--allow)", icon: ShieldCheck },
-  shadow: { label: "시범 운영", color: "var(--review)", icon: Eye },
-  record: { label: "기록만", color: "var(--info)", icon: FileText },
+  // As the engine names its modes.
+  enforce: { label: "enforce", color: "var(--allow)", icon: ShieldCheck },
+  shadow: { label: "shadow", color: "var(--review)", icon: Eye },
+  record: { label: "record", color: "var(--info)", icon: FileText },
 };
 export const ENGINE_KEYS = ["enforce", "shadow", "record"];
 export type State = "running" | "idle" | "installed" | "unregistered";

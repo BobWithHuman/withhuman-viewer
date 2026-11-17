@@ -574,7 +574,9 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
                         .filter(|id| list.iter().any(|s| &s.id == id));
                     // VIEWER_SESSION names one to open first by the start of its ID.
                     let asked = std::env::var("VIEWER_SESSION").ok().and_then(|p| {
-                        list.iter().find(|s| s.id.starts_with(&p)).map(|s| s.id.clone())
+                        list.iter()
+                            .find(|s| s.id.starts_with(&p))
+                            .map(|s| s.id.clone())
                     });
                     let pick = open
                         .or(asked)
@@ -713,9 +715,12 @@ fn TopBar() -> Element {
                         "{SCREEN_LABELS.1}"
                     }
                 }
-                button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
-                    {line_icon(if cfg!(feature = "admin") { icons::SCROLL_TEXT } else { icons::STAR })}
-                    "{SCREEN_LABELS.2}"
+                // The security team's 정책 waits until it has something to set.
+                if !cfg!(feature = "admin") {
+                    button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
+                        {line_icon(icons::STAR)}
+                        "{SCREEN_LABELS.2}"
+                    }
                 }
             }
             // On the route map, the session looked at, opening the list to switch.

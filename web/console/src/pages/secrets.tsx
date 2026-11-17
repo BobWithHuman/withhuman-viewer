@@ -17,15 +17,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { DataTable, Empty, Legend, PageHeader, Panel, ServiceLogo, Stat, ago, clock } from "@/kit";
 import { cn } from "@/lib/utils";
 import {
-  CATEGORY, DEMO, FROM, STATUS, STATUSES, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, valueKey,
-  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Source, type Status, type Trail, type Value,
+  CATEGORY, DEMO, FROM, STATUS, STATUSES, WHY, WHYS, attempts, bars, byStatus, categoryLabel, fromOf, passes, machineName, placesOf, sessionName, short, sources, values, valueKey,
+  type Attempt, type Bar, type Category, type Data, type Dim, type Filter, type Source, type Status, type Trail, type Value, type Why,
 } from "./secrets/data";
 import { Flow } from "./secrets/flow";
 import { SourceBars, parts } from "./secrets/sources";
 
 const DAY = 24 * 3600e3;
 const PERIODS: [string, string][] = [["1", "24시간"], ["7", "7일"], ["30", "30일"], ["all", "전체"]];
-const RANK: Record<Status, number> = { out: 3, blocked: 2, seen: 0 };
+const RANK: Record<Status, number> = { out: 3, blocked: 2, normal: 1, seen: 0 };
 /** What a figure pressed leaves on the page: every value, those put in a prompt, those a session
  * tried to send out, or those that came out of a document or a tool result. */
 type Focus = "all" | "prompt" | "tries" | "sources";
@@ -296,8 +296,9 @@ const HOSTLIKE = /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/\S*)?$/i;
  * bob@x.com by slack; "slack (MCP)" is no one named, by slack; a host is itself; anything else
  * is the tool that sent it, naming no one. */
 const targetOf = (place: string): { target: string | null; server: string | null; tool: string | null } => {
-  if (place.endsWith("(MCP)")) {
-    const parts = place.replace(" (MCP)", "").split(" · ");
+  // An MCP server, or a command line tool (`origin · git (CLI)`): whom or where, by which service.
+  if (place.endsWith("(MCP)") || place.endsWith("(CLI)")) {
+    const parts = place.replace(/ \((MCP|CLI)\)$/, "").split(" · ");
     return parts.length > 1 ? { target: parts[0], server: parts[1], tool: null } : { target: null, server: parts[0], tool: null };
   }
   if (HOSTLIKE.test(place)) return { target: place, server: null, tool: null };
@@ -316,6 +317,22 @@ function SourceName({ name }: { name: string }) {
 
 /** What a person typed a value in, else the session's name. */
 const typedIn = (t: Trail) => t.mentions.find((m) => m.said)?.said ?? sessionName(t);
+
+/** Why the sends that ran got out, each with how many: the engine's leave, no decision, the
+ * person's leave, or the engine's mode as it names it. */
+function Whys({ whys }: { whys: Partial<Record<Why, number>> }) {
+  const shown = WHYS.filter((w) => (whys[w] ?? 0) > 0);
+  if (!shown.length) return null;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-1">
+      {shown.map((w) => (
+        <span key={w} className={cn("tnum inline-flex shrink-0 items-center gap-1 rounded px-1.5 text-[11px] leading-[19px] font-medium", WHY[w].cls, WHY[w].mono && "font-mono")}>
+          {WHY[w].label}{(whys[w] ?? 0) > 1 && <span className="opacity-70">{whys[w]}</span>}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 /** How a value ended, with whom it was sent to when it left or was about to. */
 function Result({ status, places }: { status: Status; places: string[] }) {
@@ -443,7 +460,7 @@ function Sent({ ran, held }: { ran: number; held: number }) {
 /** A session that tried to send values out: what it is, where to, the Call that carried them,
  * which values, and how its sends ended. */
 const attemptColumns = (now: number): ColumnDef<Attempt>[] => [
-  { id: "status", header: "결과", size: 88, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <StatusBadge s={a.ran > 0 ? "out" : "blocked"} /> },
+  { id: "status", header: "결과", size: 200, accessorFn: (a) => Number(a.ran > 0), cell: ({ row: { original: a } }) => <span className="flex min-w-0 items-center gap-1.5"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /><Whys whys={a.whys} /></span> },
   { id: "route", header: "출처 → 전송 대상", size: 340, accessorFn: (a) => `${a.trails.map(originOf).join(" ")} ${a.places.join(" ")}`, cell: ({ row: { original: a } }) => <Route trails={a.trails} places={a.places} ran={a.ran > 0} /> },
   { id: "session", header: "세션", size: 220, accessorFn: (a) => sessionName(a), cell: ({ row: { original: a } }) => <span className="block truncate" title={sessionName(a)}>{sessionName(a)}</span> },
   { id: "values", header: "값", size: 170, accessorFn: (a) => a.trails.length, cell: ({ row: { original: a } }) => <Kinds trails={a.trails} /> },
@@ -634,7 +651,7 @@ function AttemptSheet({ a, now }: { a: Attempt; now: number }) {
   return (
     <>
       <SheetHeader className="gap-2 border-b pr-12">
-        <SheetTitle className="flex items-center gap-2 text-[15px]">유출 시도<span className="ml-1"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /></span></SheetTitle>
+        <SheetTitle className="flex items-center gap-2 text-[15px]">유출 시도<span className="ml-1"><StatusBadge s={a.ran > 0 ? "out" : "blocked"} /></span><Whys whys={a.whys} /></SheetTitle>
         <SheetDescription className="sr-only">유출 시도</SheetDescription>
       </SheetHeader>
       <div className="scroll grid min-h-0 flex-1 content-start gap-5 overflow-auto p-4">
