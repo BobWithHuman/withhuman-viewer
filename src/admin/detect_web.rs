@@ -405,7 +405,13 @@ pub(super) fn data(read: &Read) -> String {
             slot.latest = Some((at, mode.clone()));
         }
         let leak = read.leaks.get(&(f.session.clone(), f.seq));
-        if let Some(severity) = Severity::of(f).or(leak.map(|_| Severity::Critical)) {
+        // A Call that sent a sensitive value out and ran is critical, whatever it was decided.
+        let severity = if leak.is_some() {
+            Some(Severity::Critical)
+        } else {
+            Severity::of(f)
+        };
+        if let Some(severity) = severity {
             let mut row = call(f, severity, leak);
             row["title"] = json!(titles.get(f.session.as_str()));
             calls.push(row);

@@ -3,12 +3,27 @@
 // bar by severity. Pressing a row narrows the page to it.
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Empty } from "@/kit";
+import { Empty, ago } from "@/kit";
 import { cn } from "@/lib/utils";
-import { type Call, DIM, SEV, SEVS, groups, named, toolName } from "./data";
+import { type Call, DIM, type Group, SEV, SEVS, groups, named, toolName } from "./data";
 
 export type RankBy = "machine" | "session" | "tool";
 const NO_PROMPT = "프롬프트 없음";
+
+/** A session as a row of the ranking names it: its name over two lines at most, and under it
+ * its machine and when it last had a Call worth a look. */
+function SessionName({ r }: { r: Group }) {
+  const last = r.calls.reduce((a, c) => Math.max(a, c.at ?? 0), 0);
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="line-clamp-2 text-[13px] leading-snug break-words" title={r.calls[0].prompt ?? undefined}>{named(r.calls[0]) ?? NO_PROMPT}</span>
+      <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+        <span className="min-w-0 truncate font-mono">{r.calls[0].machine}</span>
+        {last > 0 && <><span className="text-white/20">·</span><span className="tnum shrink-0">{ago(last)}</span></>}
+      </span>
+    </span>
+  );
+}
 
 export function Ranking({ calls, by, picked, onPick }: {
   calls: Call[]; by: RankBy; picked?: string; onPick: (key: string) => void;
@@ -29,9 +44,9 @@ export function Ranking({ calls, by, picked, onPick }: {
               )}
             >
               <span className={cn("tnum row-span-2 pt-px text-[12px]", i < 3 ? "font-semibold text-foreground" : "text-muted-foreground")}>{i + 1}</span>
-              <span className="flex min-w-0 items-baseline gap-2">
+              <span className={cn("flex min-w-0 gap-2", by === "session" ? "items-start" : "items-baseline")}>
                 {by === "session"
-                  ? <span className="flex min-w-0 flex-1 items-baseline gap-2"><span className="truncate text-[13px]">{named(r.calls[0]) ?? NO_PROMPT}</span><span className="max-w-[40%] shrink-0 truncate font-mono text-[11px] text-muted-foreground">{r.calls[0].machine}</span></span>
+                  ? <SessionName r={r} />
                   : <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{by === "tool" ? toolName(r.key) || "도구 없음" : r.key}</span>}
                 {r.crit > 0 && <span className="tnum shrink-0 text-[11.5px] font-medium text-deny">치명 {r.crit}</span>}
                 <span className="tnum shrink-0 text-right text-[13px] font-semibold">{r.total.toLocaleString()}</span>
