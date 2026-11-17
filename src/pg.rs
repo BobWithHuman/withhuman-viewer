@@ -182,6 +182,8 @@ SELECT m.session_id AS session, n.seq, n.kind AS node, m.slot,
        {tool} AS tool,
        coalesce({command}, {url}, {file_path}) AS target,
        CASE WHEN n.kind = 'Call' THEN {recipient} END AS recipient,
+       -- What the engine traced a Call to: the person's request, a tool result, or nothing.
+       CASE WHEN n.kind = 'Call' THEN substring(n.trace_json from '"link":"([a-z_]+)"') END AS link,
        -- What a person typed, for a value they put in a prompt: the words around it.
        CASE WHEN n.kind = 'Request' THEN left({prompt}, 2000) END AS said,
        (n.kind = 'Call' AND {ran}) AS ran,

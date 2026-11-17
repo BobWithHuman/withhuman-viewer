@@ -280,6 +280,7 @@ impl Demo {
                     "text": t["text"],
                     "decision": props.and_then(|p| p.get("decision")),
                     "mode": props.and_then(|p| p.get("decision_mode")),
+                    "link": parse_json(props.and_then(|p| p.get("trace_json"))).get("link").cloned(),
                     "client": props.and_then(|p| p.get("client_id")),
                     "at": props.and_then(|p| p.get("decided_at").filter(|v| v.is_i64()).or(p.get("observed_at"))),
                     "tool": payload["tool_name"],

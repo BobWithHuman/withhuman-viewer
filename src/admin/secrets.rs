@@ -253,7 +253,7 @@ fn trails(mentions: &[SecretMention]) -> Vec<Trail> {
                     if held(m) {
                         t.out_stopped += 1;
                     } else {
-                        let why = why_out(m);
+                        let why = why_out(m, &t.from);
                         *t.why.entry(why).or_default() += 1;
                         if normal(why) {
                             t.normal += 1;
@@ -281,9 +281,25 @@ pub(super) struct Leak {
 /// Every Call that sent a value out, by session and number, as 메인 puts them in its queue.
 pub(super) fn leaks(all: &[SecretMention]) -> HashMap<(String, i64), Leak> {
     let mut by: HashMap<(String, i64), Leak> = HashMap::new();
+    // Who wrote each value first in its session.
+    let mut first: HashMap<(&str, &str), (Option<i64>, i64, &str)> = HashMap::new();
+    for m in all {
+        let at = (m.at, m.seq, m.slot.as_deref().unwrap_or("agent"));
+        let e = first
+            .entry((m.session.as_str(), m.key.as_str()))
+            .or_insert(at);
+        if (at.0, at.1) < (e.0, e.1) {
+            *e = at;
+        }
+    }
+    let from = |m: &SecretMention| {
+        first
+            .get(&(m.session.as_str(), m.key.as_str()))
+            .map_or("agent", |f| f.2)
+    };
     for m in all
         .iter()
-        .filter(|m| in_call(m) && outward(m) && !held(m) && !normal(why_out(m)))
+        .filter(|m| in_call(m) && outward(m) && !held(m) && !normal(why_out(m, from(m))))
     {
         let leak = by.entry((m.session.clone(), m.seq)).or_default();
         let kind = kind_label(m.kind.as_deref().unwrap_or_default()).to_owned();
@@ -298,21 +314,26 @@ pub(super) fn leaks(all: &[SecretMention]) -> HashMap<(String, i64), Leak> {
     by
 }
 
-/// Whether a Call holding a value was kept from running: stopped, or held and not let through.
 /// A Call the engine stopped or held that did not run. One it would have stopped that ran all
 /// the same (a `shadow` or `record` engine lets every Call through) got out.
 pub(super) fn held(m: &SecretMention) -> bool {
     !m.ran && matches!(m.decision.as_deref(), Some("DENY" | "REVIEW"))
 }
 
-/// Why a value a Call sent out got out, or that sending it there is its use:
+/// Why a value a Call sent out got out, or that sending it there is its use (`from` is who
+/// wrote the value first in the session):
+/// - `asked`: a value the person gave, in a Call the engine traced to the person's request
+///   (a password they said to set, set);
 /// - `home`: to the service the value is a key of (an Anthropic key to Anthropic's API);
 /// - `local`: to this machine or a private network;
 /// - `shadow`, `record`: the engine would have stopped or held it, yet its mode lets all through;
 /// - `approved`: the engine held it and the person let it go;
 /// - `undecided`: the engine decided nothing;
 /// - `allowed`: the engine let it through.
-pub(super) fn why_out(m: &SecretMention) -> &'static str {
+pub(super) fn why_out(m: &SecretMention, from: &str) -> &'static str {
+    if from == "user" && m.link.as_deref() == Some("request") {
+        return "asked";
+    }
     let host = host_of(m);
     if host.as_deref().is_some_and(is_local) {
         return "local";
@@ -348,7 +369,7 @@ pub(super) fn why_out(m: &SecretMention) -> &'static str {
 
 /// Whether a reason names a send that is the value's use, not a leak.
 pub(super) fn normal(why: &str) -> bool {
-    matches!(why, "home" | "local")
+    matches!(why, "asked" | "home" | "local")
 }
 
 /// The host a Call sent to, lower case.
@@ -517,7 +538,7 @@ mod tests {
                     ..SecretMention::default()
                 }
             };
-        let why = |m: &SecretMention| why_out(m);
+        let why = |m: &SecretMention| why_out(m, "external");
         // To the key's own service, or to this machine.
         assert_eq!(
             why(&sent(
@@ -625,6 +646,19 @@ mod tests {
             )),
             "webhook.site"
         );
+        // A value the person gave, put where the person's request said: their own use.
+        let asked = SecretMention {
+            link: Some("request".into()),
+            ..sent("1j1l…2k3j", "", Some("ALLOW"), Some("enforce"), true)
+        };
+        assert_eq!(why_out(&asked, "user"), "asked");
+        // Not when a tool result told it, nor for a value a tool returned.
+        let told = SecretMention {
+            link: Some("segment".into()),
+            ..asked.clone()
+        };
+        assert_eq!(why_out(&told, "user"), "allowed");
+        assert_eq!(why_out(&asked, "external"), "allowed");
         // Stopped only when it did not run: a shadow engine's DENY ran all the same.
         assert!(held(&sent("x", "y", Some("DENY"), Some("enforce"), false)));
         assert!(!held(&sent("x", "y", Some("DENY"), Some("shadow"), true)));

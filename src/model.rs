@@ -313,6 +313,8 @@ pub struct SecretMention {
     pub decision: Option<String>,
     /// How the engine enforced its decision: `enforce`, `shadow` or `record`.
     pub mode: Option<String>,
+    /// What the engine traced a Call to: `request`, `segment` (a tool result) or `none`.
+    pub link: Option<String>,
     pub client: Option<String>,
     pub at: Option<i64>,
     pub tool: Option<String>,

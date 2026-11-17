@@ -15,19 +15,20 @@ export type Status = "out" | "blocked" | "normal" | "seen";
 /** Why a Call that sent a value out got it out: the engine's mode (`shadow`, `record`, named as
  * the engine names them), the person's leave, no decision, the engine's leave; or that it went
  * where the value is used (`home`, `local`), which is no leak. */
-export type Why = "shadow" | "record" | "approved" | "undecided" | "allowed" | "home" | "local";
+export type Why = "shadow" | "record" | "approved" | "undecided" | "allowed" | "asked" | "home" | "local";
 export const WHY: Record<Why, { label: string; mono?: boolean; cls: string }> = {
   allowed: { label: "엔진 허용", cls: "bg-deny/15 text-deny" },
   undecided: { label: "판정 없음", cls: "bg-white/8 text-muted-foreground" },
   approved: { label: "사용자 승인", cls: "bg-review/15 text-review" },
   shadow: { label: "shadow", mono: true, cls: "bg-white/8 text-foreground/80" },
   record: { label: "record", mono: true, cls: "bg-white/8 text-foreground/80" },
+  asked: { label: "사용자 지시", cls: "bg-allow/15 text-allow" },
   home: { label: "원래 서비스", cls: "bg-allow/15 text-allow" },
   local: { label: "로컬", cls: "bg-allow/15 text-allow" },
 };
-export const WHYS: Why[] = ["allowed", "undecided", "approved", "shadow", "record", "home", "local"];
+export const WHYS: Why[] = ["allowed", "undecided", "approved", "shadow", "record", "asked", "home", "local"];
 /** A send to where the value is used: no leak. */
-export const isNormal = (why: string | null | undefined) => why === "home" || why === "local";
+export const isNormal = (why: string | null | undefined) => why === "asked" || why === "home" || why === "local";
 export type Category = "credential" | "pii" | "financial" | "device";
 export type CallVerdict = "deny" | "approved" | "asked" | "allow";
 
