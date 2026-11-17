@@ -239,8 +239,11 @@ export function cases(calls: Call[]): CaseGroup[] {
       ran: g.calls.filter(happened).length,
       leaked: [...new Set(g.calls.flatMap((c) => c.leak?.kinds ?? []))],
     }))
-    // Values already out first, then what else already ran, then the riskiest.
-    .sort((a, b) => Number(b.leaked.length > 0) - Number(a.leaked.length > 0) || Number(b.ran > 0) - Number(a.ran > 0) || b.risk - a.risk || b.total - a.total);
+    // The worst severity first; then the most allowed though risky, the most stopped, the newest.
+    .sort((a, b) => {
+      const n = (g: Group, v: string) => g.calls.filter((c) => c.verdict === v).length;
+      return SEVS.indexOf(worst(a)) - SEVS.indexOf(worst(b)) || n(b, "allow") - n(a, "allow") || n(b, "deny") - n(a, "deny") || (b.calls[0].at ?? 0) - (a.calls[0].at ?? 0);
+    });
 }
 // A case's state: its sessions' common mark, `mixed` when they differ, none when none is marked.
 export function stateOf(g: CaseGroup, marks: Record<string, Mark>): Mark["state"] | "mixed" | null {
