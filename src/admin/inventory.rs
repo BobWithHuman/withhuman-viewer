@@ -63,6 +63,7 @@ pub fn InventoryPage() -> Element {
         actor: me(),
         reply: reply(),
         tab,
+        open_device: (state.open_device)(),
     };
     let data = match &*found.read() {
         None => inventory_web::without("loading", None, &around(now_ms())),
@@ -118,6 +119,8 @@ pub fn InventoryPage() -> Element {
                 state.screen.set(Screen::Work);
             }
             "ack" => reply.set(None),
+            // The machine asked for is open.
+            "opened" => state.open_device.set(None),
             "admin" => {
                 let token = text("token");
                 let saved = backend

@@ -24,6 +24,8 @@ pub(super) struct Around {
     pub reply: Option<Value>,
     /// The tab the page opens on.
     pub tab: &'static str,
+    /// A machine to open (its client ID), asked from elsewhere: 기록's session.
+    pub open_device: Option<String>,
 }
 
 /// What each machine's engine does with its decisions (`enforce`, `shadow` or `record`): the mode
@@ -213,9 +215,17 @@ pub(super) fn page(
     found.extend(edr_shadow(inv, &host));
     found.sort_by_key(|a| std::cmp::Reverse(a["last_seen"].as_i64()));
     page["shadow"] = json!(found);
+    // A session the list leaves out (opened and closed with nothing asked or done) is left out
+    // here too: one in the list's span the list does not have.
+    let since = titles.values().filter_map(|s| s.created_at).min();
     page["sessions"] = inv
         .sessions
         .iter()
+        .filter(|r| {
+            titles.contains_key(&r.session_id)
+                || r.ended_at.is_none()
+                || since.is_none_or(|since| r.created_at.is_none_or(|at| at < since))
+        })
         .map(|r| {
             let known = titles.get(&r.session_id);
             json!({
@@ -329,9 +339,13 @@ fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
             .filter(|c| c.edr_agent_id.as_deref() == Some(edr))
             .map(|c| c.client_id.as_str())
             .collect();
+        // A session open on the machine: from one of its client IDs, or from any other client ID
+        // that is the same machine (one a script made up on it, [`crate::machines`]).
+        let machine: Vec<String> = clients.iter().map(|c| crate::machines::name(c)).collect();
+        let ours = |c: &str| clients.contains(&c) || machine.contains(&crate::machines::name(c));
         let open = |at: i64| {
             inv.sessions.iter().any(|r| {
-                r.client_id.as_deref().is_some_and(|c| clients.contains(&c))
+                r.client_id.as_deref().is_some_and(ours)
                     && r.created_at.is_some_and(|start| start <= at + SLACK_MS)
                     && match r.ended_at {
                         Some(end) => end + SLACK_MS >= at,
@@ -369,6 +383,15 @@ fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
             };
         }
         runs.extend(run);
+        // What ran before the machine was set up is history its setup answered: shadow AI is
+        // what runs past the hooks once they are there.
+        let set_up = inv
+            .clients
+            .iter()
+            .filter(|c| c.edr_agent_id.as_deref() == Some(edr))
+            .filter_map(|c| c.registered_at)
+            .min();
+        runs.retain(|r| set_up.is_none_or(|at| r.1 >= at));
         for (first, last, scans, agent, then, command) in runs {
             found.push(json!({
                 "device": device, "host": name(then), "agent": agent, "project": null,
@@ -391,6 +414,7 @@ fn frame(around: &Around) -> Value {
         "actor": around.actor,
         "reply": around.reply,
         "tab": around.tab,
+        "open_device": around.open_device,
         "mcp": null,
     })
 }
@@ -589,6 +613,80 @@ mod tests {
         assert_eq!(of("004").unwrap()["host"], "nobody");
         assert!(of("005").is_none());
         assert_eq!(found.len(), 3);
+    }
+
+    #[test]
+    fn a_session_a_script_ran_on_the_machine_under_its_own_client_id_is_no_shadow_ai() {
+        use crate::model::{EdrDevice, Session};
+        let at = 1_000_000_000;
+        let bob = Device {
+            client_id: "personal/bob".into(),
+            hostname: Some("BoBbook".into()),
+            serial: Some("PUXJV048".into()),
+            edr_agent_id: Some("003".into()),
+            ..Device::default()
+        };
+        // The lab's sessions ran under a client ID it made up, in BoBbook's folders.
+        crate::machines::learn(std::slice::from_ref(&bob));
+        let cwd = |c: &str, cwd: &str| Session {
+            client: Some(c.into()),
+            cwd: Some(cwd.into()),
+            ..Session::default()
+        };
+        crate::machines::learn_folders(&[
+            cwd("personal/bob", "C:\\WithHuman\\demo-ec2"),
+            cwd(
+                "intent-drift-lab/s3",
+                "C:\\WithHuman\\intent-drift-lab\\runs\\s3",
+            ),
+        ]);
+        let inv = Inventory {
+            clients: vec![bob],
+            sessions: vec![SessionRun {
+                session_id: "lab".into(),
+                client_id: Some("intent-drift-lab/s3".into()),
+                created_at: Some(at - 60_000),
+                last_seen_at: Some(at),
+                ..SessionRun::default()
+            }],
+            edr: Some(vec![EdrDevice {
+                agent_id: "003".into(),
+                name: "Iamsh-win".into(),
+                agent: Some("claude-code".into()),
+                running_at: Some(at),
+                ..EdrDevice::default()
+            }]),
+            ..Inventory::default()
+        };
+        assert!(edr_shadow(&inv, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn what_ran_before_the_machine_was_set_up_is_no_shadow_ai() {
+        use crate::model::EdrSighting;
+        const H: i64 = 60 * 60_000;
+        let at = 1_000_000_000;
+        let seen = |hours: i64| EdrSighting {
+            agent_id: "005".into(),
+            running_at: at + hours * H,
+            agent: "claude-code".into(),
+            ..EdrSighting::default()
+        };
+        let inv = Inventory {
+            // Set up an hour in: the scan before is history, the one after with no session is not.
+            clients: vec![Device {
+                client_id: "default/hye".into(),
+                hostname: Some("Hye-Jeong".into()),
+                registered_at: Some(at + H),
+                edr_agent_id: Some("005".into()),
+                ..Device::default()
+            }],
+            sightings: Some(vec![seen(0), seen(5)]),
+            ..Inventory::default()
+        };
+        let found = edr_shadow(&inv, &HashMap::new());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["first"], at + 5 * H);
     }
 
     #[test]

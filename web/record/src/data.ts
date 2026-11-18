@@ -52,6 +52,9 @@ export interface Session {
   /** The other intents the session stated. */
   others?: string[];
   device: string;
+  /** In the security team's app, the machine's client ID in the inventory: the device name opens
+   * it there. */
+  client?: string | null;
   person?: string;
   team?: string;
   folder?: string;

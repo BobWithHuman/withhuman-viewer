@@ -732,7 +732,9 @@ fn machine_of(s: &Session) -> String {
     s.client
         .as_deref()
         .filter(|c| !c.is_empty())
-        .map_or_else(|| NONE.into(), crate::machines::name)
+        .map(crate::machines::name)
+        .or_else(|| s.cwd.as_deref().and_then(crate::machines::of_folder))
+        .unwrap_or_else(|| NONE.into())
 }
 
 /// A machine in the session picker: its sessions and their Calls blocked and held, and when it
