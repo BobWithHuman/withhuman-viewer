@@ -44,6 +44,8 @@ export type FlowCount = [number, number, string, string, string, number];
 export type Data = {
   source: string; demo: boolean; loading: boolean; failed: string | null; refreshed: number | null;
   machines: string[]; calls: Call[]; cover: Cover[]; flow: FlowCount[];
+  /** When each session the Calls are of was last active. */
+  last?: Record<string, number>;
   /** What the team marked each session as, the case opened, and what the last save said. */
   triage?: Record<string, Mark>; case?: Case | null; saved?: string | null;
   /** The sources the team distrusts, and the machines to tell it about. */
