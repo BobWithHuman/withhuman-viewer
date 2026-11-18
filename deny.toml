@@ -1,5 +1,9 @@
 [advisories]
 unmaintained = "workspace"
+ignore = [
+  # chrono is marked unmaintained, not vulnerable; the app uses it only to format local times.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, no vulnerability; only formats local times" },
+]
 
 [bans]
 multiple-versions = "warn"
