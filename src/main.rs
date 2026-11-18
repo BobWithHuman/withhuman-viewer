@@ -11,9 +11,14 @@ compile_error!("build one app: `--features dev` or `--no-default-features --feat
 mod admin;
 mod api;
 mod demo;
+// Running the engine on this Mac, from the security team's first launch.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 mod engine;
 mod flow;
 mod graph;
+// The developer's hooks, installed from the app with the engine's own setup.
+#[cfg(not(feature = "admin"))]
+mod hooks;
 mod layout;
 mod menu;
 mod metro;

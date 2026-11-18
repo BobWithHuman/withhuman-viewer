@@ -148,9 +148,11 @@ mod keychain {
 }
 
 /// The keychain account the Jev API key is kept under.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 const JEV_ACCOUNT: &str = "jev-api-key";
 
 /// Keeps a Jev API key Jev took in the keychain.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 pub fn save_jev_key(key: &str) -> Result<(), String> {
     keychain::set(JEV_ACCOUNT, key.trim())
 }
@@ -304,6 +306,10 @@ impl Settings {
         };
         if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") {
             settings.demo = true;
+        }
+        // The developer's app has no demo: it reads the engine it is set up with.
+        if !cfg!(feature = "admin") {
+            settings.demo = false;
         }
         settings
     }

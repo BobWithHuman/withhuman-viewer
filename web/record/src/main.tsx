@@ -5,15 +5,18 @@ import { StrictMode, useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { DEMO, type RecordData } from "./data";
 import { GraphView } from "./GraphView";
+import { HooksView, type HooksData } from "./hooks";
 import { ONLY, cx, flagged, type Only } from "./parts";
 import "./index.css";
 
 // The page the app shows in 기록: it waits for the app to hand it a session
-// (`WHRecord.render(data)`). Opened on its own, it shows the demo.
+// (`WHRecord.render(data)`). Opened on its own, it shows the demo. The developer's 훅 page is
+// this page too, handed what the app found instead (`WHHooks.render(data)`).
 
 declare global {
   interface Window {
     WHRecord: { render: (d: RecordData) => void };
+    WHHooks: { render: (d: HooksData) => void };
   }
 }
 
@@ -21,6 +24,14 @@ let current: RecordData = DEMO;
 const subs = new Set<() => void>();
 window.WHRecord = { render: (d) => { current = d; subs.forEach((f) => f()); } };
 const useRecord = () => useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => current);
+let hooks: HooksData | null = null;
+window.WHHooks = { render: (d) => { hooks = d; subs.forEach((f) => f()); } };
+const useHooks = () => useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => hooks);
+
+function Root() {
+  const h = useHooks();
+  return h ? <HooksView data={h} /> : <App />;
+}
 
 function App() {
   const data = useRecord();
@@ -62,4 +73,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById("root")!).render(<StrictMode><Root /></StrictMode>);

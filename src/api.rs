@@ -214,13 +214,28 @@ impl Backend {
                     .filter_map(at)
                     .max()
                     .map(|t| t - FACTS_OVERLAP_MS);
-                pg.call_facts(since).await.map(|fresh| {
+                // With what was kept, the IDs of the sessions there are now: a session removed
+                // from the store (or the store emptied) takes its kept Calls with it.
+                let (fresh, ids) = tokio::join!(pg.call_facts(since), async {
+                    match since {
+                        Some(_) => pg.session_ids().await.ok(),
+                        None => None,
+                    }
+                });
+                fresh.map(|fresh| {
                     let mut all = match fresh {
                         Value::Array(rows) => rows,
                         _ => Vec::new(),
                     };
                     if let Some(since) = since {
-                        all.extend(kept.into_iter().filter(|r| at(r).is_none_or(|t| t < since)));
+                        let there: Option<std::collections::HashSet<String>> =
+                            ids.map(|ids| ids.into_iter().collect());
+                        all.extend(kept.into_iter().filter(|r| {
+                            at(r).is_none_or(|t| t < since)
+                                && there.as_ref().is_none_or(|there| {
+                                    r["session"].as_str().is_some_and(|s| there.contains(s))
+                                })
+                        }));
                     }
                     all.sort_by_key(|r| std::cmp::Reverse(at(r)));
                     all.truncate(FACTS_KEPT);
@@ -607,11 +622,16 @@ impl Backend {
         Ok(settings.public(&self.path))
     }
 
-    /// Whether the first launch's setup is still to do: no Jev key was registered.
-    /// `VIEWER_ONBOARD=1` shows it again; the demo (`VIEWER_MOCK=1`) skips it.
+    /// Whether the first launch's setup is still to do: the security team's app has no Jev key
+    /// registered, the developer's no settings saved yet. `VIEWER_ONBOARD=1` shows it again; the
+    /// demo (`VIEWER_MOCK=1`) skips the security team's.
     pub fn needs_setup(&self) -> bool {
         if std::env::var("VIEWER_ONBOARD").is_ok_and(|v| v == "1") {
             return true;
+        }
+        if !cfg!(feature = "admin") {
+            return self.settings.lock().expect("settings lock").first_run
+                && std::env::var("VIEWER_DB").is_err();
         }
         if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1")
             || std::env::var("VIEWER_DB").is_ok()
@@ -622,12 +642,14 @@ impl Backend {
     }
 
     /// Asks Jev whether it takes the key.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn check_jev(&self, key: &str) -> Result<(), String> {
         crate::engine::check_jev(&self.client, key).await
     }
 
     /// Starts the engine in `dir` with the Jev key, then waits for its Neo4j to answer. Docker's
     /// lines go to `log` as they come. Gives the connection the viewer reads it with.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn start_local(
         &self,
         dir: std::path::PathBuf,
@@ -669,6 +691,7 @@ impl Backend {
 
     /// Ends the first launch's setup: keeps the Jev key in the keychain and the connection
     /// in the settings, with where the engine runs.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub fn finish_setup(
         &self,
         key: &str,
@@ -753,6 +776,7 @@ fn now_ms() -> i64 {
 }
 
 /// A form's change again, for one more try.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 fn clone_change(c: &Change) -> Change {
     Change {
         neo4j_url: c.neo4j_url.clone(),

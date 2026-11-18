@@ -66,10 +66,18 @@ fn attention(graph: &Value) -> Value {
 #[cfg_attr(not(feature = "admin"), allow(dead_code))]
 mod mcp;
 
+// The bundled demo is the security team's alone (and the tests'): the developer's app reads only
+// the engine it is set up with.
+#[cfg(any(feature = "admin", test))]
 static FIXTURE: &str = include_str!("../mock/fixture.json");
+#[cfg(not(any(feature = "admin", test)))]
+static FIXTURE: &str = "{}";
 /// A made-up session of many turns, each later prompt joined to what it was written from, added
 /// to the recorded ones (`mock/make_dashboard_fixture.py --into-fixture` writes it).
+#[cfg(any(feature = "admin", test))]
 static TURNS: &str = include_str!("../mock/turns.json");
+#[cfg(not(any(feature = "admin", test)))]
+static TURNS: &str = "{}";
 
 pub struct Demo {
     data: Value,

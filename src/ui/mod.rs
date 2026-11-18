@@ -2,15 +2,20 @@
 //! open, its graph, and what is selected in it.
 
 mod compare;
+// The developer's first launch: the engine's store and the hooks.
+#[cfg(not(feature = "admin"))]
+mod dev_setup;
 mod flow;
 pub(crate) mod home;
 mod icons;
 mod inspector;
 mod metro;
-// 기록's graph for the security team, drawn by the page in `web/record`.
-#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+// 기록's graph, drawn by the page in `web/record`: the security team's, and the developer's
+// whole app.
 mod record;
 mod settings;
+// The security team's first launch; the developer's ([`dev_setup`]) takes its window sizing.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 mod setup;
 // The session list, kept while sessions are picked in the route list's region.
 #[allow(dead_code)]
@@ -45,7 +50,7 @@ pub fn head_extra() -> String {
     }
     #[cfg(not(feature = "admin"))]
     {
-        font_script()
+        format!("{}{}", font_script(), record::head_script())
     }
 }
 
@@ -94,6 +99,12 @@ fn first_screen() -> Screen {
         Ok("secrets") => Screen::Secrets,
         #[cfg(feature = "admin")]
         Ok("inventory") => Screen::Inventory,
+        #[cfg(not(feature = "admin"))]
+        Ok("hooks") => Screen::Hooks,
+        // The developer's app is 기록 and its hooks: it opens on the hooks while none are set up.
+        #[cfg(not(feature = "admin"))]
+        _ if crate::hooks::installed(&Prefs::load().hook_folders).is_empty() => Screen::Hooks,
+        _ if !cfg!(feature = "admin") => Screen::Work,
         _ => Screen::Home,
     }
 }
@@ -190,6 +201,9 @@ pub enum Screen {
     Secrets,
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     Inventory,
+    /// The developer's hooks: those installed, and a new setup.
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    Hooks,
 }
 
 impl Screen {
@@ -235,6 +249,9 @@ pub struct AppState {
     pub check_updates: Signal<u32>,
     /// Bumped to read the sessions, the graph, or fit the canvas again.
     pub reload: Signal<u32>,
+    /// Presses of 다시 읽기 (the rail's button, the menu): every Call read again, where a reload
+    /// alone (live, a new connection) reads only what is new.
+    pub full: Signal<u32>,
     pub refresh: Signal<u32>,
     pub fit: Signal<u32>,
 }
@@ -304,6 +321,7 @@ pub fn App() -> Element {
         inspector_width: Signal::new(width),
         check_updates: Signal::new(0),
         reload: Signal::new(0),
+        full: Signal::new(0),
         refresh: Signal::new(0),
         fit: Signal::new(0),
     });
@@ -342,8 +360,18 @@ pub fn App() -> Element {
         }
     };
 
+    // The developer's app has no main page: anything that would open it opens 기록.
+    use_effect(move || {
+        if !cfg!(feature = "admin") && matches!((state.screen)(), Screen::Home) {
+            state.screen.set(Screen::Work);
+        }
+    });
+
     match (state.screen)() {
+        #[cfg(feature = "admin")]
         Screen::Setup => return rsx! { setup::Setup {} },
+        #[cfg(not(feature = "admin"))]
+        Screen::Setup => return rsx! { dev_setup::DevSetup {} },
         Screen::Home => {
             return rsx! {
                 div { class: "app home-on",
@@ -362,6 +390,22 @@ pub fn App() -> Element {
                 }
             };
         }
+        #[cfg(not(feature = "admin"))]
+        Screen::Hooks => {
+            return rsx! {
+                div { class: "app",
+                    TopBar {}
+                    div { class: "app-body",
+                        div { class: "app-main", dev_setup::HookPage {} }
+                    }
+                    if (state.settings_open)() {
+                        settings::SettingsSheet {}
+                    }
+                }
+            };
+        }
+        #[cfg(feature = "admin")]
+        Screen::Hooks => {}
         Screen::FeatureA | Screen::FeatureB | Screen::Secrets | Screen::Inventory => {
             let screen = (state.screen)();
             return rsx! {
@@ -400,10 +444,10 @@ pub fn App() -> Element {
             if (state.mode)() == Mode::Compare {
                 compare::Compare {}
             }
-            if cfg!(feature = "admin") && (state.mode)() != Mode::Compare {
+            if (state.mode)() != Mode::Compare {
                 record::RecordGraph {}
             }
-            div { class: "columns", hidden: (state.mode)() == Mode::Compare || cfg!(feature = "admin"),
+            div { class: "columns", hidden: true,
                 main { class: "stage",
                     div { class: "canvas-wrap",
                         flow::FlowMap {}
@@ -461,6 +505,7 @@ fn use_menu(backend: Arc<Backend>, mut state: AppState) {
         menu::SETTINGS => state.settings_open.toggle(),
         menu::RELOAD => {
             state.reload += 1;
+            state.full += 1;
             state.refresh += 1;
         }
         menu::SEARCH => {
@@ -561,6 +606,10 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
             let mut current = state.current;
             match found {
                 Ok(list) => {
+                    // The developer's app shows this machine's sessions alone: the device's
+                    // client ID its hooks send.
+                    #[cfg(not(feature = "admin"))]
+                    let list = crate::hooks::mine(list);
                     // Keep the open session, even one the list leaves out (opened from another
                     // page, a session with no start time); else the last one opened, else the
                     // newest.
@@ -662,6 +711,7 @@ fn TopBar() -> Element {
         (Screen::FeatureB, _) => "b",
         // The rail's other products sit under the main page in the top bar.
         (s, _) if s.is_product() => "home",
+        (Screen::Hooks, _) => "hooks",
         _ => "graph",
     };
     let (dot, source) = match (p.demo, &*state.sessions.read()) {
@@ -701,27 +751,43 @@ fn TopBar() -> Element {
                 {sidebar_icon()}
             }
             span { class: "tb-logo", "W" }
-            div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
-                button { class: "{seg(\"home\")}", onclick: move |_| go((state.page)(), mode),
-                    {line_icon(icons::HOUSE)}
-                    "{HOME_LABEL}"
-                }
-                button { class: "{seg(\"graph\")}", onclick: move |_| go(Screen::Work, Mode::Graph),
-                    {line_icon(icons::ROUTE)}
-                    "{SCREEN_LABELS.0}"
-                }
-                // The security team's app has no second screen here: what 감사 listed is on 메인.
-                if !cfg!(feature = "admin") {
-                    button { class: "{seg(\"a\")}", onclick: move |_| go(Screen::FeatureA, Mode::Graph),
-                        {line_icon(icons::LAYOUT_GRID)}
-                        "{SCREEN_LABELS.1}"
+            // The security team's screens; the developer's have their own below.
+            if cfg!(feature = "admin") {
+                div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
+                    button { class: "{seg(\"home\")}", onclick: move |_| go((state.page)(), mode),
+                        {line_icon(icons::HOUSE)}
+                        "{HOME_LABEL}"
+                    }
+                    button { class: "{seg(\"graph\")}", onclick: move |_| go(Screen::Work, Mode::Graph),
+                        {line_icon(icons::ROUTE)}
+                        "{SCREEN_LABELS.0}"
+                    }
+                    // The security team's app has no second screen here: what 감사 listed is on 메인.
+                    if !cfg!(feature = "admin") {
+                        button { class: "{seg(\"a\")}", onclick: move |_| go(Screen::FeatureA, Mode::Graph),
+                            {line_icon(icons::LAYOUT_GRID)}
+                            "{SCREEN_LABELS.1}"
+                        }
+                    }
+                    // The security team's 정책 waits until it has something to set.
+                    if !cfg!(feature = "admin") {
+                        button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
+                            {line_icon(icons::STAR)}
+                            "{SCREEN_LABELS.2}"
+                        }
                     }
                 }
-                // The security team's 정책 waits until it has something to set.
-                if !cfg!(feature = "admin") {
-                    button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
-                        {line_icon(icons::STAR)}
-                        "{SCREEN_LABELS.2}"
+            }
+            // The developer's app: 기록 and its hooks.
+            if !cfg!(feature = "admin") {
+                div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
+                    button { class: "{seg(\"graph\")}", onclick: move |_| go(Screen::Work, Mode::Graph),
+                        {line_icon(icons::ROUTE)}
+                        "기록"
+                    }
+                    button { class: "{seg(\"hooks\")}", onclick: move |_| go(Screen::Hooks, Mode::Graph),
+                        {line_icon(icons::SHIELD_CHECK)}
+                        "훅"
                     }
                 }
             }
@@ -729,7 +795,7 @@ fn TopBar() -> Element {
             if screen == Screen::Work && mode == Mode::Graph {
                 div { class: "tb-session", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                     flow::SessionPick { class: "tb-pick" }
-                    if cfg!(feature = "admin") { flow::SessionDrop {} }
+                    flow::SessionDrop {}
                 }
             }
             div { class: "tb-spacer" }
@@ -854,7 +920,7 @@ fn Rail() -> Element {
                 {icon(icons::MONITOR_SMARTPHONE)}
             }
             i { class: "sep" }
-            button { title: "다시 읽기", onclick: move |_| state.reload += 1,
+            button { title: "다시 읽기", onclick: move |_| { state.reload += 1; state.full += 1; },
                 {icon(icons::REFRESH_CW)}
             }
             button {
