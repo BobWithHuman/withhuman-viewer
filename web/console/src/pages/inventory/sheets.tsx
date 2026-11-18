@@ -8,7 +8,7 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 import { Legend, ServiceLogo, SplitBar, Warn, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./marks";
-import { KillSwitch } from "./kill";
+import { DeleteDevice, KillSwitch } from "./kill";
 import { isOn } from "./mcp/types";
 import { EDR_STATUS, ENGINE, ENGINE_KEYS, agentLabel, type Machine, type View } from "./model";
 
@@ -45,10 +45,12 @@ export const Line = ({ onClick, children, className }: { onClick?: () => void; c
 );
 export const When = ({ children }: { children: ReactNode }) => <span className="tnum ml-auto shrink-0 text-[12px] text-muted-foreground">{children}</span>;
 
-export function DeviceSheet({ m, view, onServer, onStop }: {
+export function DeviceSheet({ m, view, onServer, onStop, onDelete }: {
   m: Machine; view: View; onServer: (name: string) => void;
   /** Stops the machine, or lets it go again. */
   onStop: (stopped: boolean, reason: string) => void;
+  /** Deletes the machine with the sessions it ran. */
+  onDelete: () => void;
 }) {
   const servers = view.serversOn(m);
   const projects = view.projects.filter((p) => p.device === m.id);
@@ -72,7 +74,12 @@ export function DeviceSheet({ m, view, onServer, onStop }: {
           <EngineBadge mode={m.engine_mode} />
           {m.shadow > 0 && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><ShieldOff />섀도 AI {m.shadow}</Badge>}
           {m.stopped && <Badge variant="secondary" className="gap-1 border-0 bg-deny/15 font-semibold text-deny"><OctagonX />멈춤{m.stopped.denied ? ` · 거부 ${m.stopped.denied}` : ""}</Badge>}
-          {m.state !== "unregistered" && <span className="ml-auto"><KillSwitch m={m} now={view.now} size="xs" onStop={onStop} /></span>}
+          {!m.edrOnly && (
+            <span className="ml-auto flex items-center gap-1.5">
+              {m.state !== "unregistered" && <KillSwitch m={m} now={view.now} size="xs" onStop={onStop} />}
+              <DeleteDevice m={m} sessions={runs.length} onDelete={onDelete} />
+            </span>
+          )}
         </div>
       </SheetHeader>
       <div className="scroll flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5">

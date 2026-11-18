@@ -130,6 +130,27 @@ pub fn InventoryPage() -> Element {
                     Err(e) => failed(e),
                 }));
             }
+            // Without the admin API's address and token, the settings open to take them.
+            "stop_device" | "delete_device" if !backend.can_admin() => {
+                state.settings_open.set(true);
+                reply.set(Some(failed("엔진 관리 토큰이 없습니다.".into())));
+            }
+            "delete_device" => {
+                let device = text("device");
+                let (backend, req) = (backend.clone(), m["req"].clone());
+                spawn(async move {
+                    reply.set(Some(match backend.delete_device(&device).await {
+                        Ok(sessions) => {
+                            bump += 1;
+                            // The sessions it ran are gone from every list.
+                            state.reload += 1;
+                            state.full += 1;
+                            json!({ "req": req, "ok": true, "done": "device_deleted", "sessions": sessions })
+                        }
+                        Err(e) => failed(e),
+                    }));
+                });
+            }
             "stop_device" => {
                 let (device, actor, reason) = (text("device"), text("actor"), text("reason"));
                 let stopped = m["stopped"].as_bool().unwrap_or(true);

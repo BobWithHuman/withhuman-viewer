@@ -1,5 +1,7 @@
 //! The connection sheet: where the engine's data is (its PostgreSQL, or Neo4j before
-//! withhuman-core #118), tried before it is saved, or the demo instead.
+//! withhuman-core #118), tried before it is saved, or the demo instead; and in the security
+//! team's app, the engine's admin API (its address and token), which stopping and deleting a
+//! machine call.
 
 use std::sync::Arc;
 
@@ -29,6 +31,10 @@ pub fn SettingsSheet() -> Element {
     let mut password = use_signal(String::new);
     let mut demo = use_signal(|| current.demo);
     let mut status = use_signal(|| Status::Idle);
+    let mut api = use_signal(|| current.engine_api.clone());
+    // Empty keeps the stored token.
+    let mut token = use_signal(String::new);
+    let admin = cfg!(feature = "admin");
 
     let change = move || Change {
         neo4j_url: url(),
@@ -53,7 +59,13 @@ pub fn SettingsSheet() -> Element {
             });
         }
     };
-    let save = move |_| match backend.save(change()) {
+    let save = move |_| match backend.save(change()).and_then(|next| {
+        if !admin {
+            return Ok(next);
+        }
+        let token = token();
+        backend.save_admin(&api(), Some(token.trim()).filter(|t| !t.is_empty()))
+    }) {
         Ok(next) => {
             state.public.set(next);
             state.current.set(None);
@@ -112,6 +124,19 @@ pub fn SettingsSheet() -> Element {
                     }
                     label { "비밀번호"
                         input { r#type: "password", value: "{password}", placeholder: hint, oninput: move |e| password.set(e.value()) }
+                    }
+                }
+                if admin {
+                    h2 { class: "sheet-sub", "엔진 관리 API" }
+                    div { class: "row",
+                        label { "주소"
+                            input { r#type: "text", value: "{api}", placeholder: "https://엔진 주소", oninput: move |e| api.set(e.value()) }
+                        }
+                        label { "관리 토큰"
+                            input { r#type: "password", value: "{token}",
+                                placeholder: if current.has_admin_token { "저장된 토큰 유지" } else { "WITHHUMAN_ADMIN_TOKEN" },
+                                oninput: move |e| token.set(e.value()) }
+                        }
                     }
                 }
                 match status() {

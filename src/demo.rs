@@ -720,6 +720,23 @@ impl Demo {
         true
     }
 
+    /// Takes a machine out of the demo's inventory with the sessions it ran; how many, or none
+    /// when there is no such machine.
+    pub fn delete_device(&mut self, now: i64, client: &str) -> Option<u64> {
+        let mut inv = self.inventory(now);
+        let before = inv.clients.len();
+        inv.clients.retain(|d| d.client_id != client);
+        if inv.clients.len() == before {
+            return None;
+        }
+        let sessions = inv.sessions.len();
+        inv.sessions
+            .retain(|r| r.client_id.as_deref() != Some(client));
+        let gone = (sessions - inv.sessions.len()) as u64;
+        self.inventory = Some(inv);
+        Some(gone)
+    }
+
     pub fn graph(&self, session: &str) -> Result<Value, ApiError> {
         self.data["graphs"]
             .get(session)

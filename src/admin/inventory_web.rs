@@ -194,7 +194,7 @@ pub(super) fn page(
         .iter()
         .map(|p| {
             json!({
-                "device": p.client_id, "project": p.project, "agent": p.agent,
+                "device": p.client_id, "project": p.project, "agent": agent(p.agent.as_deref()),
                 "hook_version": p.hook_version, "installed_at": p.installed_at,
             })
         })
@@ -205,7 +205,7 @@ pub(super) fn page(
             json!({
                 "device": a.client_id,
                 "host": a.client_id.as_deref().and_then(|c| host.get(c)),
-                "agent": a.agent, "project": a.project,
+                "agent": agent(Some(a.agent.as_str())), "project": a.project,
                 "last_seen": a.last_seen, "why": "project",
             })
         })
@@ -395,6 +395,12 @@ fn frame(around: &Around) -> Value {
     })
 }
 
+/// An agent by one name: a setup registers Claude Code as `claude`, the EDR names it
+/// `claude-code`; both are `claude-code`, so a machine shows one agent whoever saw it.
+fn agent(name: Option<&str>) -> Option<&str> {
+    name.map(|n| if n == "claude" { "claude-code" } else { n })
+}
+
 /// Each machine with what its sessions add: how many, when it was last heard through them, how
 /// its latest one was let run.
 fn devices(
@@ -419,7 +425,7 @@ fn devices(
                 .max(called.get(&d.client_id).copied());
             json!({
                 "id": d.client_id, "host": d.hostname, "os": d.os,
-                "agent": d.agent, "hook_version": d.hook_version,
+                "agent": agent(d.agent.as_deref()), "hook_version": d.hook_version,
                 "registered_at": d.registered_at, "first_seen": d.first_seen, "last": last,
                 "sessions": runs.len(),
                 "permission_mode": latest.and_then(|r| r.permission_mode.clone()),
@@ -437,6 +443,14 @@ fn devices(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_code_goes_by_one_name_whoever_saw_it() {
+        assert_eq!(agent(Some("claude")), Some("claude-code"));
+        assert_eq!(agent(Some("claude-code")), Some("claude-code"));
+        assert_eq!(agent(Some("codex")), Some("codex"));
+        assert_eq!(agent(None), None);
+    }
     use crate::model::Device;
 
     fn run(client: Option<&str>, user: Option<&str>, last: i64) -> SessionRun {
