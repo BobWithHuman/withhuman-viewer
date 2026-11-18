@@ -49,7 +49,9 @@ fn main() {
         .with_title(ui::APP_NAME)
         .with_inner_size(LogicalSize::new(size.0, size.1))
         .with_min_inner_size(LogicalSize::new(min.0, min.1))
-        .with_resizable(!setup);
+        // A Mac keeps the setup's small window as it is; elsewhere a window that cannot be
+        // resized cannot be sized back from maximized.
+        .with_resizable(!setup || !cfg!(target_os = "macos"));
     // No title bar: the content runs to the top, the traffic lights over it as in a Mac app.
     #[cfg(target_os = "macos")]
     let window = {
