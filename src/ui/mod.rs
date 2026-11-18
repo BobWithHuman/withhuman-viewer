@@ -2,15 +2,20 @@
 //! open, its graph, and what is selected in it.
 
 mod compare;
+// The developer's first launch: the engine's store and the hooks.
+#[cfg(not(feature = "admin"))]
+mod dev_setup;
 mod flow;
 pub(crate) mod home;
 mod icons;
 mod inspector;
 mod metro;
-// 기록's graph for the security team, drawn by the page in `web/record`.
-#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+// 기록's graph, drawn by the page in `web/record`: the security team's, and the developer's
+// whole app.
 mod record;
 mod settings;
+// The security team's first launch; the developer's ([`dev_setup`]) takes its window sizing.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 mod setup;
 // The session list, kept while sessions are picked in the route list's region.
 #[allow(dead_code)]
@@ -45,7 +50,7 @@ pub fn head_extra() -> String {
     }
     #[cfg(not(feature = "admin"))]
     {
-        font_script()
+        format!("{}{}", font_script(), record::head_script())
     }
 }
 
@@ -94,6 +99,8 @@ fn first_screen() -> Screen {
         Ok("secrets") => Screen::Secrets,
         #[cfg(feature = "admin")]
         Ok("inventory") => Screen::Inventory,
+        // The developer's app is 기록 alone.
+        _ if !cfg!(feature = "admin") => Screen::Work,
         _ => Screen::Home,
     }
 }
@@ -342,8 +349,18 @@ pub fn App() -> Element {
         }
     };
 
+    // The developer's app has no main page: anything that would open it opens 기록.
+    use_effect(move || {
+        if !cfg!(feature = "admin") && matches!((state.screen)(), Screen::Home) {
+            state.screen.set(Screen::Work);
+        }
+    });
+
     match (state.screen)() {
+        #[cfg(feature = "admin")]
         Screen::Setup => return rsx! { setup::Setup {} },
+        #[cfg(not(feature = "admin"))]
+        Screen::Setup => return rsx! { dev_setup::DevSetup {} },
         Screen::Home => {
             return rsx! {
                 div { class: "app home-on",
@@ -400,10 +417,10 @@ pub fn App() -> Element {
             if (state.mode)() == Mode::Compare {
                 compare::Compare {}
             }
-            if cfg!(feature = "admin") && (state.mode)() != Mode::Compare {
+            if (state.mode)() != Mode::Compare {
                 record::RecordGraph {}
             }
-            div { class: "columns", hidden: (state.mode)() == Mode::Compare || cfg!(feature = "admin"),
+            div { class: "columns", hidden: true,
                 main { class: "stage",
                     div { class: "canvas-wrap",
                         flow::FlowMap {}
@@ -701,7 +718,7 @@ fn TopBar() -> Element {
                 {sidebar_icon()}
             }
             span { class: "tb-logo", "W" }
-            div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
+            div { class: "tb-seg", hidden: !cfg!(feature = "admin"), onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                 button { class: "{seg(\"home\")}", onclick: move |_| go((state.page)(), mode),
                     {line_icon(icons::HOUSE)}
                     "{HOME_LABEL}"
@@ -729,7 +746,7 @@ fn TopBar() -> Element {
             if screen == Screen::Work && mode == Mode::Graph {
                 div { class: "tb-session", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
                     flow::SessionPick { class: "tb-pick" }
-                    if cfg!(feature = "admin") { flow::SessionDrop {} }
+                    flow::SessionDrop {}
                 }
             }
             div { class: "tb-spacer" }

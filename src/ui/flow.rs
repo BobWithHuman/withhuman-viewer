@@ -135,9 +135,10 @@ pub fn FlowMap() -> Element {
                if (!id) return; const b = document.getElementById(id); if (b && !b.disabled) { e.preventDefault(); b.click(); } }); }",
         );
     });
-    // The security team's app lists the sessions from its top bar ([`SessionDrop`]).
+    // Both apps list the sessions from the top bar ([`SessionDrop`]); this list is no longer
+    // opened.
     let pick_list = rsx! {
-        if picking() && !cfg!(feature = "admin") {
+        if picking() && false {
             div { class: "fx-pick-shade", onclick: move |_| picking.set(false) }
             div {
                 class: "fx-pick-pop",
