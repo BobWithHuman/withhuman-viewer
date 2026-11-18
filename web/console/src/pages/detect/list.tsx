@@ -120,6 +120,13 @@ const latest = (g: CaseGroup, last: Record<string, number>) => {
   return { at, call };
 };
 
+/** The Call a case opens on: the worst of its newest session's, so 기록 opens that session. */
+const opening = (g: CaseGroup, last: Record<string, number>) => {
+  const session = latest(g, last).call.session;
+  const mine = g.calls.filter((c) => c.session === session);
+  return mine.reduce((a, c) => (SEVS.indexOf(c.sev) < SEVS.indexOf(a.sev) ? c : a), mine[0]);
+};
+
 const caseColumns = (marks: Record<string, Mark>, ran: boolean, last: Record<string, number>): ColumnDef<CaseGroup>[] => [
   { id: "mark", header: "처리", size: 92, accessorFn: (g) => stateOf(g, marks) ?? "", cell: ({ row }) => {
     const st = stateOf(row.original, marks);
@@ -271,7 +278,7 @@ export function Watch({ calls, ask, loading, marks, last: active, caseData, save
     >
       <div className="min-h-0 flex-1 border-t [&_[data-slot=table-container]]:scroll [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-y-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
         {loading && <div className="flex flex-col gap-2 p-4">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-8 rounded-md" />)}</div>}
-        {!loading && view !== "sources" && <DataTable columns={columns} rows={sessions.slice(0, ROWS)} onRow={(g) => open(first(g))} picked={(g) => g.calls.some(same)} dense />}
+        {!loading && view !== "sources" && <DataTable columns={columns} rows={sessions.slice(0, ROWS)} onRow={(g) => open(opening(g, active))} picked={(g) => g.calls.some(same)} dense />}
         {!loading && view === "sources" && <DataTable columns={SOURCES} rows={causes.slice(0, ROWS)} onRow={(s) => open(first(s.cases[0]))} picked={(s) => s.cases.some((g) => g.calls.some(same))} dense />}
       </div>
 
