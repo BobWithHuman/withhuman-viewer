@@ -26,9 +26,12 @@ pub(super) fn now_ms() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
-/// The machine a session came from: the client ID its hooks sent.
+/// The machine a session came from: by the client ID its hooks sent, so a machine's several
+/// client IDs are one ([`crate::machines`]).
 pub(super) fn machine_of(s: &Session) -> String {
-    s.client.clone().unwrap_or_else(|| NO_NAME.into())
+    s.client
+        .as_deref()
+        .map_or_else(|| NO_NAME.into(), crate::machines::name)
 }
 
 /// The machine a Call came from: by its serial or host name from the inventory, so a machine's
