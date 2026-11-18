@@ -101,11 +101,13 @@ export const pct = (p: number) => `${Math.round(p * 100)}%`;
 /** What decided a Call, in one name: what the second question asked, else the worst breach,
  * else the rule. */
 export const judgeLabel = (j: NonNullable<Step["judge"]>) =>
-  (j.stage === "2차 질문" && j.asked) || (j.worst && (WORST[j.worst] ?? j.worst)) || (j.rule && (RULE[j.rule] ?? j.rule)) || null;
+  (j.stage !== "1차 질문" && j.asked) || (j.worst && (WORST[j.worst] ?? j.worst)) || (j.rule && (RULE[j.rule] ?? j.rule)) || null;
 
 export function Judge({ j }: { j: NonNullable<Step["judge"]> }) {
   const at = j.score != null ? Math.min(1, Math.max(0, j.score)) : null;
-  const second = j.stage === "2차 질문";
+  // The first question's scale is how far the Call departs; a rule's on a path, how risky it is;
+  // the second question's, how likely.
+  const measure = j.stage === "1차 질문" || !j.stage ? "이탈" : j.rule?.startsWith("causal::") ? "위험" : "확률";
   const label = judgeLabel(j);
   return (
     <span className="grid gap-1.5">
@@ -119,7 +121,10 @@ export function Judge({ j }: { j: NonNullable<Step["judge"]> }) {
             <i className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-fg ring-2 ring-bg" style={{ left: pct(at) }} />
           </span>
           <span className="flex justify-between text-[10.5px] text-dim tabular-nums">
-            <span>{second ? "확률" : "이탈"} <b className="font-semibold text-fg/85">{pct(at)}</b></span>
+            <span>
+              {measure} <b className="font-semibold text-fg/85">{pct(at)}</b>
+              {j.without != null && <> · 지시 없으면 안 함 <b className={cx("font-semibold", j.without >= j.deny ? "text-block" : "text-fg/85")}>{pct(j.without)}</b></>}
+            </span>
             <span>{j.review > 0 && j.review < j.deny && `확인 ${pct(j.review)} · `}차단 {pct(j.deny)}</span>
           </span>
         </span>
