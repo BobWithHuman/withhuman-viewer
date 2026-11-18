@@ -2,6 +2,8 @@
 // line, a loop's body indented, a long pipe cut); arguments in JSON laid out; a path breaking
 // only where it divides, never inside a name.
 
+import { useState } from "react";
+
 /** One line of a command laid out as a script: how deep in a loop or branch it sits, a pipe it
  * goes on with, and the `&&` or `||` it ends with. */
 export type Line = { level: number; text: string; lead?: string; end?: string };
@@ -116,6 +118,34 @@ function Marked({ text, mark, first }: { text: string; mark?: string; first?: bo
     </>
   );
 }
+
+/** What a tool gave back, as it reads in a terminal: a script or a command's output line by line,
+ * each line's program set apart and a comment dimmed; any other text as it is. `lines` cuts it
+ * to its first lines, the rest behind a press. */
+export function Output({ text, shell, lines }: { text: string; shell: boolean; lines?: number }) {
+  const [all, setAll] = useState(false);
+  const rows = text.replace(/\s+$/, "").split("\n");
+  const cut = lines != null && !all && rows.length > lines;
+  const shown = cut ? rows.slice(0, lines) : rows;
+  return (
+    <div>
+      <pre className="m-0 rounded-md bg-box px-3 py-2.5 font-mono text-[11.5px] leading-[1.6] whitespace-pre-wrap text-[#e8e8e8] [overflow-wrap:anywhere] [tab-size:4]">
+        {shown.map((l, i) => (
+          <div key={i} className="min-h-[1.6em]">
+            {shell && /^\s*#/.test(l) ? <span className="text-dim">{l}</span> : shell ? <Words text={l} first /> : l}
+          </div>
+        ))}
+      </pre>
+      {lines != null && rows.length > lines && (
+        <button onClick={() => setAll((a) => !a)} className="mt-1 text-[11.5px] text-mut hover:text-fg">{all ? "접기" : `전체 ${rows.length}줄`}</button>
+      )}
+    </div>
+  );
+}
+
+/** Whether some words read as a script or a command's output: a `#!` line, or a tool that runs
+ * a shell. */
+export const scripted = (text: string, tool?: string) => /^#!/.test(text.trim()) || isShell(tool);
 
 export function Code({ text, mark, tool }: { text: string; mark?: string; tool?: string }) {
   const box = "m-0 rounded-md bg-box px-3 py-2.5 font-mono text-[11.5px] leading-[1.6] whitespace-pre-wrap text-[#e8e8e8] [overflow-wrap:anywhere] [tab-size:4]";

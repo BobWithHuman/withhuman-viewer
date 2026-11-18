@@ -3,7 +3,7 @@ import { ArrowUpRight, Bot, CircleDot, FileText, Laptop, Layers, MessageSquareTe
 import { createContext, useContext, type ReactNode } from "react";
 import { siClaude, siGithub, siNotion, siPostgresql } from "simple-icons";
 import type { Kind, Step, Svc, Verdict } from "./data";
-import { Code } from "./code";
+import { Code, Output, scripted } from "./code";
 import { isLong, LongText } from "./longtext";
 
 export const clock = (at: Step["at"]) => {
@@ -98,17 +98,18 @@ export const pct = (p: number) => `${Math.round(p * 100)}%`;
 /** Why the engine decided as it did: the question that decided it (the second, with what it
  * asked, when it was asked), the rule and the worst breach, and the score on its scale: allowed
  * below the review line, asked up to the deny line, refused above. */
+/** What decided a Call, in one name: what the second question asked, else the worst breach,
+ * else the rule. */
+export const judgeLabel = (j: NonNullable<Step["judge"]>) =>
+  (j.stage === "2차 질문" && j.asked) || (j.worst && (WORST[j.worst] ?? j.worst)) || (j.rule && (RULE[j.rule] ?? j.rule)) || null;
+
 export function Judge({ j }: { j: NonNullable<Step["judge"]> }) {
   const at = j.score != null ? Math.min(1, Math.max(0, j.score)) : null;
   const second = j.stage === "2차 질문";
+  const label = judgeLabel(j);
   return (
     <span className="grid gap-1.5">
-      <span className="flex flex-wrap items-center gap-1.5">
-        {j.stage && <span className="rounded bg-white/8 px-1.5 py-px text-[11.5px] font-semibold text-fg/90">{j.stage}</span>}
-        {second && j.asked && <span className="rounded bg-block/15 px-1.5 py-px text-[11.5px] text-block">{j.asked}</span>}
-        {j.rule && <span className="rounded bg-white/8 px-1.5 py-px text-[11.5px] text-fg" title={j.rule}>{RULE[j.rule] ?? j.rule}</span>}
-        {!second && j.worst && <span className="rounded bg-block/15 px-1.5 py-px text-[11.5px] text-block" title={j.worst}>{WORST[j.worst] ?? j.worst}</span>}
-      </span>
+      {label && <span className="justify-self-start rounded bg-block/15 px-1.5 py-px text-[11.5px] font-semibold text-block" title={[j.stage, j.rule].filter(Boolean).join(" · ")}>{label}</span>}
       {at != null && (
         <span className="grid gap-1">
           <span className="relative flex h-1.5 overflow-hidden rounded-full">
@@ -150,7 +151,7 @@ export function DetailBody({ s }: { s: Step }) {
         {s.detail.map(([k, v], i) => (
           <div key={i} className="contents">
             <dt className="text-mut">{k}</dt>
-            <dd className="m-0 min-w-0 text-fg/85 [overflow-wrap:anywhere]">{k === "판정" && s.verdict ? <span className={cx("rounded-md px-1.5 py-px text-[11px] font-semibold", VERDICT[s.verdict][1])}>{v}</span> : k === "규칙" ? <code className="font-mono text-[11px]">{v}</code> : v}</dd>
+            <dd className="m-0 min-w-0 text-fg/85 [overflow-wrap:break-word]">{k === "판정" && s.verdict ? <span className={cx("rounded-md px-1.5 py-px text-[11px] font-semibold", VERDICT[s.verdict][1])}>{v}</span> : k === "규칙" ? <code className="font-mono text-[11px]">{v}</code> : v}</dd>
           </div>
         ))}
       </dl>
@@ -184,7 +185,7 @@ function Told({ c }: { c: NonNullable<Step["catch"]> }) {
         )}
         {words && (isLong(words)
           ? <div className="px-1 py-1"><LongText label={c.name} text={words} /></div>
-          : <div className="px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap text-fg/85 [overflow-wrap:anywhere]">{words}</div>)}
+          : <Output text={words} shell={scripted(words, from?.type)} />)}
       </div>
     </div>
   );
