@@ -214,13 +214,28 @@ impl Backend {
                     .filter_map(at)
                     .max()
                     .map(|t| t - FACTS_OVERLAP_MS);
-                pg.call_facts(since).await.map(|fresh| {
+                // With what was kept, the IDs of the sessions there are now: a session removed
+                // from the store (or the store emptied) takes its kept Calls with it.
+                let (fresh, ids) = tokio::join!(pg.call_facts(since), async {
+                    match since {
+                        Some(_) => pg.session_ids().await.ok(),
+                        None => None,
+                    }
+                });
+                fresh.map(|fresh| {
                     let mut all = match fresh {
                         Value::Array(rows) => rows,
                         _ => Vec::new(),
                     };
                     if let Some(since) = since {
-                        all.extend(kept.into_iter().filter(|r| at(r).is_none_or(|t| t < since)));
+                        let there: Option<std::collections::HashSet<String>> =
+                            ids.map(|ids| ids.into_iter().collect());
+                        all.extend(kept.into_iter().filter(|r| {
+                            at(r).is_none_or(|t| t < since)
+                                && there.as_ref().is_none_or(|there| {
+                                    r["session"].as_str().is_some_and(|s| there.contains(s))
+                                })
+                        }));
                     }
                     all.sort_by_key(|r| std::cmp::Reverse(at(r)));
                     all.truncate(FACTS_KEPT);

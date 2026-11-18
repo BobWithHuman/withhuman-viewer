@@ -48,9 +48,14 @@ pub struct Facts(
 /// Reads the Calls on launch, on reload and after the connection changes.
 pub fn use_facts_loader(backend: Arc<Backend>, state: AppState) {
     let mut facts = use_context_provider(|| Facts(Signal::new(None), Signal::new(None)));
+    // The presses of 다시 읽기 already answered.
+    let mut answered = use_signal(|| 0u32);
     use_effect(move || {
-        // The reload button reads every Call again; a launch or a new connection reads what is new.
-        let full = (state.reload)() > 0;
+        // 다시 읽기 reads every Call again; a launch, live, or a new connection reads what is new.
+        let _ = (state.reload)();
+        let pressed = (state.full)();
+        let full = pressed > *answered.peek();
+        answered.set(pressed);
         let _ = (state.public)();
         let b = backend.clone();
         spawn(async move {

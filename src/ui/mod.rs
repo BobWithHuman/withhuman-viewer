@@ -242,6 +242,9 @@ pub struct AppState {
     pub check_updates: Signal<u32>,
     /// Bumped to read the sessions, the graph, or fit the canvas again.
     pub reload: Signal<u32>,
+    /// Presses of 다시 읽기 (the rail's button, the menu): every Call read again, where a reload
+    /// alone (live, a new connection) reads only what is new.
+    pub full: Signal<u32>,
     pub refresh: Signal<u32>,
     pub fit: Signal<u32>,
 }
@@ -311,6 +314,7 @@ pub fn App() -> Element {
         inspector_width: Signal::new(width),
         check_updates: Signal::new(0),
         reload: Signal::new(0),
+        full: Signal::new(0),
         refresh: Signal::new(0),
         fit: Signal::new(0),
     });
@@ -478,6 +482,7 @@ fn use_menu(backend: Arc<Backend>, mut state: AppState) {
         menu::SETTINGS => state.settings_open.toggle(),
         menu::RELOAD => {
             state.reload += 1;
+            state.full += 1;
             state.refresh += 1;
         }
         menu::SEARCH => {
@@ -871,7 +876,7 @@ fn Rail() -> Element {
                 {icon(icons::MONITOR_SMARTPHONE)}
             }
             i { class: "sep" }
-            button { title: "다시 읽기", onclick: move |_| state.reload += 1,
+            button { title: "다시 읽기", onclick: move |_| { state.reload += 1; state.full += 1; },
                 {icon(icons::REFRESH_CW)}
             }
             button {
