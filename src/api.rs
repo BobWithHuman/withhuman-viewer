@@ -288,9 +288,9 @@ impl Backend {
     pub async fn inventory(&self) -> Result<Option<crate::model::Inventory>, String> {
         let settings = self.current();
         if settings.demo {
-            return Ok(Some(
-                self.demo.lock().expect("demo lock").inventory(now_ms()),
-            ));
+            let inventory = self.demo.lock().expect("demo lock").inventory(now_ms());
+            crate::machines::learn(&inventory.clients);
+            return Ok(Some(inventory));
         }
         if !crate::pg::is_postgres(&settings) {
             return Ok(None);
@@ -303,7 +303,11 @@ impl Backend {
         .await;
         match value {
             Ok(Value::Null) => Ok(None),
-            other => typed(other).map(Some),
+            other => typed::<crate::model::Inventory>(other).map(|inventory| {
+                // The pages name a client ID's machine from what the inventory says of it.
+                crate::machines::learn(&inventory.clients);
+                Some(inventory)
+            }),
         }
     }
 

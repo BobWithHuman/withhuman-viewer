@@ -31,8 +31,12 @@ pub(super) fn machine_of(s: &Session) -> String {
     s.client.clone().unwrap_or_else(|| NO_NAME.into())
 }
 
+/// The machine a Call came from: by its serial or host name from the inventory, so a machine's
+/// several client IDs are one ([`crate::machines`]).
 pub(super) fn machine_of_fact(f: &CallFact) -> String {
-    f.client.clone().unwrap_or_else(|| NO_NAME.into())
+    f.client
+        .as_deref()
+        .map_or_else(|| NO_NAME.into(), crate::machines::name)
 }
 
 /// The last part of a working folder, whether it uses / or \.
