@@ -136,8 +136,8 @@ export function CaseView({ call, group, data, marks, blocked, saved, ask, onCall
           <ToggleGroup type="single" variant="outline" size="sm" spacing={0} value={shown} onValueChange={(v) => { setPressed(v || null); ask({ do: "triage", sessions: group.sessions, state: v || null }); }}>
             {MARKS.map((m) => <ToggleGroupItem key={m} value={m} className={cn("px-2.5 text-[12.5px]", m === "attack" && "data-[state=on]:bg-deny/20 data-[state=on]:text-deny", m === "benign" && "data-[state=on]:bg-allow/20 data-[state=on]:text-allow", m === "reviewing" && "data-[state=on]:bg-review/20 data-[state=on]:text-review", m === "closed" && "data-[state=on]:bg-white/15 data-[state=on]:text-foreground")}>{MARK[m].label}</ToggleGroupItem>)}
           </ToggleGroup>
-          <Confirm title="단말 멈춤" what={call.machine} label="멈추기" reason onDo={(reason) => ask({ do: "stop_device", device: call.machine, reason, session: call.session, seq: call.seq })}>
-            <Button variant="outline" size="sm" className="border-deny/50 text-deny hover:bg-deny/15 hover:text-deny"><OctagonX />단말 멈춤</Button>
+          <Confirm title="단말 차단" what={call.machine} label="차단하기" reason onDo={(reason) => ask({ do: "stop_device", device: call.machine, reason, session: call.session, seq: call.seq })}>
+            <Button variant="outline" size="sm" className="border-deny/50 text-deny hover:bg-deny/15 hover:text-deny"><OctagonX />단말 차단</Button>
           </Confirm>
           <Button variant="outline" size="sm" onClick={evidence}><Download />증거</Button>
           <Button size="sm" onClick={() => ask({ do: "open", session: call.session, seq: call.seq })}>기록<ArrowUpRight /></Button>

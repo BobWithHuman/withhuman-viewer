@@ -323,12 +323,12 @@ pub fn Main() -> Element {
                                 (Some(r), Some(at)) => format!("{r} · {at}"),
                                 (Some(r), None) => r,
                                 (None, Some(at)) => at,
-                                (None, None) => "보안 현황에서 멈춤".to_owned(),
+                                (None, None) => "보안 현황에서 차단".to_owned(),
                             };
                             spawn(async move {
                                 saved.set(Some(match backend.stop_device(&device, true, &by, &why).await {
-                                    Ok(()) => format!("단말 멈춤 · {device}"),
-                                    Err(e) => format!("단말 멈춤 실패 · {e}"),
+                                    Ok(()) => format!("단말 차단 · {device}"),
+                                    Err(e) => format!("단말 차단 실패 · {e}"),
                                 }));
                             });
                         }
