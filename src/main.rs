@@ -20,6 +20,9 @@ mod graph;
 #[cfg(not(feature = "admin"))]
 mod hooks;
 mod layout;
+// Each client ID's machine, by serial, else host name, from the inventory.
+#[cfg_attr(not(feature = "admin"), allow(dead_code))]
+mod machines;
 mod menu;
 mod metro;
 mod model;
