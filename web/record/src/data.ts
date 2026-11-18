@@ -22,7 +22,19 @@ export interface Step {
   /** A prompt the engine judged written from nothing of the turn before: a new request. */
   fresh?: boolean;
   /** What the engine caught here, and how sure. */
-  catch?: { name: string; sub: string; score: number };
+  catch?: {
+    name: string; sub: string; score: number;
+    /** The paragraph of the result that told it, in its own words. */ para?: string;
+    /** The Call whose result it was. */ by?: number;
+  };
+  /** How the engine judged a Call: the rule, the worst of what it breaks, its deviation score
+   * and the review and deny thresholds it was held to, and what it was linked to. */
+  judge?: {
+    /** The question that decided it: the first (deviation), the second (asked against the
+     * prompt, with what it asked), or a rule. */
+    stage?: "1차 질문" | "2차 질문" | "규칙"; asked?: string;
+    rule?: string | null; worst?: string | null; score?: number | null; review: number; deny: number; link?: string;
+  } | null;
   /** For a fold of quiet steps: what is inside. */
   inside?: string[];
   /** Laid out above (-1) or below (1) the main line, for a fork. */

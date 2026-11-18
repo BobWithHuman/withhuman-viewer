@@ -56,20 +56,55 @@ pub fn head_script() -> String {
 pub fn RecordGraph() -> Element {
     let state = use_context::<AppState>();
     let backend = use_context::<std::sync::Arc<crate::api::Backend>>();
+    // The paragraph of a tool result each Call was traced to, by step: what told it, in the
+    // result's own words (the store keeps a result's paragraphs apart from the session's graph).
+    let evidence = use_resource(move || {
+        let backend = backend.clone();
+        let wants: Vec<(i64, i64, i64)> = match &*state.graph.read() {
+            Load::Ready(model) => unfolded(model)
+                .stations
+                .iter()
+                .filter_map(|st| {
+                    st.source
+                        .as_ref()
+                        .and_then(|s| Some((st.seq, s.result, s.paragraph?)))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let session = (state.current)();
+        async move {
+            let mut out = std::collections::HashMap::<String, String>::new();
+            let Some(session) = session else { return out };
+            let mut seen = std::collections::HashMap::new();
+            for (step, result, paragraph) in wants {
+                if let std::collections::hash_map::Entry::Vacant(slot) = seen.entry(result) {
+                    slot.insert(backend.node(&session, result).await.ok().flatten());
+                }
+                let text = seen
+                    .get(&result)
+                    .and_then(Option::as_ref)
+                    .and_then(|d| d.paragraphs.iter().find(|p| p.index == Some(paragraph)))
+                    .and_then(|p| p.text.clone());
+                if let Some(text) = text.filter(|t| !t.trim().is_empty()) {
+                    out.insert(format!("s{step}"), text);
+                }
+            }
+            out
+        }
+    });
     // The machines' host names, from the inventory, so a session's machine is named as its list
     // names it rather than by its client ID.
-    let hosts = use_resource({
-        let backend = backend.clone();
-        move || {
-            let b = backend.clone();
-            let _ = (state.reload)();
-            async move {
-                let inv = b.inventory().await.ok().flatten().unwrap_or_default();
-                inv.clients
-                    .into_iter()
-                    .filter_map(|c| Some((c.client_id, c.hostname?)))
-                    .collect::<std::collections::HashMap<String, String>>()
-            }
+    let inventory = use_context::<std::sync::Arc<crate::api::Backend>>();
+    let hosts = use_resource(move || {
+        let b = inventory.clone();
+        let _ = (state.reload)();
+        async move {
+            let inv = b.inventory().await.ok().flatten().unwrap_or_default();
+            inv.clients
+                .into_iter()
+                .filter_map(|c| Some((c.client_id, c.hostname?)))
+                .collect::<std::collections::HashMap<String, String>>()
         }
     });
     let data = use_memo(move || {
@@ -86,6 +121,17 @@ pub fn RecordGraph() -> Element {
         if let Some(client) = session.as_ref().and_then(|s| s.client.as_deref()) {
             let host = hosts.read().as_ref().and_then(|h| h.get(client).cloned());
             out["session"]["device"] = json!(host.unwrap_or_else(|| short_client(client)));
+        }
+        // What told each Call, once read.
+        if let (Some(found), Some(steps)) = (&*evidence.read(), out["steps"].as_array_mut()) {
+            for step in steps {
+                let Some(text) = step["id"].as_str().and_then(|id| found.get(id)) else {
+                    continue;
+                };
+                if step["catch"].is_object() {
+                    step["catch"]["para"] = json!(text);
+                }
+            }
         }
         // The Call opened from another page (민감 정보, 메인): the step it stands in, to open on.
         if let Selection::Node(seq) = (state.selected)() {
@@ -192,7 +238,59 @@ fn clip(text: &str, n: usize) -> String {
     }
 }
 
-fn station_step(st: &Station) -> Value {
+/// How the engine judged a Call, from its trace: the rule it decided by, the worst of what the
+/// Call breaks, its deviation score and the thresholds it was held to, and what it was linked to.
+fn judgement(model: &Model, seq: i64) -> Value {
+    let Some(node) = model
+        .nodes
+        .iter()
+        .find(|n| n.kind == "Call" && n.seq() == seq)
+    else {
+        return Value::Null;
+    };
+    let trace = crate::model::parse_json(node.props.get("trace_json"));
+    let link = trace["link"].as_str().unwrap_or("request");
+    let (review, deny) = trace["thresholds"]["review"]
+        .as_f64()
+        .zip(trace["thresholds"]["deny"].as_f64())
+        .unwrap_or_else(|| super::trace::default_thresholds(link));
+    let d = &trace["deviation"];
+    // The second question decides where it was asked: its own score against its cut, allowed
+    // below (held, after a first-question breach) and denied at or above.
+    let c = &trace["check"];
+    let second = c["unwanted"].as_f64().zip(super::trace::check_cut(
+        c,
+        super::trace::exchange(&trace, "check"),
+    ));
+    if let Some((unwanted, cut)) = second {
+        let held = c["breach"].as_bool() == Some(true);
+        return json!({
+            "stage": "2차 질문",
+            "asked": match c["branch"].as_str() {
+                Some("file") => "요청 밖 내용 추가",
+                Some("run") => "요청 밖 코드 실행",
+                _ => "요청 밖 목적",
+            },
+            "rule": node.props.get("decision_rule"),
+            "worst": d["worst"].as_str().filter(|w| *w != "none"),
+            "score": unwanted,
+            "review": if held { 0.0 } else { cut },
+            "deny": cut,
+            "link": link,
+        });
+    }
+    json!({
+        "stage": if c["branch"] == "safeguard" { "규칙" } else { "1차 질문" },
+        "rule": node.props.get("decision_rule"),
+        "worst": d["worst"].as_str().filter(|w| *w != "none"),
+        "score": d["score"].as_f64(),
+        "review": review,
+        "deny": deny,
+        "link": link,
+    })
+}
+
+fn station_step(model: &Model, st: &Station) -> Value {
     let mcp = mcp_parts(&st.tool);
     let decision = st.decision.as_deref();
     let decided = match decision {
@@ -240,6 +338,8 @@ fn station_step(st: &Station) -> Value {
             "name": if src.error { "도구 오류" } else { "도구 응답" },
             "sub": src.quote.clone().unwrap_or_default(),
             "score": (src.probability * 100.0).round() as i64,
+            // The Call whose result it was, to open from the card.
+            "by": src.by,
         })
     });
     json!({
@@ -250,6 +350,7 @@ fn station_step(st: &Station) -> Value {
         "at": st.at,
         "svc": mcp.and_then(|(server, _)| logo_of(server)),
         "verdict": verdict(decision),
+        "judge": judgement(model, st.seq),
         "undecided": decision.is_none(),
         "catch": catch,
         "lane": lane(st.line),
@@ -296,7 +397,7 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
         ));
     }
     for st in &m.stations {
-        items.push((st.seq, lane(st.line), station_step(st)));
+        items.push((st.seq, lane(st.line), station_step(model, st)));
     }
     // The agent's messages as steps of their own: each turn's answer (its last message), and
     // any a later prompt was written from; the session's last is the answer already.
