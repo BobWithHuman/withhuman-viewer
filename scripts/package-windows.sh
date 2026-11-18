@@ -6,8 +6,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
-config=target/packager-windows.json
-mkdir -p target
+# At the root: cargo-packager reads the paths in it from the file's own folder.
+config=packager-windows.json
+trap 'rm -f "$config"' EXIT
 cat > "$config" <<JSON
 {
   "name": "withhuman-viewer",
