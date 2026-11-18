@@ -274,6 +274,43 @@ pub fn HookPage() -> Element {
         let _ = looked();
         hooks::installed(&state.prefs.read().hook_folders)
     });
+    let machine = use_hook(hooks::this_machine);
+    // The engine checked: the one the hooks use, or one typed to try (`check`).
+    let mut try_server = use_signal(|| None::<String>);
+    let health = use_resource(move || {
+        let _ = looked();
+        let server = try_server().unwrap_or_else(|| state.public.read().engine_api.clone());
+        async move {
+            let result = hooks::check_engine(&server).await;
+            json!({
+                "server": server,
+                "ok": result.is_ok(),
+                "ms": result.as_ref().ok().map(|ms| *ms as u64),
+                "error": result.err(),
+            })
+        }
+    });
+    // What the engine keeps of this machine: when it registered and was last heard from, its
+    // serial, its EDR agent, and whether the security team blocked it.
+    let record = use_resource({
+        let backend = backend.clone();
+        move || {
+            let b = backend.clone();
+            let _ = looked();
+            async move {
+                let id = hooks::device_id()?;
+                let inventory = b.inventory().await.ok().flatten()?;
+                let d = inventory.clients.into_iter().find(|c| c.client_id == id)?;
+                Some(json!({
+                    "registered_at": d.registered_at,
+                    "last_seen": d.last_seen,
+                    "serial": d.serial.is_some(),
+                    "edr": d.edr_status,
+                    "stopped": d.stopped_at.map(|at| json!({"at": at, "by": d.stopped_by, "reason": d.stop_reason})),
+                }))
+            }
+        }
+    });
     let data = use_memo(move || {
         let _ = looked();
         let installs: Vec<Value> = found()
@@ -284,10 +321,13 @@ pub fn HookPage() -> Element {
                     hooks::Where::Everywhere => ("all", i.file.display().to_string()),
                     hooks::Where::Folder(f) => ("folder", f.display().to_string()),
                 };
-                json!({"at": at, "place": place, "file": i.file.display().to_string(), "engine": i.engine, "removable": true})
+                json!({"at": at, "place": place, "file": i.file.display().to_string(), "engine": i.engine, "installed_at": i.at_ms, "removable": true})
             })
             .collect();
         json!({
+            "machine": {"name": machine.0, "os": machine.1},
+            "health": health.read().clone(),
+            "record": record.read().clone().flatten(),
             "device": hooks::device_id(),
             "engine": state.public.read().engine_api,
             "installs": installs,
@@ -311,6 +351,9 @@ pub fn HookPage() -> Element {
             );
             while let Ok(m) = eval.recv::<Value>().await {
                 match m["do"].as_str() {
+                    Some("check") => {
+                        try_server.set(m["server"].as_str().map(str::to_owned));
+                    }
                     Some("pick") => {
                         spawn(async move {
                             if let Some(f) = rfd::AsyncFileDialog::new().pick_folder().await {
@@ -350,13 +393,8 @@ pub fn HookPage() -> Element {
                                 }
                             }
                             note.set(Some(match done {
-                                Ok(d) => (
-                                    true,
-                                    match d.client_id {
-                                        Some(id) => format!("설치됨 · 기기 {id}"),
-                                        None => "설치됨".into(),
-                                    },
-                                ),
+                                // The machine's ID shows in its card above.
+                                Ok(_) => (true, "설치됨".into()),
                                 Err(e) => (false, e),
                             }));
                             busy.set(None);
