@@ -27,29 +27,88 @@ pub struct Done {
     pub client_id: Option<String>,
 }
 
-/// The places Python is looked for after `PATH`: an app opened from the Finder gets a short one.
-const PYTHON_DIRS: [&str; 4] = [
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
-    "/Library/Frameworks/Python.framework/Versions/Current/bin",
-    "/usr/bin",
-];
+/// A program to run, with no console window flashing up for it on Windows.
+fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
 
-/// A Python 3.8 or later the setup can run with.
-fn python() -> Result<PathBuf, String> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let dirs = std::env::split_paths(&path).chain(PYTHON_DIRS.iter().map(PathBuf::from));
-    for dir in dirs {
-        let candidate = dir.join("python3");
-        if !candidate.is_file() {
-            continue;
-        }
-        let ok = Command::new(&candidate)
+/// The places Python is looked for after `PATH`: an app opened from the Finder gets a short one;
+/// on Windows, where python.org's installer puts it, for the user and for everyone.
+fn python_dirs() -> Vec<PathBuf> {
+    if !cfg!(windows) {
+        return [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/Library/Frameworks/Python.framework/Versions/Current/bin",
+            "/usr/bin",
+        ]
+        .map(PathBuf::from)
+        .to_vec();
+    }
+    let bases = [
+        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs/Python")),
+        std::env::var_os("ProgramFiles").map(PathBuf::from),
+    ];
+    let mut dirs: Vec<PathBuf> = bases
+        .into_iter()
+        .flatten()
+        .filter_map(|base| std::fs::read_dir(base).ok())
+        .flat_map(|entries| entries.flatten().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("Python3"))
+        })
+        .collect();
+    // The newest first: Python312 before Python39.
+    dirs.sort_by_key(|p| {
+        let n = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        std::cmp::Reverse(n[6..].parse::<u32>().unwrap_or(0))
+    });
+    dirs
+}
+
+/// Whether `candidate` is a Python 3.8 or later. Windows' stand-in that offers the Store's
+/// Python fails this, as it runs nothing.
+fn usable(candidate: &Path) -> bool {
+    candidate.is_file()
+        && command(candidate)
             .args(["-c", "import sys; sys.exit(sys.version_info < (3, 8))"])
             .output()
-            .is_ok_and(|o| o.status.success());
-        if ok {
-            return Ok(candidate);
+            .is_ok_and(|o| o.status.success())
+}
+
+/// A Python 3.8 or later the setup can run with: on `PATH` or where installers put it, else on
+/// Windows the one the Python launcher (`py -3`) names.
+fn python() -> Result<PathBuf, String> {
+    let names: &[&str] = if cfg!(windows) {
+        &["python.exe", "python3.exe"]
+    } else {
+        &["python3"]
+    };
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    for dir in std::env::split_paths(&path).chain(python_dirs()) {
+        if let Some(found) = names.iter().map(|n| dir.join(n)).find(|c| usable(c)) {
+            return Ok(found);
+        }
+    }
+    if cfg!(windows) {
+        let named = command("py")
+            .args(["-3", "-c", "import sys; print(sys.executable)"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
+        if let Some(found) = named.filter(|p| usable(p)) {
+            return Ok(found);
         }
     }
     Err("Python 3.8 이상을 찾지 못했습니다.".into())
@@ -155,19 +214,21 @@ pub fn reset(folders: &[String]) -> Result<(), String> {
 fn setup(args: &[String], admin: bool) -> Result<String, String> {
     let python = python()?;
     let dir = files()?;
-    let output = if admin {
+    let ran = if admin {
         as_administrator(&python, &dir.join("configure.py"), args)?
     } else {
-        Command::new(python)
+        command(python)
             .arg(dir.join("configure.py"))
             .args(args)
+            .env("PYTHONIOENCODING", "utf-8")
             .output()
+            .map(Ran::from)
             .map_err(|e| format!("설치를 실행하지 못했습니다: {e}"))?
     };
-    // AppleScript hands back a script's lines ended by `\r`.
-    let out = String::from_utf8_lossy(&output.stdout).replace('\r', "\n");
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
+    // AppleScript hands back a script's lines ended by `\r`; Windows ends them with `\r\n`.
+    let out = ran.out.replace("\r\n", "\n").replace('\r', "\n");
+    if !ran.ok {
+        let err = ran.err;
         let said = err
             .lines()
             .chain(out.lines())
@@ -179,7 +240,25 @@ fn setup(args: &[String], admin: bool) -> Result<String, String> {
     Ok(out)
 }
 
+/// What a run of the setup ended with: whether it succeeded, and what it printed and said.
+struct Ran {
+    ok: bool,
+    out: String,
+    err: String,
+}
+
+impl From<std::process::Output> for Ran {
+    fn from(o: std::process::Output) -> Self {
+        Ran {
+            ok: o.status.success(),
+            out: String::from_utf8_lossy(&o.stdout).into_owned(),
+            err: String::from_utf8_lossy(&o.stderr).into_owned(),
+        }
+    }
+}
+
 /// A shell word: `value` in single quotes, its own single quotes kept.
+#[cfg_attr(windows, allow(dead_code))]
 fn quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -188,13 +267,10 @@ fn quoted(value: &str) -> String {
 /// … `with administrator privileges`). The user who asked is passed on (`SUDO_USER`), so the
 /// device keeps the client ID their own setup gave it. The command goes in a script file, so
 /// nothing in it needs AppleScript's quoting.
-fn as_administrator(
-    python: &Path,
-    configure: &Path,
-    args: &[String],
-) -> Result<std::process::Output, String> {
+#[cfg(not(windows))]
+fn as_administrator(python: &Path, configure: &Path, args: &[String]) -> Result<Ran, String> {
     if !cfg!(target_os = "macos") {
-        return Err("기기 전체 설치는 macOS에서만 앱으로 할 수 있습니다.".into());
+        return Err("기기 전체 설치는 macOS와 Windows에서만 앱으로 할 수 있습니다.".into());
     }
     let user = std::env::var("USER").unwrap_or_default();
     let mut line = format!(
@@ -223,7 +299,73 @@ fn as_administrator(
     if String::from_utf8_lossy(&output.stderr).contains("-128") {
         return Err("관리자 암호 입력을 취소했습니다.".into());
     }
-    Ok(output)
+    Ok(output.into())
+}
+
+/// A word of a Windows batch file: in double quotes, a `%` doubled so it is not read as a
+/// variable. A path or URL holds no double quote.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn batch_word(value: &str) -> String {
+    format!("\"{}\"", value.replace('%', "%%"))
+}
+
+/// The batch file that runs the setup with `args`, its output and errors to `out` and `err`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn batch(python: &Path, configure: &Path, args: &[String], out: &Path, err: &Path) -> String {
+    let mut line = format!(
+        "{} {}",
+        batch_word(&python.display().to_string()),
+        batch_word(&configure.display().to_string())
+    );
+    for arg in args {
+        line.push(' ');
+        line.push_str(&batch_word(arg));
+    }
+    format!(
+        "@echo off\r\nset PYTHONIOENCODING=utf-8\r\n{line} > {} 2> {}\r\nexit /b %ERRORLEVEL%\r\n",
+        batch_word(&out.display().to_string()),
+        batch_word(&err.display().to_string())
+    )
+}
+
+/// Runs the setup as an administrator on Windows: a batch file started with `RunAs`, which
+/// shows the UAC prompt. An elevated process cannot write to this one's pipes, so the batch
+/// file writes what the setup printed and said to files beside it, read back here.
+#[cfg(windows)]
+fn as_administrator(python: &Path, configure: &Path, args: &[String]) -> Result<Ran, String> {
+    let script = configure.with_file_name("as-administrator.cmd");
+    let out = configure.with_file_name("as-administrator.out");
+    let err = configure.with_file_name("as-administrator.err");
+    let _ = std::fs::remove_file(&out);
+    let _ = std::fs::remove_file(&err);
+    std::fs::write(&script, batch(python, configure, args, &out, &err))
+        .map_err(|e| format!("설치 파일을 쓰지 못했습니다: {e}"))?;
+    // Refusing the UAC prompt throws; that is told apart by exit code 1223, Windows' own for a
+    // cancelled operation.
+    let elevate = "try { $p = Start-Process -FilePath $env:WH_SCRIPT -Verb RunAs -Wait -PassThru \
+                   -WindowStyle Hidden -ErrorAction Stop; exit $p.ExitCode } catch { exit 1223 }";
+    let status = command("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", elevate])
+        .env("WH_SCRIPT", &script)
+        .status()
+        .map_err(|e| format!("관리자 권한으로 실행하지 못했습니다: {e}"))?;
+    let _ = std::fs::remove_file(&script);
+    let read = |path: &Path| {
+        let text = std::fs::read(path)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .ok();
+        let _ = std::fs::remove_file(path);
+        text
+    };
+    let (printed, said) = (read(&out), read(&err));
+    if status.code() == Some(1223) && printed.is_none() {
+        return Err("관리자 권한 확인을 취소했습니다.".into());
+    }
+    Ok(Ran {
+        ok: status.success(),
+        out: printed.unwrap_or_default(),
+        err: said.unwrap_or_default(),
+    })
 }
 
 /// This device's client ID: the one a device-wide setup keeps, else the user's own setup's.
@@ -255,7 +397,7 @@ fn device_folder() -> PathBuf {
 /// its system with the version.
 pub fn this_machine() -> (String, String) {
     let said = |program: &str, args: &[&str]| {
-        Command::new(program)
+        command(program)
             .args(args)
             .output()
             .ok()
@@ -263,14 +405,30 @@ pub fn this_machine() -> (String, String) {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
             .filter(|s| !s.is_empty())
     };
-    let name = said("scutil", &["--get", "ComputerName"])
-        .or_else(|| said("hostname", &[]))
-        .unwrap_or_else(|| "이 기기".into());
+    let name = if cfg!(target_os = "macos") {
+        said("scutil", &["--get", "ComputerName"])
+    } else {
+        std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty())
+    }
+    .or_else(|| said("hostname", &[]))
+    .unwrap_or_else(|| "이 기기".into());
     let os = match std::env::consts::OS {
         "macos" => format!(
             "macOS {}",
             said("sw_vers", &["-productVersion"]).unwrap_or_default()
         ),
+        // `Microsoft Windows 11 Pro`, its maker left off.
+        "windows" => said(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance Win32_OperatingSystem).Caption",
+            ],
+        )
+        .map(|c| c.trim_start_matches("Microsoft ").to_owned())
+        .unwrap_or_else(|| "Windows".into()),
         other => other.to_owned(),
     };
     (name, os.trim().to_owned())
@@ -465,6 +623,22 @@ mod tests {
         );
         assert!(arguments(Scope::Folder, None, "http://e", None, false).is_err());
         assert!(arguments(Scope::Everywhere, None, " ", None, false).is_err());
+    }
+
+    #[test]
+    fn writes_the_batch_file_that_runs_the_setup_as_an_administrator() {
+        let script = batch(
+            Path::new("C:\\Python312\\python.exe"),
+            Path::new("C:\\Users\\a b\\client\\configure.py"),
+            &["--reset".into(), "C:\\work\\100% app".into()],
+            Path::new("C:\\t\\o"),
+            Path::new("C:\\t\\e"),
+        );
+        assert!(script.contains(
+            "\"C:\\Python312\\python.exe\" \"C:\\Users\\a b\\client\\configure.py\" \"--reset\" \"C:\\work\\100%% app\" > \"C:\\t\\o\" 2> \"C:\\t\\e\"\r\n"
+        ));
+        assert!(script.starts_with("@echo off\r\n"));
+        assert!(script.ends_with("exit /b %ERRORLEVEL%\r\n"));
     }
 
     #[test]
