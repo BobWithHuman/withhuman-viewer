@@ -16,6 +16,9 @@ pub enum Scope {
     Folder,
     /// Every folder of this user (`~/.claude/settings.json`).
     Everywhere,
+    /// Every user and folder of the device, in Claude Code's managed settings, with no other
+    /// hooks beside them (`--managed-hooks-only`); installed with an administrator's password.
+    Device,
 }
 
 /// What a setup ended with: the device's client ID, when it printed one.
@@ -78,9 +81,13 @@ fn arguments(
         match scope {
             Scope::Folder => "project",
             Scope::Everywhere => "user",
+            Scope::Device => "managed",
         }
         .to_owned(),
     ];
+    if scope == Scope::Device && !uninstall {
+        args.push("--managed-hooks-only".into());
+    }
     if scope == Scope::Folder {
         let folder = folder.ok_or("폴더를 골라 주세요.")?;
         args.push("--project".into());
@@ -96,7 +103,11 @@ fn arguments(
     }
     args.push("--server".into());
     args.push(server.to_owned());
-    if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
+    // A device's setup is for every user: each keeps their own key.
+    if let Some(key) = key
+        .map(str::trim)
+        .filter(|k| !k.is_empty() && scope != Scope::Device)
+    {
         args.push("--key".into());
         args.push(key.to_owned());
     }
@@ -123,12 +134,17 @@ pub fn run(
     let args = arguments(scope, folder, server, key, uninstall)?;
     let python = python()?;
     let dir = files()?;
-    let output = Command::new(python)
-        .arg(dir.join("configure.py"))
-        .args(&args)
-        .output()
-        .map_err(|e| format!("설치를 실행하지 못했습니다: {e}"))?;
-    let out = String::from_utf8_lossy(&output.stdout);
+    let output = if scope == Scope::Device {
+        as_administrator(&python, &dir.join("configure.py"), &args)?
+    } else {
+        Command::new(python)
+            .arg(dir.join("configure.py"))
+            .args(&args)
+            .output()
+            .map_err(|e| format!("설치를 실행하지 못했습니다: {e}"))?
+    };
+    // AppleScript hands back a script's lines ended by `\r`.
+    let out = String::from_utf8_lossy(&output.stdout).replace('\r', "\n");
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
         let said = err
@@ -144,13 +160,88 @@ pub fn run(
     })
 }
 
-/// This device's client ID, from an earlier setup.
+/// A shell word: `value` in single quotes, its own single quotes kept.
+fn quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Runs the setup as root, asking for an administrator's password as macOS does (`osascript`
+/// … `with administrator privileges`). The user who asked is passed on (`SUDO_USER`), so the
+/// device keeps the client ID their own setup gave it. The command goes in a script file, so
+/// nothing in it needs AppleScript's quoting.
+fn as_administrator(
+    python: &Path,
+    configure: &Path,
+    args: &[String],
+) -> Result<std::process::Output, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("기기 전체 설치는 macOS에서만 앱으로 할 수 있습니다.".into());
+    }
+    let user = std::env::var("USER").unwrap_or_default();
+    let mut line = format!(
+        "SUDO_USER={} {} {}",
+        quoted(&user),
+        quoted(&python.display().to_string()),
+        quoted(&configure.display().to_string())
+    );
+    for arg in args {
+        line.push(' ');
+        line.push_str(&quoted(arg));
+    }
+    let script = configure.with_file_name("as-administrator.sh");
+    std::fs::write(&script, format!("#!/bin/sh\n{line}\n"))
+        .map_err(|e| format!("설치 파일을 쓰지 못했습니다: {e}"))?;
+    let apple = format!(
+        "do shell script \"/bin/sh \" & quoted form of \"{}\" with administrator privileges",
+        script.display()
+    );
+    let output = Command::new("osascript")
+        .args(["-e", &apple])
+        .output()
+        .map_err(|e| format!("관리자 권한으로 실행하지 못했습니다: {e}"))?;
+    let _ = std::fs::remove_file(&script);
+    // Cancelling the password prompt is error -128.
+    if String::from_utf8_lossy(&output.stderr).contains("-128") {
+        return Err("관리자 암호 입력을 취소했습니다.".into());
+    }
+    Ok(output)
+}
+
+/// This device's client ID: the one a device-wide setup keeps, else the user's own setup's.
 pub fn device_id() -> Option<String> {
-    let path = dirs::home_dir()?.join(".config/withhuman/client-id");
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
+    let mut files = vec![device_folder().join("client-id")];
+    if let Some(home) = dirs::home_dir() {
+        files.push(home.join(".config/withhuman/client-id"));
+    }
+    files.into_iter().find_map(|path| {
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+    })
+}
+
+/// Where a device-wide setup keeps the hook and the device's client ID, by system.
+fn device_folder() -> PathBuf {
+    PathBuf::from(if cfg!(target_os = "macos") {
+        "/Library/Application Support/WithHuman"
+    } else if cfg!(windows) {
+        "C:\\Program Files\\WithHuman"
+    } else {
+        "/opt/withhuman"
+    })
+}
+
+/// The sessions of this machine alone: those its hooks sent with its client ID. None without a
+/// setup on this machine.
+pub fn mine(sessions: Vec<crate::model::Session>) -> Vec<crate::model::Session> {
+    let Some(id) = device_id() else {
+        return Vec::new();
+    };
+    sessions
+        .into_iter()
+        .filter(|s| s.client.as_deref() == Some(id.as_str()))
+        .collect()
 }
 
 /// Where a WithHuman setup was found.
@@ -279,8 +370,29 @@ mod tests {
             arguments(Scope::Everywhere, None, "", None, true).unwrap(),
             ["--scope", "user", "--uninstall"]
         );
+        // The device's setup runs no other hooks beside it, and takes no one's key.
+        assert_eq!(
+            arguments(Scope::Device, None, "http://e", Some("whk_x"), false).unwrap(),
+            [
+                "--scope",
+                "managed",
+                "--managed-hooks-only",
+                "--server",
+                "http://e"
+            ]
+        );
+        assert_eq!(
+            arguments(Scope::Device, None, "", None, true).unwrap(),
+            ["--scope", "managed", "--uninstall"]
+        );
         assert!(arguments(Scope::Folder, None, "http://e", None, false).is_err());
         assert!(arguments(Scope::Everywhere, None, " ", None, false).is_err());
+    }
+
+    #[test]
+    fn quotes_a_shell_word_with_its_own_quotes() {
+        assert_eq!(quoted("a b"), "'a b'");
+        assert_eq!(quoted("it's"), "'it'\\''s'");
     }
 
     #[test]

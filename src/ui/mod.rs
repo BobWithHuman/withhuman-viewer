@@ -606,6 +606,10 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
             let mut current = state.current;
             match found {
                 Ok(list) => {
+                    // The developer's app shows this machine's sessions alone: the device's
+                    // client ID its hooks send.
+                    #[cfg(not(feature = "admin"))]
+                    let list = crate::hooks::mine(list);
                     // Keep the open session, even one the list leaves out (opened from another
                     // page, a session with no start time); else the last one opened, else the
                     // newest.

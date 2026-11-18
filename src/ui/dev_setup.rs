@@ -13,6 +13,7 @@ use super::{AppState, Screen, Selection};
 use crate::api::Backend;
 use crate::hooks::{self, Scope};
 use crate::settings::Change;
+use serde_json::{Value, json};
 
 /// The engine's store as the engine's own Compose file serves it to the viewer.
 const STORE: &str = "postgres://127.0.0.1:15432/withhuman";
@@ -151,7 +152,7 @@ pub fn HookSetup(on_done: Option<EventHandler<()>>) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let mut server = use_signal(|| state.public.peek().engine_api.clone());
-    let mut scope = use_signal(|| Scope::Everywhere);
+    let mut scope = use_signal(|| Scope::Device);
     let mut folder = use_signal(|| None::<PathBuf>);
     let mut key = use_signal(String::new);
     let mut status = use_signal(|| match hooks::device_id() {
@@ -204,15 +205,21 @@ pub fn HookSetup(on_done: Option<EventHandler<()>>) -> Element {
         });
     };
     let busy = status() == Status::Busy;
-    let ready = !busy
-        && !server().trim().is_empty()
-        && (scope() == Scope::Everywhere || folder().is_some());
+    let ready =
+        !busy && !server().trim().is_empty() && (scope() != Scope::Folder || folder().is_some());
     let folder_name = folder()
         .map(|f| f.display().to_string())
         .unwrap_or_else(|| "폴더 고르기".into());
 
     rsx! {
-        div { class: "setup-choice",
+        div { class: "setup-choice three",
+            button {
+                class: if scope() == Scope::Device { "on" } else { "" },
+                disabled: busy,
+                onclick: move |_| scope.set(Scope::Device),
+                strong { "기기 전체" }
+                span { "관리자 · 다른 훅 막음" }
+            }
             button {
                 class: if scope() == Scope::Everywhere { "on" } else { "" },
                 disabled: busy,
@@ -234,7 +241,7 @@ pub fn HookSetup(on_done: Option<EventHandler<()>>) -> Element {
                     input { r#type: "text", value: "{server}", placeholder: "http://127.0.0.1:3000", oninput: move |e| server.set(e.value()) }
                 }
                 label { "키 (선택)"
-                    input { r#type: "password", value: "{key}", placeholder: "whk_…", oninput: move |e| key.set(e.value()) }
+                    input { r#type: "password", value: "{key}", disabled: scope() == Scope::Device, placeholder: if scope() == Scope::Device { "사용자마다" } else { "whk_…" }, oninput: move |e| key.set(e.value()) }
                 }
             }
         }
@@ -251,102 +258,155 @@ pub fn HookSetup(on_done: Option<EventHandler<()>>) -> Element {
     }
 }
 
-/// The hooks' own page: the setups found on this machine (the device's, set by an administrator;
-/// the user's, for every folder; the folders the app installed in), each with the engine it
-/// reports to and a button to take it out, and a new setup below.
+/// The hooks' own page, drawn by 기록's page (`web/record`, `hooks.tsx`) in its frame: the
+/// setups found on this machine (the device's, the user's, the folders the app installed in),
+/// each with the engine it reports to and a button to take it out, and a new setup. What is
+/// pressed there comes back here to be done.
 #[component]
 pub fn HookPage() -> Element {
+    let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let mut looked = use_signal(|| 0u32);
+    let mut folder = use_signal(|| None::<PathBuf>);
+    let mut busy = use_signal(|| None::<String>);
+    let mut note = use_signal(|| None::<(bool, String)>);
     let found = use_memo(move || {
         let _ = looked();
         hooks::installed(&state.prefs.read().hook_folders)
     });
-    let device = use_memo(move || {
+    let data = use_memo(move || {
         let _ = looked();
-        hooks::device_id()
-    });
-    let mut busy = use_signal(|| None::<std::path::PathBuf>);
-    let mut failed = use_signal(|| None::<String>);
-    let mut remove = move |install: hooks::Install| {
-        let (scope, folder) = match &install.at {
-            hooks::Where::Folder(f) => (Scope::Folder, Some(f.clone())),
-            _ => (Scope::Everywhere, None),
-        };
-        busy.set(Some(install.file.clone()));
-        failed.set(None);
-        spawn(async move {
-            let at = folder.clone();
-            let done = tokio::task::spawn_blocking(move || {
-                hooks::run(scope, folder.as_deref(), "", None, true)
+        let installs: Vec<Value> = found()
+            .iter()
+            .map(|i| {
+                let (at, place) = match &i.at {
+                    hooks::Where::Device => ("device", i.file.display().to_string()),
+                    hooks::Where::Everywhere => ("all", i.file.display().to_string()),
+                    hooks::Where::Folder(f) => ("folder", f.display().to_string()),
+                };
+                json!({"at": at, "place": place, "file": i.file.display().to_string(), "engine": i.engine, "removable": true})
             })
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r);
-            match done {
-                Ok(_) => {
-                    if let Some(at) = at.map(|f| f.display().to_string()) {
-                        state.prefs.write().hook_folders.retain(|f| *f != at);
+            .collect();
+        json!({
+            "device": hooks::device_id(),
+            "engine": state.public.read().engine_api,
+            "installs": installs,
+            "folder": folder().map(|f| f.display().to_string()),
+            "busy": busy(),
+            "note": note().map(|(ok, text)| json!({"ok": ok, "text": text})),
+        })
+        .to_string()
+    });
+    use_effect(move || {
+        let d = data();
+        document::eval(&format!(
+            "requestAnimationFrame(() => window.__whHooksSet && window.__whHooksSet({d}))"
+        ));
+    });
+    use_future(move || {
+        let backend = backend.clone();
+        async move {
+            let mut eval = document::eval(
+                "window.__whHooksOn = (m) => dioxus.send(m); await new Promise(() => {});",
+            );
+            while let Ok(m) = eval.recv::<Value>().await {
+                match m["do"].as_str() {
+                    Some("pick") => {
+                        spawn(async move {
+                            if let Some(f) = rfd::AsyncFileDialog::new().pick_folder().await {
+                                folder.set(Some(f.path().to_path_buf()));
+                            }
+                        });
                     }
-                }
-                Err(e) => failed.set(Some(e)),
-            }
-            busy.set(None);
-            looked += 1;
-        });
-    };
-    let list = found();
-    let device_label = device().unwrap_or_else(|| "없음".into());
-    rsx! {
-        div { class: "hooks-page",
-            header { class: "hooks-head",
-                h1 { "훅" }
-                span { class: "hooks-chip", "기기" b { "{device_label}" } }
-            }
-            section { class: "setup-block",
-                div { class: "setup-k", "설치됨" span { class: "hooks-count", "{list.len()}" } }
-                if list.is_empty() {
-                    p { class: "hooks-empty", "없음" }
-                }
-                for install in list {
-                    {
-                        let (label, tone) = match &install.at {
-                            hooks::Where::Device => ("기기 전체", "device"),
-                            hooks::Where::Everywhere => ("모든 폴더", "all"),
-                            hooks::Where::Folder(_) => ("폴더", "folder"),
+                    Some("install") => {
+                        let scope = match m["scope"].as_str() {
+                            Some("folder") => Scope::Folder,
+                            Some("all") => Scope::Everywhere,
+                            _ => Scope::Device,
                         };
-                        let place = match &install.at {
-                            hooks::Where::Folder(f) => f.display().to_string(),
-                            _ => install.file.display().to_string(),
-                        };
-                        let engine = install.engine.clone().unwrap_or_else(|| "엔진 모름".into());
-                        let working = busy().as_ref() == Some(&install.file);
-                        let managed = install.at == hooks::Where::Device;
-                        let it = install.clone();
-                        rsx! {
-                            div { class: "hooks-row", key: "{install.file.display()}",
-                                span { class: "hooks-scope {tone}", "{label}" }
-                                span { class: "hooks-place", title: "{place}", "{place}" }
-                                span { class: "hooks-engine", title: "{engine}", "{engine}" }
-                                if managed {
-                                    span { class: "hooks-lock", "관리자" }
-                                } else {
-                                    button { class: "setup-link", disabled: busy().is_some(), onclick: move |_| remove(it.clone()),
-                                        if working { "제거 중…" } else { "제거" }
-                                    }
+                        let server = m["server"].as_str().unwrap_or_default().to_owned();
+                        let key = m["key"].as_str().unwrap_or_default().to_owned();
+                        let at = folder();
+                        if let Ok(next) = backend.save_admin(&server, None) {
+                            state.public.set(next);
+                        }
+                        busy.set(Some("install".into()));
+                        note.set(None);
+                        spawn(async move {
+                            let into = at.clone();
+                            let done = tokio::task::spawn_blocking(move || {
+                                hooks::run(scope, into.as_deref(), &server, Some(&key), false)
+                            })
+                            .await
+                            .map_err(|e| e.to_string())
+                            .and_then(|r| r);
+                            let added = at
+                                .filter(|_| done.is_ok() && scope == Scope::Folder)
+                                .map(|f| f.display().to_string());
+                            if let Some(at) = added {
+                                let mut prefs = state.prefs.write();
+                                if !prefs.hook_folders.contains(&at) {
+                                    prefs.hook_folders.push(at);
                                 }
                             }
-                        }
+                            note.set(Some(match done {
+                                Ok(d) => (
+                                    true,
+                                    match d.client_id {
+                                        Some(id) => format!("설치됨 · 기기 {id}"),
+                                        None => "설치됨".into(),
+                                    },
+                                ),
+                                Err(e) => (false, e),
+                            }));
+                            busy.set(None);
+                            looked += 1;
+                        });
                     }
+                    Some("remove") => {
+                        let file = m["file"].as_str().unwrap_or_default().to_owned();
+                        let Some(install) = found
+                            .peek()
+                            .iter()
+                            .find(|i| i.file.display().to_string() == file)
+                            .cloned()
+                        else {
+                            continue;
+                        };
+                        let (scope, at) = match &install.at {
+                            hooks::Where::Device => (Scope::Device, None),
+                            hooks::Where::Everywhere => (Scope::Everywhere, None),
+                            hooks::Where::Folder(f) => (Scope::Folder, Some(f.clone())),
+                        };
+                        busy.set(Some(file));
+                        note.set(None);
+                        spawn(async move {
+                            let from = at.clone();
+                            let done = tokio::task::spawn_blocking(move || {
+                                hooks::run(scope, from.as_deref(), "", None, true)
+                            })
+                            .await
+                            .map_err(|e| e.to_string())
+                            .and_then(|r| r);
+                            match done {
+                                Ok(_) => {
+                                    if let Some(at) = at.map(|f| f.display().to_string()) {
+                                        state.prefs.write().hook_folders.retain(|f| *f != at);
+                                    }
+                                    note.set(Some((true, "제거됨".into())));
+                                }
+                                Err(e) => note.set(Some((false, e))),
+                            }
+                            busy.set(None);
+                            looked += 1;
+                        });
+                    }
+                    _ => {}
                 }
-                if let Some(e) = failed() {
-                    p { class: "setup-note err", "{e}" }
-                }
-            }
-            section { class: "setup-block",
-                div { class: "setup-k", "새로 설치" }
-                HookSetup { on_done: move |_| looked += 1 }
             }
         }
+    });
+    rsx! {
+        div { id: "wh-hooks", class: "wh-record" }
     }
 }
