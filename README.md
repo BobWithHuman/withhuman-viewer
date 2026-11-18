@@ -1,6 +1,6 @@
 # WithHuman Viewer
 
-[WithHuman](https://github.com/BobWithHuman/withhuman-core) 엔진이 기록한 에이전트 세션을 지하철 노선도로 보는 데스크톱 앱입니다.
+[WithHuman](https://github.com/BobWithHuman/withhuman-core) 엔진이 기록한 에이전트 세션을 보여주는 데스크톱 앱입니다.
 도구 호출(Call) 하나하나가 사람의 요청을 따른 것인지, 도구 결과 속 글을 따른 것인지 그래프로 보여주며, 엔진의 판정
 (허용·확인·차단)과 차단된 호출의 원인 경로를 따라갈 수 있습니다.
 
