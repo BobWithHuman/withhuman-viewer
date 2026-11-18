@@ -134,5 +134,11 @@ export function demoAnswer(d: Data, m: Record<string, unknown>, req: number): Da
     devices = devices?.map((x) => (x.id === m.device ? { ...x, stopped: m.stopped ? { at, by: actor, reason: String(m.reason ?? ""), denied: 0 } : null } : x));
     reply = { req, ok: true, done: m.stopped ? "device_stopped" : "device_released" };
   }
-  return { ...d, devices, reply };
+  let sessions = d.sessions;
+  if (m.type === "delete_device") {
+    devices = devices?.filter((x) => x.id !== m.device);
+    sessions = sessions?.filter((r) => r.device !== m.device);
+    reply = { req, ok: true, done: "device_deleted" };
+  }
+  return { ...d, devices, sessions, reply };
 }

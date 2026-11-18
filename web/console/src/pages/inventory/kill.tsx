@@ -2,7 +2,7 @@
 // machine, what stopping does, and why (kept with the stop); a stopped machine is let go again
 // at once. The panel and the machine's sheet both use it.
 
-import { Laptop, Loader2, OctagonX } from "lucide-react";
+import { Laptop, Loader2, OctagonX, Trash2 } from "lucide-react";
 import { AlertDialog } from "radix-ui";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useState } from "react";
@@ -66,6 +66,56 @@ export function KillSwitch({ m, now, busy, onStop, size = "sm" }: {
             <Button disabled={!why.trim() || busy} onClick={stop} className={cn("gap-1.5 bg-deny text-white hover:bg-deny/85")}>
               {busy ? <Loader2 className="animate-spin" /> : <OctagonX />}멈추기
             </Button>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
+/** Deleting a machine from the inventory with every session it ran, asked first in a dialog that
+ * names it and what goes with it; the name typed again before it goes, as it cannot be undone. */
+export function DeleteDevice({ m, sessions, onDelete, size = "xs" }: {
+  m: Machine; sessions: number; onDelete: () => void; size?: "sm" | "xs";
+}) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const ready = typed.trim() === m.name;
+  const go = () => { onDelete(); setOpen(false); setTyped(""); };
+  return (
+    <AlertDialog.Root open={open} onOpenChange={(o) => { setOpen(o); if (!o) setTyped(""); }}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <AlertDialog.Trigger asChild>
+            <Button size={size} variant="ghost" aria-label="단말 삭제" className="shrink-0 gap-1.5 text-muted-foreground hover:bg-deny/15 hover:text-deny"><Trash2 />삭제</Button>
+          </AlertDialog.Trigger>
+        </TooltipTrigger>
+        <TooltipContent>단말과 세션 기록 삭제</TooltipContent>
+      </Tooltip>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <AlertDialog.Content aria-describedby={undefined}
+          className="fixed top-1/2 left-1/2 z-50 flex w-[400px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl border bg-popover p-5 shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-deny/15 text-deny"><Trash2 className="size-[18px]" /></span>
+            <div className="flex min-w-0 flex-col">
+              <AlertDialog.Title className="text-[15px] font-semibold">단말 삭제</AlertDialog.Title>
+              <span className="truncate font-mono text-[12.5px] text-muted-foreground">{m.id}</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5 text-[12px]">
+            <span className="rounded-md bg-deny/15 px-2 py-0.5 font-medium text-deny">세션 <span className="tnum">{sessions}</span></span>
+            <span className="rounded-md bg-deny/15 px-2 py-0.5 font-medium text-deny">호출 기록</span>
+            <span className="rounded-md bg-white/8 px-2 py-0.5 text-muted-foreground">되돌리기 불가</span>
+          </div>
+          <label className="flex flex-col gap-1.5 text-[12px] text-muted-foreground">
+            <span>단말 이름 <span className="font-mono text-foreground">{m.name}</span></span>
+            <Input autoFocus value={typed} placeholder={m.name} onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && ready) go(); }} />
+          </label>
+          <div className="flex justify-end gap-2">
+            <AlertDialog.Cancel asChild><Button variant="ghost">취소</Button></AlertDialog.Cancel>
+            <Button disabled={!ready} onClick={go} className="gap-1.5 bg-deny text-white hover:bg-deny/85"><Trash2 />삭제</Button>
           </div>
         </AlertDialog.Content>
       </AlertDialog.Portal>

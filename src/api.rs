@@ -510,6 +510,48 @@ impl Backend {
 
     /// One call of the engine's admin API (Collector's /v1/admin): a POST with the admin token.
     async fn admin(&self, path: &[&str], body: Value) -> Result<Value, String> {
+        self.admin_call(reqwest::Method::POST, path, Some(body))
+            .await
+    }
+
+    /// Deletes a machine from the inventory with every session it ran
+    /// (`DELETE /v1/admin/clients/{id}`); the number of its sessions deleted. It cannot be
+    /// undone, and a machine that sends hooks again is recorded again.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub async fn delete_device(&self, client: &str) -> Result<u64, String> {
+        if self.current().demo {
+            return self
+                .demo
+                .lock()
+                .expect("demo lock")
+                .delete_device(now_ms(), client)
+                .ok_or_else(|| "그런 기기가 없습니다.".into());
+        }
+        let answer = self
+            .admin_call(
+                reqwest::Method::DELETE,
+                &["v1", "admin", "clients", client],
+                None,
+            )
+            .await?;
+        Ok(answer["sessions"].as_u64().unwrap_or(0))
+    }
+
+    /// Whether the engine's admin API can be called: the demo, or an address and a token kept.
+    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
+    pub fn can_admin(&self) -> bool {
+        let settings = self.current();
+        settings.demo || settings.admin_token().is_some() && !settings.engine_api.trim().is_empty()
+    }
+
+    /// One call of the engine's admin API with the admin token: `method` at `path`, with a JSON
+    /// `body` when there is one.
+    async fn admin_call(
+        &self,
+        method: reqwest::Method,
+        path: &[&str],
+        body: Option<Value>,
+    ) -> Result<Value, String> {
         let settings = self.current();
         let token = settings.admin_token().ok_or("엔진 관리 토큰이 없습니다.")?;
         let mut url = reqwest::Url::parse(&settings.engine_api)
@@ -518,19 +560,16 @@ impl Backend {
             .map_err(|_| "엔진 관리 API 주소가 올바르지 않습니다.".to_owned())?
             .pop_if_empty()
             .extend(path);
-        let response = self
-            .client
-            .post(url)
-            .bearer_auth(token)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                format!(
-                    "엔진 관리 API({})에 닿지 않습니다: {e}",
-                    settings.engine_api
-                )
-            })?;
+        let mut request = self.client.request(method, url).bearer_auth(token);
+        if let Some(body) = &body {
+            request = request.json(body);
+        }
+        let response = request.send().await.map_err(|e| {
+            format!(
+                "엔진 관리 API({})에 닿지 않습니다: {e}",
+                settings.engine_api
+            )
+        })?;
         let status = response.status().as_u16();
         let answer: Value = response.json().await.unwrap_or(Value::Null);
         match status {

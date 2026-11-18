@@ -59,7 +59,7 @@ export type Run = {
 };
 /** The app's answer to the request with the same `req`. */
 export type Reply = {
-  req: number; ok: boolean; error?: string; done?: "admin" | "device_stopped" | "device_released";
+  req: number; ok: boolean; error?: string; done?: "admin" | "device_stopped" | "device_released" | "device_deleted";
 };
 export type Tab = "sessions" | "shadow" | "mcp";
 export type SessionCalls = { n: number; review: number; deny: number; mode: string | null };

@@ -139,6 +139,7 @@ table.props td:first-child { color: var(--muted); width: 34%; }
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(10, 14, 22, .35); display: grid; place-items: center; z-index: 50; }
 .sheet { width: min(480px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
          padding: 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px; }
+.sheet h2.sheet-sub { margin-top: 18px; }
 .choice { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .choice button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 10px; text-align: left; }
 .choice button span { color: var(--muted); font-size: 12px; }

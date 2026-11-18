@@ -5,10 +5,9 @@
 // that (`src/admin/inventory.rs`) and answers in `data.reply`.
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowUpRight, Check, Laptop, PackageOpen, PlugZap, Search, TriangleAlert, X } from "lucide-react";
+import { ArrowUpRight, Check, Laptop, PackageOpen, Search, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,7 +18,6 @@ import { send } from "@/bridge";
 import { DataTable, Empty, PageHeader, Panel, ServiceLogo, SourceMeta, ago, clock, num } from "@/kit";
 import { cn } from "@/lib/utils";
 import { demo, demoAnswer } from "./inventory/demo";
-import { Asks, type Ask } from "./inventory/dialogs";
 import { AgentMark, Chip, Dash, EngineBadge, StateBadge } from "./inventory/marks";
 import { Threats, ThreatsLegend } from "./inventory/threats";
 import { ServerSheet, ToolSheet } from "./inventory/mcp/sheets";
@@ -52,7 +50,6 @@ export default function Page({ data }: { data: unknown | null }) {
   const [focus, setFocus] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Open | null>(null);
-  const [ask, setAsk] = useState<Ask | null>(null);
   const [pending, setPending] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -76,8 +73,8 @@ export default function Page({ data }: { data: unknown | null }) {
     if (!standalone) send("inventory", { type: "ack" });
     if (!r.ok) setError(r.error ?? "실패");
     else {
-      setAsk(null);
-      setToast(r.done === "device_stopped" ? "기기 멈춤" : r.done === "device_released" ? "기기 멈춤 풀림" : "관리 API 저장됨");
+      if (r.done === "device_deleted") setOpen(null);
+      setToast(r.done === "device_stopped" ? "기기 멈춤" : r.done === "device_released" ? "기기 멈춤 풀림" : r.done === "device_deleted" ? "단말 삭제됨" : "완료");
     }
   }, [d.reply, pending, standalone]);
   // The app names the tab to open on; it changes the tab again only when it names another.
@@ -86,13 +83,12 @@ export default function Page({ data }: { data: unknown | null }) {
     if (t) setTab(t);
   }, [d.tab]);
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
+    if (!toast && !error) return;
+    const t = setTimeout(() => { setToast(null); setError(null); }, 4000);
     return () => clearTimeout(t);
-  }, [toast]);
+  }, [toast, error]);
 
   const openSession = (id: string) => send("inventory", { type: "open_session", id });
-  const closeAsk = () => { setAsk(null); setError(null); setPending(null); };
 
   const has = (...parts: (string | null | undefined)[]) => !q.trim() || parts.some((p) => p?.toLowerCase().includes(q.trim().toLowerCase()));
   const current = view.machines.find((m) => m.id === focus) ?? machineOrder(view)[0];
@@ -173,15 +169,15 @@ export default function Page({ data }: { data: unknown | null }) {
       </Select>
       <StoppedMachines machines={view.machines} now={view.now} onPick={setFocus}
         onRelease={(id) => request({ type: "stop_device", device: id, stopped: false, actor: d.actor, reason: "" })} />
-      <Button variant="outline" size="sm" onClick={() => setAsk({ kind: "admin" })}>
-        <PlugZap />관리 API
-        <i className={cn("size-1.5 rounded-full", d.source.demo ? "bg-catch" : d.admin.has_token ? "bg-allow" : "bg-white/25")} />
-        <span className="text-muted-foreground">{d.source.demo ? "데모" : d.admin.has_token ? "연결됨" : "연결 안 됨"}</span>
-      </Button>
     </PageHeader>
   );
-  const dialogs = ask && (
-    <Asks admin={d.admin} demo={d.source.demo} busy={pending !== null} error={error} onSend={request} onClose={closeAsk} />
+  // What the app answered last: done, or why it failed.
+  const notes = (toast || error) && (
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex justify-center">
+      {error
+        ? <span className="inline-flex max-w-[560px] items-center gap-2 rounded-full border border-deny/40 bg-popover px-3.5 py-2 text-[12.5px] text-deny shadow-xl animate-in fade-in-0 slide-in-from-bottom-2"><TriangleAlert className="size-3.5 shrink-0" /><span className="truncate">{error}</span></span>
+        : <span className="inline-flex items-center gap-2 rounded-full border bg-popover px-3.5 py-2 text-[12.5px] shadow-xl animate-in fade-in-0 slide-in-from-bottom-2"><Check className="size-3.5 text-allow" />{toast}</span>}
+    </div>
   );
 
   if (d.status !== "ready") {
@@ -206,7 +202,7 @@ export default function Page({ data }: { data: unknown | null }) {
             </div>
           </div>
         )}
-        {dialogs}
+        {notes}
       </div>
     );
   }
@@ -278,21 +274,17 @@ export default function Page({ data }: { data: unknown | null }) {
         </Card>
       </div>
 
-      <Sheet open={!!(machine || server)} onOpenChange={(o) => { if (!o && !ask) setOpen(null); }}>
+      <Sheet open={!!(machine || server)} onOpenChange={(o) => { if (!o) setOpen(null); }}>
         <SheetContent aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()} className="w-[480px] gap-0 data-[side=right]:sm:max-w-[480px]">
           {machine && <DeviceSheet m={machine} view={view} onServer={openServer}
-            onStop={(stopped, reason) => request({ type: "stop_device", device: machine.id, stopped, actor: d.actor, reason })} />}
+            onStop={(stopped, reason) => request({ type: "stop_device", device: machine.id, stopped, actor: d.actor, reason })}
+            onDelete={() => request({ type: "delete_device", device: machine.id, actor: d.actor })} />}
           {server && (tool
             ? <ToolSheet server={server} tool={tool} view={view} onServer={openServer} onDevice={openDevice} />
             : <ServerSheet server={server} view={view} onTool={openTool} onDevice={openDevice} />)}
         </SheetContent>
       </Sheet>
-      {dialogs}
-      {toast && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex justify-center">
-          <span className="inline-flex items-center gap-2 rounded-full border bg-popover px-3.5 py-2 text-[12.5px] shadow-xl animate-in fade-in-0 slide-in-from-bottom-2"><Check className="size-3.5 text-allow" />{toast}</span>
-        </div>
-      )}
+      {notes}
     </div>
   );
 }
