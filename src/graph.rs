@@ -563,9 +563,14 @@ pub(crate) fn summary(props: &Map<String, Value>) -> Map<String, Value> {
         .filter_map(|(key, value)| {
             value
                 .filter(|v| !v.is_empty())
-                // A person's prompt is read whole where it is shown; the rest are brief.
+                // What is read whole where it is shown (a person's prompt, the agent's message,
+                // the command or argument a Call ran with) is kept whole; the rest are brief.
                 .map(|v| {
-                    let limit = if key == "prompt" { PROMPT_CHARS } else { 200 };
+                    let limit = if matches!(key, "prompt" | "text" | "brief") {
+                        PROMPT_CHARS
+                    } else {
+                        200
+                    };
                     (key.to_owned(), Value::String(clip(&v, limit)))
                 })
         })
@@ -667,12 +672,18 @@ mod tests {
         .unwrap();
         let s = summary(&props);
         assert_eq!(s["tool_name"], "Bash");
-        assert_eq!(s["brief"].as_str().unwrap().len(), 200);
+        assert_eq!(s["brief"].as_str().unwrap().len(), 300);
         let props: Map<String, Value> = serde_json::from_value(json!({
             "payload_json": json!({"prompt": "y".repeat(1000)}).to_string(),
         }))
         .unwrap();
         assert_eq!(summary(&props)["prompt"].as_str().unwrap().len(), 1000);
+        // What a tool gave back stays brief.
+        let props: Map<String, Value> = serde_json::from_value(json!({
+            "payload_json": json!({"tool_response": "z".repeat(300)}).to_string(),
+        }))
+        .unwrap();
+        assert_eq!(summary(&props)["output"].as_str().unwrap().len(), 200);
     }
 
     #[test]

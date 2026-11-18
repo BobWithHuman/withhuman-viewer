@@ -1,6 +1,6 @@
 import * as TT from "@radix-ui/react-tooltip";
-import { Bot, CircleDot, FileText, Laptop, Layers, MessageSquareText, SquareTerminal, TriangleAlert, Wrench } from "lucide-react";
-import type { ReactNode } from "react";
+import { ArrowUpRight, Bot, CircleDot, FileText, Laptop, Layers, MessageSquareText, SquareTerminal, TriangleAlert, Wrench } from "lucide-react";
+import { createContext, useContext, type ReactNode } from "react";
 import { siClaude, siGithub, siNotion, siPostgresql } from "simple-icons";
 import type { Kind, Step, Svc, Verdict } from "./data";
 import { Code } from "./code";
@@ -82,10 +82,66 @@ export function VerdictChip({ s }: { s: Step }) {
   return null;
 }
 
-/** Everything about one step: its text, the engine's numbers, and what it caught. */
+/** An engine rule, by what it decided on. */
+export const RULE: Record<string, string> = {
+  "intent::mismatch": "의도 밖", "intent::review": "의도 밖일 수 있음", "intent::match": "의도 안", "intent::hijack": "목표 탈취",
+  "intent::unknown": "의도 없음", "trace::unresolved": "원인 못 찾음", "trace::no_subgraph": "추적 대상 없음", "cause::none": "원인 없음",
+  "safeguard::change": "에이전트 설정 변경", "causal::instruction": "외부 지시",
+};
+/** The worst of what a Call breaks. */
+export const WORST: Record<string, string> = {
+  explicit: "사용자 조건 어김", unrelated_change: "요청과 무관한 변경", exfiltration: "데이터 외부 전송", unconfirmed_irreversible: "되돌릴 수 없는 작업",
+  security_change: "보안 설정 변경", out_of_scope_access: "요청 범위 밖 접근", hijacked_goal: "끌려온 새 목표",
+};
+export const pct = (p: number) => `${Math.round(p * 100)}%`;
+
+/** Why the engine decided as it did: the question that decided it (the second, with what it
+ * asked, when it was asked), the rule and the worst breach, and the score on its scale: allowed
+ * below the review line, asked up to the deny line, refused above. */
+export function Judge({ j }: { j: NonNullable<Step["judge"]> }) {
+  const at = j.score != null ? Math.min(1, Math.max(0, j.score)) : null;
+  const second = j.stage === "2차 질문";
+  return (
+    <span className="grid gap-1.5">
+      <span className="flex flex-wrap items-center gap-1.5">
+        {j.stage && <span className="rounded bg-white/8 px-1.5 py-px text-[11.5px] font-semibold text-fg/90">{j.stage}</span>}
+        {second && j.asked && <span className="rounded bg-block/15 px-1.5 py-px text-[11.5px] text-block">{j.asked}</span>}
+        {j.rule && <span className="rounded bg-white/8 px-1.5 py-px text-[11.5px] text-fg" title={j.rule}>{RULE[j.rule] ?? j.rule}</span>}
+        {!second && j.worst && <span className="rounded bg-block/15 px-1.5 py-px text-[11.5px] text-block" title={j.worst}>{WORST[j.worst] ?? j.worst}</span>}
+      </span>
+      {at != null && (
+        <span className="grid gap-1">
+          <span className="relative flex h-1.5 overflow-hidden rounded-full">
+            <i className="h-full bg-teal/55" style={{ width: pct(j.review) }} />
+            <i className="h-full bg-hold/55" style={{ width: pct(j.deny - j.review) }} />
+            <i className="h-full flex-1 bg-block/55" />
+            <i className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-fg ring-2 ring-bg" style={{ left: pct(at) }} />
+          </span>
+          <span className="flex justify-between text-[10.5px] text-dim tabular-nums">
+            <span>{second ? "확률" : "이탈"} <b className="font-semibold text-fg/85">{pct(at)}</b></span>
+            <span>{j.review > 0 && j.review < j.deny && `확인 ${pct(j.review)} · `}차단 {pct(j.deny)}</span>
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** What the card can reach of the rest of the record: a step by its ID, and opening one. */
+export const Nav = createContext<{ step: (id: string) => Step | undefined; go: (id: string) => void } | null>(null);
+
+/** Everything about one step: its text, the engine's numbers, why it was decided so, and what
+ * told it: the result's words in full, after the Call that brought them back. */
 export function DetailBody({ s }: { s: Step }) {
+  const stopped = s.verdict === "deny" || s.verdict === "review" || s.verdict === "rejected";
   return (
     <div className="space-y-3">
+      {stopped && s.judge && (
+        <div>
+          <div className="mb-1.5 text-[11.5px] text-mut">{s.verdict === "deny" ? "차단 이유" : "확인 이유"}</div>
+          <div className="rounded-md bg-box px-3 py-2.5"><Judge j={s.judge} /></div>
+        </div>
+      )}
       {s.text && (isLong(s.text.body)
         ? <LongText label={s.text.label} text={s.text.body} mark={s.text.mark} />
         : <div><div className="mb-1.5 text-[11.5px] text-mut">{s.text.label}</div><Code text={s.text.body} mark={s.text.mark} tool={s.detail.find(([k]) => k === "도구")?.[1] ?? s.type} /></div>)}
@@ -98,16 +154,38 @@ export function DetailBody({ s }: { s: Step }) {
           </div>
         ))}
       </dl>
-      {s.catch && (
-        <div>
-          <div className="mb-1.5 text-[11.5px] text-mut">지시한 곳</div>
-          <div className="flex items-center rounded-md bg-box px-3 py-2">
-            <div><div className="text-[12px] text-fg">{s.catch.name}</div><div className="font-mono text-[11px] text-mut">{s.catch.sub}</div></div>
-            <span className="ml-auto flex items-center gap-1.5 text-[12px] font-semibold"><TriangleAlert className="size-3.5 fill-catch text-[#242424]" />{s.catch.score}%</span>
-          </div>
-        </div>
-      )}
+      {s.catch && <Told c={s.catch} />}
       {s.inside && <div className="flex flex-wrap gap-1.5">{s.inside.map((t) => <span key={t} className="rounded-md bg-chip px-1.5 py-0.5 font-mono text-[11px]">{t}</span>)}</div>}
+    </div>
+  );
+}
+
+/** What told a Call: the Call whose result it was (opening it), then the result's words in full,
+ * with how sure the engine is. */
+function Told({ c }: { c: NonNullable<Step["catch"]> }) {
+  const nav = useContext(Nav);
+  const from = c.by != null && nav ? nav.step(`s${c.by}`) : undefined;
+  const words = c.para?.trim() || c.sub;
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center text-[11.5px] text-mut">
+        지시한 곳
+        <span className="ml-auto flex items-center gap-1 font-semibold text-fg"><TriangleAlert className="size-3.5 fill-catch text-[#242424]" />{c.score}%</span>
+      </div>
+      <div className="overflow-hidden rounded-md bg-box">
+        {(from || c.by != null) && (
+          <button disabled={!from || !nav} onClick={() => from && nav?.go(from.id)}
+            className="flex w-full min-w-0 items-center gap-2 border-b border-white/[.06] px-3 py-2 text-left enabled:cursor-pointer enabled:hover:bg-white/[.04]">
+            {from && <span className={cx("grid size-5 shrink-0 place-items-center rounded [&_svg]:size-3 [&_svg]:stroke-[2.4]", tone(from))}>{KIND_ICON[from.kind]}</span>}
+            <span className="min-w-0 flex-1 truncate text-[12px] text-fg">{from?.name ?? `호출 #${c.by}`}</span>
+            <span className="shrink-0 text-[11px] text-dim">{from?.type ?? ""} · {c.name}</span>
+            {from && <ArrowUpRight className="size-3.5 shrink-0 text-mut" />}
+          </button>
+        )}
+        {words && (isLong(words)
+          ? <div className="px-1 py-1"><LongText label={c.name} text={words} /></div>
+          : <div className="px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap text-fg/85 [overflow-wrap:anywhere]">{words}</div>)}
+      </div>
     </div>
   );
 }

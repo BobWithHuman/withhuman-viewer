@@ -18,7 +18,7 @@ const PROCESS: [&str; 2] = ["out_of_scope_access", "hijacked_goal"];
 
 /// The Decision Module's defaults, for traces stored before it recorded its thresholds:
 /// (review, deny) by what the Call follows from.
-fn default_thresholds(link: &str) -> (f64, f64) {
+pub(crate) fn default_thresholds(link: &str) -> (f64, f64) {
     match link {
         "segment" | "none" => (0.08, 0.15),
         _ => (0.15, 0.3),
@@ -170,7 +170,7 @@ fn branch_text(branch: &str) -> &str {
 }
 
 /// The exchange of the given stage (`cause`, `check`, …) among the trace's Jev requests.
-fn exchange<'a>(trace: &'a Value, stage: &str) -> Option<&'a Value> {
+pub(super) fn exchange<'a>(trace: &'a Value, stage: &str) -> Option<&'a Value> {
     trace["jev"]
         .as_array()?
         .iter()
@@ -179,7 +179,7 @@ fn exchange<'a>(trace: &'a Value, stage: &str) -> Option<&'a Value> {
 
 /// Below the cut the second question allows (or reviews, after a first-question breach); at or
 /// above it, denies. A file change asked `requested` first is cut at 0.2.
-fn check_cut(check: &Value, exchange: Option<&Value>) -> Option<f64> {
+pub(super) fn check_cut(check: &Value, exchange: Option<&Value>) -> Option<f64> {
     let branch = check["branch"].as_str()?;
     let requested = exchange.is_some_and(|x| {
         !x.pointer("/request/questions/requested")
