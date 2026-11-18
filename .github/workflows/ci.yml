@@ -50,8 +50,8 @@ jobs:
       - name: Check dependencies
         uses: EmbarkStudios/cargo-deny-action@v2
 
-  # Both apps on Windows: built, linted and tested there, and the developer's packaged as its
-  # installer, so what only breaks on Windows shows up here.
+  # Both apps on Windows: built, linted, tested and packaged as their installers there, so what
+  # only breaks on Windows shows up here.
   windows:
     name: Windows
     runs-on: windows-latest
@@ -88,13 +88,16 @@ jobs:
         with:
           tool: cargo-packager@0.11.8
 
-      - name: Package the installer
-        run: scripts/package-windows.sh
+      - name: Package the developer's app
+        run: scripts/package-windows.sh dev
+
+      - name: Package the security team's app
+        run: scripts/package-windows.sh admin
 
       - name: Upload the installer
         uses: actions/upload-artifact@v4
         with:
-          name: withhuman-dev-windows
+          name: withhuman-windows
           path: dist/*.exe
           retention-days: 7
 
