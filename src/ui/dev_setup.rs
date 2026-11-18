@@ -439,6 +439,26 @@ pub fn HookPage() -> Element {
                             looked += 1;
                         });
                     }
+                    Some("reset") => {
+                        let folders = state.prefs.peek().hook_folders.clone();
+                        busy.set(Some("reset".into()));
+                        note.set(None);
+                        spawn(async move {
+                            let done = tokio::task::spawn_blocking(move || hooks::reset(&folders))
+                                .await
+                                .map_err(|e| e.to_string())
+                                .and_then(|r| r);
+                            match done {
+                                Ok(()) => {
+                                    state.prefs.write().hook_folders.clear();
+                                    note.set(Some((true, "모두 지움".into())));
+                                }
+                                Err(e) => note.set(Some((false, e))),
+                            }
+                            busy.set(None);
+                            looked += 1;
+                        });
+                    }
                     _ => {}
                 }
             }

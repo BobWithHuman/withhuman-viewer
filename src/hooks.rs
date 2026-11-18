@@ -132,14 +132,35 @@ pub fn run(
     uninstall: bool,
 ) -> Result<Done, String> {
     let args = arguments(scope, folder, server, key, uninstall)?;
+    let out = setup(&args, scope == Scope::Device)?;
+    Ok(Done {
+        client_id: client_id(&out),
+    })
+}
+
+/// Takes every WithHuman setup on this machine out at once (`--reset`): the device's, the
+/// user's, and those of `folders`, however they were made. The device's client ID is kept, so
+/// a setup made after is the same device. Asks for an administrator's password when a
+/// device-wide setup is there to take out.
+pub fn reset(folders: &[String]) -> Result<(), String> {
+    let mut args = vec!["--reset".to_owned()];
+    args.extend(folders.iter().cloned());
+    let device =
+        managed_file().is_file() || device_folder().join("hooks/pre-tool-use.py").is_file();
+    setup(&args, device).map(|_| ())
+}
+
+/// Runs the setup with `args`, as an administrator when `admin`; what it printed, or the last
+/// line it said when it failed.
+fn setup(args: &[String], admin: bool) -> Result<String, String> {
     let python = python()?;
     let dir = files()?;
-    let output = if scope == Scope::Device {
-        as_administrator(&python, &dir.join("configure.py"), &args)?
+    let output = if admin {
+        as_administrator(&python, &dir.join("configure.py"), args)?
     } else {
         Command::new(python)
             .arg(dir.join("configure.py"))
-            .args(&args)
+            .args(args)
             .output()
             .map_err(|e| format!("설치를 실행하지 못했습니다: {e}"))?
     };
@@ -155,9 +176,7 @@ pub fn run(
             .unwrap_or("설치가 실패했습니다.");
         return Err(said.to_owned());
     }
-    Ok(Done {
-        client_id: client_id(&out),
-    })
+    Ok(out)
 }
 
 /// A shell word: `value` in single quotes, its own single quotes kept.

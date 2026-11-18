@@ -6,7 +6,7 @@ import * as DM from "@radix-ui/react-dropdown-menu";
 import * as TT from "@radix-ui/react-tooltip";
 import {
   Ban, Check, CircleAlert, Copy, Folder, FolderOpen, FolderTree, KeyRound, Laptop, Loader2, MoreHorizontal,
-  MonitorCog, RefreshCw, ShieldCheck, ShieldOff, Trash2, Users,
+  MonitorCog, RefreshCw, RotateCcw, ShieldCheck, ShieldOff, Trash2, Users,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { cx } from "./parts";
@@ -160,10 +160,41 @@ function Engine({ data }: { data: HooksData }) {
   );
 }
 
+/** Taking every setup out at once, whatever made it, pressed twice: the menu, then the item. */
+function ResetAll({ data }: { data: HooksData }) {
+  const busy = data.busy;
+  if (busy === "reset") return <span className="flex items-center gap-1.5 text-[12px] text-mut"><Loader2 className="size-3.5 animate-spin" />지우는 중</span>;
+  return (
+    <DM.Root>
+      <DM.Trigger asChild disabled={!!busy}>
+        <button className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[12px] text-mut hover:bg-white/[.06] hover:text-fg disabled:opacity-40">
+          <RotateCcw className="size-3.5" />초기화
+        </button>
+      </DM.Trigger>
+      <DM.Portal>
+        <DM.Content align="end" sideOffset={4} className="z-50 min-w-[180px] rounded-lg bg-[#1b1b1b] p-1 text-[12.5px] shadow-xl ring-1 ring-white/10">
+          <DM.Item onSelect={() => send({ do: "reset" })}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-block outline-none data-[highlighted]:bg-block/15">
+            <Trash2 className="size-3.5" />모두 지우기
+            <span className="ml-auto flex items-center gap-1.5 text-dim tabular-nums">
+              {data.installs.length}{data.installs.some((i) => i.at === "device") && <KeyRound className="size-3" />}
+            </span>
+          </DM.Item>
+        </DM.Content>
+      </DM.Portal>
+    </DM.Root>
+  );
+}
+
 function Installs({ data }: { data: HooksData }) {
   const busy = data.busy;
   return (
-    <Panel title="설치" pad={false} aside={<span className="rounded-md bg-white/8 px-1.5 text-[11.5px] font-semibold text-mut tabular-nums">{data.installs.length}</span>}>
+    <Panel title="설치" pad={false} aside={
+      <span className="flex items-center gap-2">
+        {data.installs.length > 0 && <ResetAll data={data} />}
+        <span className="rounded-md bg-white/8 px-1.5 text-[11.5px] font-semibold text-mut tabular-nums">{data.installs.length}</span>
+      </span>
+    }>
       {data.installs.length === 0 ? (
         <div className="flex items-center gap-2 px-4 py-5 text-[12.5px] text-hold"><CircleAlert className="size-4" />설치 없음</div>
       ) : (
