@@ -232,6 +232,53 @@ fn device_folder() -> PathBuf {
     })
 }
 
+/// This machine's name as its owner knows it (macOS's computer name, else the host name) and
+/// its system with the version.
+pub fn this_machine() -> (String, String) {
+    let said = |program: &str, args: &[&str]| {
+        Command::new(program)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .filter(|s| !s.is_empty())
+    };
+    let name = said("scutil", &["--get", "ComputerName"])
+        .or_else(|| said("hostname", &[]))
+        .unwrap_or_else(|| "이 기기".into());
+    let os = match std::env::consts::OS {
+        "macos" => format!(
+            "macOS {}",
+            said("sw_vers", &["-productVersion"]).unwrap_or_default()
+        ),
+        other => other.to_owned(),
+    };
+    (name, os.trim().to_owned())
+}
+
+/// Whether the engine at `server` answers (`/healthz`), and how fast, in milliseconds.
+pub async fn check_engine(server: &str) -> Result<u128, String> {
+    let url = format!("{}/healthz", server.trim().trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let started = std::time::Instant::now();
+    let response = client.get(&url).send().await.map_err(|e| {
+        if e.is_timeout() {
+            "응답 없음".to_owned()
+        } else {
+            "연결 안 됨".to_owned()
+        }
+    })?;
+    if response.status().is_success() {
+        Ok(started.elapsed().as_millis())
+    } else {
+        Err(format!("HTTP {}", response.status().as_u16()))
+    }
+}
+
 /// The sessions of this machine alone: those its hooks sent with its client ID. None without a
 /// setup on this machine.
 pub fn mine(sessions: Vec<crate::model::Session>) -> Vec<crate::model::Session> {
@@ -262,6 +309,8 @@ pub struct Install {
     pub at: Where,
     pub file: PathBuf,
     pub engine: Option<String>,
+    /// When its settings file was last written, epoch milliseconds.
+    pub at_ms: Option<i64>,
 }
 
 /// The engine the WithHuman hooks in Claude Code settings report to; none when the settings
@@ -292,7 +341,17 @@ fn found(at: Where, file: PathBuf) -> Option<Install> {
     let text = std::fs::read_to_string(&file).ok()?;
     let settings: serde_json::Value = serde_json::from_str(&text).ok()?;
     let engine = engine_of(&settings)?;
-    Some(Install { at, file, engine })
+    let at_ms = std::fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64);
+    Some(Install {
+        at,
+        file,
+        engine,
+        at_ms,
+    })
 }
 
 /// Claude Code's managed settings file WithHuman's device-wide setup writes, by system.
