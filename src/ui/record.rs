@@ -262,6 +262,48 @@ fn clip(text: &str, n: usize) -> String {
     }
 }
 
+/// The second question's part of a judgement, when the Call was asked it (the trace took a
+/// branch that asks one, and the question answered): what it asked, and its own score on its own
+/// scale. A file, program or purpose is scored by how unwanted it is against its cut (held below
+/// it after a first-question breach, denied at or above); a service call that changes, sends,
+/// deletes, moves money or grants access, by how much of it came from a tool result (held from
+/// 0.3, denied from 0.5, as withhuman-core's `target`). One the trace keeps no score for has
+/// none, and shows by what it asked alone.
+fn second_question(trace: &Value) -> Option<Value> {
+    let c = &trace["check"];
+    let branch = c["branch"].as_str()?;
+    if matches!(branch, "none" | "clear" | "safeguard") {
+        return None;
+    }
+    let target = c["target"]["from_result"].as_f64();
+    if c["verdict"].is_null() && c["unwanted"].is_null() && target.is_none() {
+        return None;
+    }
+    let held = c["breach"].as_bool() == Some(true);
+    let cut = super::trace::check_cut(c, super::trace::exchange(trace, "check"));
+    let (score, review, deny) = match (c["unwanted"].as_f64(), cut, target) {
+        (Some(unwanted), Some(cut), _) => (Some(unwanted), if held { 0.0 } else { cut }, cut),
+        (_, _, Some(from_result)) => (Some(from_result), if held { 0.0 } else { 0.3 }, 0.5),
+        _ => (None, 0.0, 1.0),
+    };
+    Some(json!({
+        "stage": "2차 질문",
+        "asked": match branch {
+            "file" => "요청 밖 내용 추가",
+            "run" => "요청 밖 코드 실행",
+            "change" => "요청 밖 변경",
+            "send" => "요청 밖 전송",
+            "delete" => "요청 밖 삭제",
+            "transact" => "요청 밖 거래",
+            "access" => "요청 밖 권한 변경",
+            _ => "요청 밖 목적",
+        },
+        "score": score,
+        "review": review,
+        "deny": deny,
+    }))
+}
+
 /// How the engine judged a Call, from its trace: the rule it decided by, the worst of what the
 /// Call breaks, its deviation score and the thresholds it was held to, and what it was linked to.
 fn judgement(model: &Model, seq: i64) -> Value {
@@ -279,30 +321,13 @@ fn judgement(model: &Model, seq: i64) -> Value {
         .zip(trace["thresholds"]["deny"].as_f64())
         .unwrap_or_else(|| super::trace::default_thresholds(link));
     let d = &trace["deviation"];
-    // The second question decides where it was asked: its own score against its cut, allowed
-    // below (held, after a first-question breach) and denied at or above.
-    let c = &trace["check"];
-    let second = c["unwanted"].as_f64().zip(super::trace::check_cut(
-        c,
-        super::trace::exchange(&trace, "check"),
-    ));
-    if let Some((unwanted, cut)) = second {
-        let held = c["breach"].as_bool() == Some(true);
-        return json!({
-            "stage": "2차 질문",
-            "asked": match c["branch"].as_str() {
-                Some("file") => "요청 밖 내용 추가",
-                Some("run") => "요청 밖 코드 실행",
-                _ => "요청 밖 목적",
-            },
-            "rule": node.props.get("decision_rule"),
-            "worst": d["worst"].as_str().filter(|w| *w != "none"),
-            "score": unwanted,
-            "review": if held { 0.0 } else { cut },
-            "deny": cut,
-            "link": link,
-        });
+    if let Some(mut second) = second_question(&trace) {
+        second["rule"] = json!(node.props.get("decision_rule"));
+        second["worst"] = json!(d["worst"].as_str().filter(|w| *w != "none"));
+        second["link"] = json!(link);
+        return second;
     }
+    let c = &trace["check"];
     json!({
         "stage": if c["branch"] == "safeguard" { "규칙" } else { "1차 질문" },
         "rule": node.props.get("decision_rule"),
@@ -613,6 +638,48 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn a_call_the_second_question_decided_shows_that_question_alone() {
+        use super::second_question;
+        // A purpose asked: its own score against its cut.
+        let purpose = second_question(
+            &json!({"check": {"branch": "purpose", "unwanted": 0.82, "verdict": "DENY"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                purpose["asked"].clone(),
+                purpose["score"].clone(),
+                purpose["deny"].clone()
+            ),
+            (json!("요청 밖 목적"), json!(0.82), json!(0.4))
+        );
+        // A service call that grants access: by how much came from a tool result.
+        let access = second_question(&json!({"check": {"branch": "access", "verdict": "DENY", "target": {"from_result": 0.7, "unchosen": 0.1}}})).unwrap();
+        assert_eq!(
+            (
+                access["asked"].clone(),
+                access["score"].clone(),
+                access["review"].clone(),
+                access["deny"].clone()
+            ),
+            (
+                json!("요청 밖 권한 변경"),
+                json!(0.7),
+                json!(0.3),
+                json!(0.5)
+            )
+        );
+        // Asked, with no score kept: what it asked alone.
+        let send =
+            second_question(&json!({"check": {"branch": "send", "verdict": "REVIEW"}})).unwrap();
+        assert!(send["score"].is_null());
+        // Not asked: the first question's.
+        assert!(second_question(&json!({"check": {"branch": "clear"}})).is_none());
+        assert!(second_question(&json!({"check": {"branch": "none"}})).is_none());
+        assert!(second_question(&json!({})).is_none());
+    }
 
     use super::*;
     use crate::layout::Model;
