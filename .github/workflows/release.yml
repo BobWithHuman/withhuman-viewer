@@ -1,7 +1,7 @@
 name: Release
 
-# A version tag (v1.2.3) builds the universal app, signs it with the Developer ID, has Apple
-# notarize it, and drafts a GitHub release with the disk image. Run by hand, it does the same
+# A version tag (v1.2.3) builds the universal app (the security team's), signs it with the
+# Developer ID, has Apple notarize it, and drafts a GitHub release with the disk image. Run by hand, it does the same
 # without a release: the signed disk image is left as a workflow artifact, to try the pipeline.
 on:
   push:
@@ -25,6 +25,8 @@ jobs:
     timeout-minutes: 60
     env:
       SIGNING_IDENTITY: "Developer ID Application: seonung park (T77ZY4CF39)"
+      # The app released: the security team's (`admin`), or the developer's (`dev`).
+      VIEWER_APP: admin
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
