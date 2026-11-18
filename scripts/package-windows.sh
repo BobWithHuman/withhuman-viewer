@@ -40,6 +40,7 @@ cat > "$config" <<JSON
 }
 JSON
 cargo packager --release --config "$config"
-# A name without spaces, as the macOS files have.
-mv "dist/${product}_${version}_x64-setup.exe" "dist/${file}_${version}_x64-setup.exe"
+# cargo-packager names the installer after the package; each app's own name, as the macOS
+# files have.
+mv "dist/withhuman-viewer_${version}_x64-setup.exe" "dist/${file}_${version}_x64-setup.exe"
 ls -l "dist/${file}_${version}_x64-setup.exe"
