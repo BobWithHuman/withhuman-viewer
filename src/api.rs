@@ -131,7 +131,9 @@ impl Backend {
                 .await
             }
         };
-        let sessions: Vec<Session> = typed(value)?;
+        let mut sessions: Vec<Session> = typed(value)?;
+        // A session opened and closed with nothing asked or done in it is not a session to read.
+        sessions.retain(|s| !s.empty());
         // A client ID no setup registered is named by the folders its sessions ran in.
         crate::machines::learn_folders(&sessions);
         Ok(sessions)
@@ -850,8 +852,9 @@ fn sessions_cache(url: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     url.hash(&mut hasher);
-    // The number is the rows' shape: a file of an older shape is left unread.
-    config_dir().join(format!("sessions1-{:016x}.json", hasher.finish()))
+    // The number is the rows' shape: a file of an older shape is left unread. 2: a session's
+    // client ID falls back to the session's own.
+    config_dir().join(format!("sessions2-{:016x}.json", hasher.finish()))
 }
 
 /// The file a store's Calls are kept in between reads, named after the store's address.

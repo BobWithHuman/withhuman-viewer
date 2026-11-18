@@ -213,9 +213,17 @@ pub(super) fn page(
     found.extend(edr_shadow(inv, &host));
     found.sort_by_key(|a| std::cmp::Reverse(a["last_seen"].as_i64()));
     page["shadow"] = json!(found);
+    // A session the list leaves out (opened and closed with nothing asked or done) is left out
+    // here too: one in the list's span the list does not have.
+    let since = titles.values().filter_map(|s| s.created_at).min();
     page["sessions"] = inv
         .sessions
         .iter()
+        .filter(|r| {
+            titles.contains_key(&r.session_id)
+                || r.ended_at.is_none()
+                || since.is_none_or(|since| r.created_at.is_none_or(|at| at < since))
+        })
         .map(|r| {
             let known = titles.get(&r.session_id);
             json!({
@@ -373,6 +381,15 @@ fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
             };
         }
         runs.extend(run);
+        // What ran before the machine was set up is history its setup answered: shadow AI is
+        // what runs past the hooks once they are there.
+        let set_up = inv
+            .clients
+            .iter()
+            .filter(|c| c.edr_agent_id.as_deref() == Some(edr))
+            .filter_map(|c| c.registered_at)
+            .min();
+        runs.retain(|r| set_up.is_none_or(|at| r.1 >= at));
         for (first, last, scans, agent, then, command) in runs {
             found.push(json!({
                 "device": device, "host": name(then), "agent": agent, "project": null,
@@ -639,6 +656,34 @@ mod tests {
             ..Inventory::default()
         };
         assert!(edr_shadow(&inv, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn what_ran_before_the_machine_was_set_up_is_no_shadow_ai() {
+        use crate::model::EdrSighting;
+        const H: i64 = 60 * 60_000;
+        let at = 1_000_000_000;
+        let seen = |hours: i64| EdrSighting {
+            agent_id: "005".into(),
+            running_at: at + hours * H,
+            agent: "claude-code".into(),
+            ..EdrSighting::default()
+        };
+        let inv = Inventory {
+            // Set up an hour in: the scan before is history, the one after with no session is not.
+            clients: vec![Device {
+                client_id: "default/hye".into(),
+                hostname: Some("Hye-Jeong".into()),
+                registered_at: Some(at + H),
+                edr_agent_id: Some("005".into()),
+                ..Device::default()
+            }],
+            sightings: Some(vec![seen(0), seen(5)]),
+            ..Inventory::default()
+        };
+        let found = edr_shadow(&inv, &HashMap::new());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["first"], at + 5 * H);
     }
 
     #[test]

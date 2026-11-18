@@ -40,6 +40,16 @@ pub struct Session {
     pub intents: Vec<(Option<String>, i64)>,
 }
 
+impl Session {
+    /// Opened and closed with nothing asked or done: no prompt, no intent, no Call.
+    pub fn empty(&self) -> bool {
+        self.prompt.as_deref().is_none_or(|p| p.trim().is_empty())
+            && self.intent.as_deref().is_none_or(|i| i.trim().is_empty())
+            && self.calls == 0
+            && self.intents.is_empty()
+    }
+}
+
 /// One Call as the security team's charts count it (`graph::CALL_FACTS`).
 #[cfg_attr(not(feature = "admin"), allow(dead_code))]
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -760,4 +770,24 @@ pub struct McpUse {
     /// `ALLOW`, `REVIEW` or `DENY`, as for any Call.
     pub decision: String,
     pub ran: bool,
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::Session;
+
+    #[test]
+    fn a_session_with_nothing_asked_or_done_is_empty() {
+        assert!(Session::default().empty());
+        let asked = Session {
+            prompt: Some("고쳐 줘".into()),
+            ..Session::default()
+        };
+        assert!(!asked.empty());
+        let called = Session {
+            calls: 1,
+            ..Session::default()
+        };
+        assert!(!called.empty());
+    }
 }
