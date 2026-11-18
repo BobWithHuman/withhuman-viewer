@@ -170,10 +170,9 @@ fn by_folder(
     names: &HashMap<String, String>,
 ) -> HashMap<String, String> {
     let registered = |client: &str| {
-        devices.iter().any(|d| {
-            d.client_id == client
-                && (d.hostname.is_some() || real_serial(d.serial.as_deref()).is_some())
-        })
+        devices
+            .iter()
+            .any(|d| d.client_id == client && registered(d))
     };
     let mut machines_of: HashMap<&str, BTreeSet<&str>> = HashMap::new();
     for (client, roots) in folders {
@@ -229,6 +228,25 @@ pub fn learn_folders(sessions: &[Session]) {
         known.folders = folders;
         remake(&mut known);
     }
+}
+
+/// Whether a setup registered the device: it reported a host name or a serial.
+fn registered(d: &Device) -> bool {
+    d.hostname.is_some() || real_serial(d.serial.as_deref()).is_some()
+}
+
+/// The registered client ID that stands for a client ID's machine in the inventory: itself when
+/// registered, else the machine's latest-heard registered client ID; none when the machine is
+/// unknown or has none.
+pub fn device(client: &str) -> Option<String> {
+    let known = KNOWN.read().ok()?;
+    let name = known.names.get(client)?;
+    known
+        .devices
+        .iter()
+        .filter(|d| registered(d) && known.names.get(&d.client_id) == Some(name))
+        .max_by_key(|d| (d.client_id == client, d.last_seen.or(d.updated_at)))
+        .map(|d| d.client_id.clone())
 }
 
 /// The machine of a client ID: its name, or the ID cut short while nothing tells of it.

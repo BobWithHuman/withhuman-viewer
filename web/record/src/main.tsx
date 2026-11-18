@@ -1,6 +1,6 @@
 import * as TT from "@radix-ui/react-tooltip";
 import { ReactFlowProvider } from "@xyflow/react";
-import { TriangleAlert } from "lucide-react";
+import { ArrowUpRight, Laptop, TriangleAlert } from "lucide-react";
 import { StrictMode, useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { DEMO, type RecordData } from "./data";
@@ -58,7 +58,14 @@ function App() {
             )}
           </div>
           <div className="mt-1.5 flex items-center gap-2 text-[13px] text-mut">
-            <span>{data.session.device}</span><span className="text-dim">|</span><span className="font-mono text-[12px]">세션 {data.session.id}</span>
+            {data.session.client ? (
+              <button onClick={() => (window.parent as unknown as { __whRecordSend?: (m: unknown) => void }).__whRecordSend?.({ do: "device", client: data.session.client })}
+                title="인벤토리에서 열기"
+                className="group -mx-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 text-fg/90 hover:bg-white/[.06] hover:text-fg">
+                <Laptop className="size-3.5 text-mut group-hover:text-fg" />{data.session.device}<ArrowUpRight className="size-3 text-dim group-hover:text-fg" />
+              </button>
+            ) : <span>{data.session.device}</span>}
+            <span className="text-dim">|</span><span className="font-mono text-[12px]">세션 {data.session.id}</span>
             {data.steps.some(flagged) && <span className="text-dim">|</span>}
             {chip("outside", "bg-catch/15 text-catch")}
             {chip("deny", "bg-block/15 text-block")}
