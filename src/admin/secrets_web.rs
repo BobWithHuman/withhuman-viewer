@@ -134,7 +134,7 @@ pub(super) fn page(
                     "from": b.from,
                     "at": b.mentions.first().and_then(|m| m.at),
                 })),
-                "client": if t.client.is_empty() { NO_NAME } else { &t.client },
+                "client": if t.client.is_empty() { NO_NAME.to_owned() } else { crate::machines::name(&t.client) },
                 "host": hosts.0.get(&t.client),
                 "calls": t.calls,
                 "outRan": t.out_ran,
