@@ -89,8 +89,10 @@ SELECT s.session_id AS id, s.version, s.created_at,
           WHERE g > 0 GROUP BY g) t) AS intents,
        (SELECT cwd FROM nodes WHERE session_id = s.session_id AND cwd IS NOT NULL
         ORDER BY "order" LIMIT 1) AS cwd,
-       (SELECT client_id FROM nodes WHERE session_id = s.session_id AND client_id IS NOT NULL
-        ORDER BY "order" LIMIT 1) AS client,
+       -- The client ID its Calls carried, else the one the session was recorded with (a session
+       -- of a prompt or two and no Call carries it only there).
+       coalesce((SELECT client_id FROM nodes WHERE session_id = s.session_id AND client_id IS NOT NULL
+        ORDER BY "order" LIMIT 1), s.client_id) AS client,
        (SELECT decision_mode FROM nodes WHERE session_id = s.session_id AND kind = 'Call'
         AND decision_mode IS NOT NULL ORDER BY decided_at DESC NULLS LAST LIMIT 1) AS mode
 FROM (SELECT * FROM sessions WHERE created_at IS NOT NULL

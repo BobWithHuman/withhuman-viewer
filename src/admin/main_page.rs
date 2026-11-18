@@ -31,7 +31,9 @@ pub(super) fn now_ms() -> i64 {
 pub(super) fn machine_of(s: &Session) -> String {
     s.client
         .as_deref()
-        .map_or_else(|| NO_NAME.into(), crate::machines::name)
+        .map(crate::machines::name)
+        .or_else(|| s.cwd.as_deref().and_then(crate::machines::of_folder))
+        .unwrap_or_else(|| NO_NAME.into())
 }
 
 /// The machine a Call came from: by its serial or host name from the inventory, so a machine's

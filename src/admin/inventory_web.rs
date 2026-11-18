@@ -329,9 +329,13 @@ fn edr_shadow(inv: &Inventory, host: &HashMap<&str, &str>) -> Vec<Value> {
             .filter(|c| c.edr_agent_id.as_deref() == Some(edr))
             .map(|c| c.client_id.as_str())
             .collect();
+        // A session open on the machine: from one of its client IDs, or from any other client ID
+        // that is the same machine (one a script made up on it, [`crate::machines`]).
+        let machine: Vec<String> = clients.iter().map(|c| crate::machines::name(c)).collect();
+        let ours = |c: &str| clients.contains(&c) || machine.contains(&crate::machines::name(c));
         let open = |at: i64| {
             inv.sessions.iter().any(|r| {
-                r.client_id.as_deref().is_some_and(|c| clients.contains(&c))
+                r.client_id.as_deref().is_some_and(ours)
                     && r.created_at.is_some_and(|start| start <= at + SLACK_MS)
                     && match r.ended_at {
                         Some(end) => end + SLACK_MS >= at,
@@ -589,6 +593,52 @@ mod tests {
         assert_eq!(of("004").unwrap()["host"], "nobody");
         assert!(of("005").is_none());
         assert_eq!(found.len(), 3);
+    }
+
+    #[test]
+    fn a_session_a_script_ran_on_the_machine_under_its_own_client_id_is_no_shadow_ai() {
+        use crate::model::{EdrDevice, Session};
+        let at = 1_000_000_000;
+        let bob = Device {
+            client_id: "personal/bob".into(),
+            hostname: Some("BoBbook".into()),
+            serial: Some("PUXJV048".into()),
+            edr_agent_id: Some("003".into()),
+            ..Device::default()
+        };
+        // The lab's sessions ran under a client ID it made up, in BoBbook's folders.
+        crate::machines::learn(std::slice::from_ref(&bob));
+        let cwd = |c: &str, cwd: &str| Session {
+            client: Some(c.into()),
+            cwd: Some(cwd.into()),
+            ..Session::default()
+        };
+        crate::machines::learn_folders(&[
+            cwd("personal/bob", "C:\\WithHuman\\demo-ec2"),
+            cwd(
+                "intent-drift-lab/s3",
+                "C:\\WithHuman\\intent-drift-lab\\runs\\s3",
+            ),
+        ]);
+        let inv = Inventory {
+            clients: vec![bob],
+            sessions: vec![SessionRun {
+                session_id: "lab".into(),
+                client_id: Some("intent-drift-lab/s3".into()),
+                created_at: Some(at - 60_000),
+                last_seen_at: Some(at),
+                ..SessionRun::default()
+            }],
+            edr: Some(vec![EdrDevice {
+                agent_id: "003".into(),
+                name: "Iamsh-win".into(),
+                agent: Some("claude-code".into()),
+                running_at: Some(at),
+                ..EdrDevice::default()
+            }]),
+            ..Inventory::default()
+        };
+        assert!(edr_shadow(&inv, &HashMap::new()).is_empty());
     }
 
     #[test]
