@@ -50,10 +50,10 @@ jobs:
       - name: Check dependencies
         uses: EmbarkStudios/cargo-deny-action@v2
 
-  # The developer's app on Windows: built, linted and tested there, and packaged as its
+  # Both apps on Windows: built, linted and tested there, and the developer's packaged as its
   # installer, so what only breaks on Windows shows up here.
   windows:
-    name: Windows developer app
+    name: Windows
     runs-on: windows-latest
     defaults:
       run:
@@ -75,6 +75,13 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked
+
+      # The security team's app (`cargo admin`) too: built, linted and tested on Windows.
+      - name: Run Clippy on the security team's app
+        run: cargo clippy --all-targets --locked --no-default-features --features admin -- -D warnings
+
+      - name: Run the security team's app's tests
+        run: cargo test --locked --no-default-features --features admin
 
       - name: Install cargo-packager
         uses: taiki-e/install-action@v2
