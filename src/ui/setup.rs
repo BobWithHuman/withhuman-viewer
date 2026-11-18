@@ -21,11 +21,24 @@ enum Status {
     Err(String),
 }
 
+/// The app's smallest window, no larger than most of its screen: a laptop with its display
+/// scaled up (a 1366×768 one at 125% is 1093×614) must still be able to shrink it.
+pub fn work_min() -> LogicalSize<f64> {
+    let window = dioxus::desktop::window();
+    let (mut w, mut h) = WORK_MIN;
+    if let Some(m) = window.current_monitor() {
+        let size = m.size().to_logical::<f64>(m.scale_factor());
+        w = w.min(size.width * 0.8);
+        h = h.min(size.height * 0.75);
+    }
+    LogicalSize::new(w, h)
+}
+
 /// The window at the app's size: where it was last time, else in the middle of its screen.
 pub fn grow(state: AppState) {
     let window = dioxus::desktop::window();
     window.set_resizable(true);
-    window.set_min_inner_size(Some(LogicalSize::new(WORK_MIN.0, WORK_MIN.1)));
+    window.set_min_inner_size(Some(work_min()));
     let place = state.prefs.peek().window;
     let (w, h) = place.map_or(WORK_SIZE, |p| (p.width, p.height));
     window.set_inner_size(LogicalSize::new(w, h));
@@ -59,7 +72,9 @@ pub fn shrink(mut state: AppState) {
             at.y + (size.height - h) / 2.0,
         ));
     }
-    window.set_resizable(false);
+    // A Mac keeps the setup's small window as it is; elsewhere it can still be resized, as a
+    // window there that cannot be sized back from maximized is stuck.
+    window.set_resizable(!cfg!(target_os = "macos"));
     state.screen.set(Screen::Setup);
 }
 

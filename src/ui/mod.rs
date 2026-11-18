@@ -527,13 +527,23 @@ fn use_window_place(mut state: AppState) {
     use dioxus::desktop::{LogicalPosition, LogicalSize};
 
     use_hook(move || {
+        let window = dioxus::desktop::window();
+        // The smallest window no larger than most of the screen, so a small or scaled-up
+        // display can still shrink it.
         if *state.screen.peek() == Screen::Setup {
+            if let Some(m) = window.current_monitor() {
+                let size = m.size().to_logical::<f64>(m.scale_factor());
+                window.set_min_inner_size(Some(LogicalSize::new(
+                    SETUP_SIZE.0.min(size.width * 0.8),
+                    SETUP_SIZE.1.min(size.height * 0.75),
+                )));
+            }
             return;
         }
+        window.set_min_inner_size(Some(setup::work_min()));
         let Some(place) = state.prefs.peek().window else {
             return;
         };
-        let window = dioxus::desktop::window();
         let on_screen = window.available_monitors().any(|m| {
             let scale = m.scale_factor();
             let at = m.position().to_logical::<f64>(scale);
