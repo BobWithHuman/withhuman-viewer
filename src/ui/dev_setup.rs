@@ -144,10 +144,10 @@ pub fn DevSetup() -> Element {
     }
 }
 
-/// Where the hooks go and the engine they report to, and the button that installs them (or
-/// takes them out). Shared by the first launch and the connection settings.
+/// Where the hooks go and the engine they report to, and the button that installs them. Shared by
+/// the first launch and the hooks' page, which `on_done` tells to look again.
 #[component]
-pub fn HookSetup() -> Element {
+pub fn HookSetup(on_done: Option<EventHandler<()>>) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let mut server = use_signal(|| state.public.peek().engine_api.clone());
@@ -166,33 +166,42 @@ pub fn HookSetup() -> Element {
             }
         });
     };
-    let run = {
+    let install = move |_| {
         let backend = backend.clone();
-        move |uninstall: bool| {
-            let backend = backend.clone();
-            let (s, f, srv, k) = (scope(), folder(), server(), key());
-            status.set(Status::Busy);
-            spawn(async move {
-                // The engine's address is kept for the next setup, as the security team's is.
-                if let Some(Ok(next)) = (!uninstall).then(|| backend.save_admin(&srv, None)) {
-                    state.public.set(next);
+        let (s, f, srv, k) = (scope(), folder(), server(), key());
+        status.set(Status::Busy);
+        spawn(async move {
+            // The engine's address is kept for the next setup, as the security team's is.
+            if let Ok(next) = backend.save_admin(&srv, None) {
+                state.public.set(next);
+            }
+            let at = f.clone();
+            let done = tokio::task::spawn_blocking(move || {
+                hooks::run(s, f.as_deref(), &srv, Some(&k), false)
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+            let added = at
+                .filter(|_| done.is_ok() && s == Scope::Folder)
+                .map(|f| f.display().to_string());
+            if let Some(at) = added {
+                let mut prefs = state.prefs.write();
+                if !prefs.hook_folders.contains(&at) {
+                    prefs.hook_folders.push(at);
                 }
-                let done = tokio::task::spawn_blocking(move || {
-                    hooks::run(s, f.as_deref(), &srv, Some(&k), uninstall)
-                })
-                .await
-                .map_err(|e| e.to_string())
-                .and_then(|r| r);
-                status.set(match (done, uninstall) {
-                    (Ok(_), true) => Status::Ok("훅 제거됨".into()),
-                    (Ok(d), false) => Status::Ok(match d.client_id {
-                        Some(id) => format!("설치됨 · 기기 {id}"),
-                        None => "설치됨".into(),
-                    }),
-                    (Err(e), _) => Status::Err(e),
-                });
+            }
+            status.set(match done {
+                Ok(d) => Status::Ok(match d.client_id {
+                    Some(id) => format!("설치됨 · 기기 {id}"),
+                    None => "설치됨".into(),
+                }),
+                Err(e) => Status::Err(e),
             });
-        }
+            if let Some(done) = on_done {
+                done.call(());
+            }
+        });
     };
     let busy = status() == Status::Busy;
     let ready = !busy
@@ -230,15 +239,114 @@ pub fn HookSetup() -> Element {
             }
         }
         div { class: "setup-actions",
-            button { class: "setup-pill", disabled: !ready, onclick: { let mut run = run.clone(); move |_| run(false) },
+            button { class: "setup-pill", disabled: !ready, onclick: install,
                 if busy { "설치 중…" } else { "훅 설치" }
             }
-            button { class: "setup-link", disabled: busy || (scope() == Scope::Folder && folder().is_none()), onclick: { let mut run = run.clone(); move |_| run(true) }, "제거" }
         }
         match status() {
             Status::Ok(t) => rsx! { p { class: "setup-note ok", "✓ {t}" } },
             Status::Err(t) => rsx! { p { class: "setup-note err", "{t}" } },
             _ => rsx! {},
+        }
+    }
+}
+
+/// The hooks' own page: the setups found on this machine (the device's, set by an administrator;
+/// the user's, for every folder; the folders the app installed in), each with the engine it
+/// reports to and a button to take it out, and a new setup below.
+#[component]
+pub fn HookPage() -> Element {
+    let mut state = use_context::<AppState>();
+    let mut looked = use_signal(|| 0u32);
+    let found = use_memo(move || {
+        let _ = looked();
+        hooks::installed(&state.prefs.read().hook_folders)
+    });
+    let device = use_memo(move || {
+        let _ = looked();
+        hooks::device_id()
+    });
+    let mut busy = use_signal(|| None::<std::path::PathBuf>);
+    let mut failed = use_signal(|| None::<String>);
+    let mut remove = move |install: hooks::Install| {
+        let (scope, folder) = match &install.at {
+            hooks::Where::Folder(f) => (Scope::Folder, Some(f.clone())),
+            _ => (Scope::Everywhere, None),
+        };
+        busy.set(Some(install.file.clone()));
+        failed.set(None);
+        spawn(async move {
+            let at = folder.clone();
+            let done = tokio::task::spawn_blocking(move || {
+                hooks::run(scope, folder.as_deref(), "", None, true)
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+            match done {
+                Ok(_) => {
+                    if let Some(at) = at.map(|f| f.display().to_string()) {
+                        state.prefs.write().hook_folders.retain(|f| *f != at);
+                    }
+                }
+                Err(e) => failed.set(Some(e)),
+            }
+            busy.set(None);
+            looked += 1;
+        });
+    };
+    let list = found();
+    let device_label = device().unwrap_or_else(|| "없음".into());
+    rsx! {
+        div { class: "hooks-page",
+            header { class: "hooks-head",
+                h1 { "훅" }
+                span { class: "hooks-chip", "기기" b { "{device_label}" } }
+            }
+            section { class: "setup-block",
+                div { class: "setup-k", "설치됨" span { class: "hooks-count", "{list.len()}" } }
+                if list.is_empty() {
+                    p { class: "hooks-empty", "없음" }
+                }
+                for install in list {
+                    {
+                        let (label, tone) = match &install.at {
+                            hooks::Where::Device => ("기기 전체", "device"),
+                            hooks::Where::Everywhere => ("모든 폴더", "all"),
+                            hooks::Where::Folder(_) => ("폴더", "folder"),
+                        };
+                        let place = match &install.at {
+                            hooks::Where::Folder(f) => f.display().to_string(),
+                            _ => install.file.display().to_string(),
+                        };
+                        let engine = install.engine.clone().unwrap_or_else(|| "엔진 모름".into());
+                        let working = busy().as_ref() == Some(&install.file);
+                        let managed = install.at == hooks::Where::Device;
+                        let it = install.clone();
+                        rsx! {
+                            div { class: "hooks-row", key: "{install.file.display()}",
+                                span { class: "hooks-scope {tone}", "{label}" }
+                                span { class: "hooks-place", title: "{place}", "{place}" }
+                                span { class: "hooks-engine", title: "{engine}", "{engine}" }
+                                if managed {
+                                    span { class: "hooks-lock", "관리자" }
+                                } else {
+                                    button { class: "setup-link", disabled: busy().is_some(), onclick: move |_| remove(it.clone()),
+                                        if working { "제거 중…" } else { "제거" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(e) = failed() {
+                    p { class: "setup-note err", "{e}" }
+                }
+            }
+            section { class: "setup-block",
+                div { class: "setup-k", "새로 설치" }
+                HookSetup { on_done: move |_| looked += 1 }
+            }
         }
     }
 }

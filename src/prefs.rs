@@ -20,6 +20,8 @@ pub struct Prefs {
     pub compare_known: Vec<String>,
     pub compare_chosen: Option<Vec<String>>,
     pub condition_names: std::collections::BTreeMap<String, String>,
+    /// The folders the developer's app installed hooks in, to list and take them out again.
+    pub hook_folders: Vec<String>,
 }
 
 /// Where the window was, in logical points.

@@ -85,7 +85,8 @@ pub fn SettingsSheet() -> Element {
             onclick: move |_| state.settings_open.set(false),
             div { class: "sheet", onclick: move |e| e.stop_propagation(),
                 h2 { "데이터 연결" }
-                div { class: "choice",
+                // The developer's app has no demo to choose.
+                div { class: "choice", hidden: !cfg!(feature = "admin"),
                     button { class: if !demo() { "on" } else { "" }, onclick: move |_| demo.set(false),
                         strong { "엔진 데이터" }
                         span { "WithHuman 엔진이 기록한 실제 세션" }

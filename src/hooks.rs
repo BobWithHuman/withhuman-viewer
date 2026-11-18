@@ -153,9 +153,102 @@ pub fn device_id() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Where a WithHuman setup was found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Where {
+    /// Every folder of this user.
+    Everywhere,
+    /// One project folder.
+    Folder(PathBuf),
+    /// Every user and folder of the device, set by an administrator.
+    Device,
+}
+
+/// A WithHuman setup found on this machine: where, its settings file, and the engine its hooks
+/// report to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Install {
+    pub at: Where,
+    pub file: PathBuf,
+    pub engine: Option<String>,
+}
+
+/// The engine the WithHuman hooks in Claude Code settings report to; none when the settings
+/// hold no WithHuman hook. An HTTP hook names it in its URL, the PreToolUse command hook as its
+/// last argument.
+fn engine_of(settings: &serde_json::Value) -> Option<Option<String>> {
+    let mut found = None;
+    for groups in settings["hooks"].as_object()?.values() {
+        for group in groups.as_array().into_iter().flatten() {
+            for hook in group["hooks"].as_array().into_iter().flatten() {
+                let url = hook["url"].as_str().filter(|u| u.contains("/v1/hooks/"));
+                let command = hook["command"]
+                    .as_str()
+                    .filter(|c| c.contains("pre-tool-use.py"))
+                    .and_then(|c| c.split_whitespace().last());
+                if let Some(target) = url.or(command) {
+                    let engine = target.split("/v1/hooks/").next().map(str::to_owned);
+                    found = Some(engine.filter(|e| e.starts_with("http")));
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The setup in the settings file at `file`, if it holds WithHuman's hooks.
+fn found(at: Where, file: PathBuf) -> Option<Install> {
+    let text = std::fs::read_to_string(&file).ok()?;
+    let settings: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let engine = engine_of(&settings)?;
+    Some(Install { at, file, engine })
+}
+
+/// Claude Code's managed settings file WithHuman's device-wide setup writes, by system.
+fn managed_file() -> PathBuf {
+    let folder = if cfg!(target_os = "macos") {
+        "/Library/Application Support/ClaudeCode"
+    } else if cfg!(windows) {
+        "C:\\Program Files\\ClaudeCode"
+    } else {
+        "/etc/claude-code"
+    };
+    Path::new(folder).join("managed-settings.d/50-withhuman.json")
+}
+
+/// The WithHuman setups on this machine: the device's, the user's, and those in `folders` (the
+/// ones the app installed); the folders whose setup is gone are left out.
+pub fn installed(folders: &[String]) -> Vec<Install> {
+    let mut out = Vec::new();
+    out.extend(found(Where::Device, managed_file()));
+    if let Some(home) = dirs::home_dir() {
+        out.extend(found(Where::Everywhere, home.join(".claude/settings.json")));
+    }
+    for folder in folders {
+        let folder = PathBuf::from(folder);
+        let file = folder.join(".claude/settings.json");
+        out.extend(found(Where::Folder(folder), file));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_engine_withhumans_hooks_report_to() {
+        let settings = serde_json::json!({"hooks": {
+            "PreToolUse": [{"hooks": [{"type": "command", "command": "\"/usr/bin/python3\" \"/h/pre-tool-use.py\" https://e.example/v1/hooks/PreToolUse"}]}],
+            "Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}],
+        }});
+        assert_eq!(engine_of(&settings), Some(Some("https://e.example".into())));
+        let http = serde_json::json!({"hooks": {"SessionStart": [{"hooks": [{"type": "http", "url": "http://127.0.0.1:3000/v1/hooks/SessionStart"}]}]}});
+        assert_eq!(engine_of(&http), Some(Some("http://127.0.0.1:3000".into())));
+        let mine = serde_json::json!({"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo"}]}]}});
+        assert_eq!(engine_of(&mine), None);
+        assert_eq!(engine_of(&serde_json::json!({})), None);
+    }
 
     #[test]
     fn a_folder_setup_names_its_folder_and_a_global_one_none() {

@@ -2028,3 +2028,35 @@ div.admin-hbar:hover { background: none; }
 .tb-seg button.on, .tb-seg button.on:hover:not(:disabled) { background: #3a3a40; color: #fff; font-weight: 600; }
 .tb-seg button.on svg { color: #fff; }
 .rail button.product.on { background: #2e2e32; color: #fff; box-shadow: inset 2px 0 0 #6b9be0; }
+
+/* ----- The developer's hooks page: the setups found, and a new one. ----- */
+.hooks-page { color: #ededed; height: 100%; overflow: auto; padding: 28px 32px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; max-width: 920px; }
+.hooks-head { display: flex; align-items: baseline; gap: 14px; }
+.hooks-head h1 { margin: 0; font-size: 22px; font-weight: 650; }
+.hooks-chip { display: inline-flex; gap: 6px; align-items: baseline; font-size: 12px; color: #9a9a9a; }
+.hooks-chip b { font-weight: 500; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.hooks-count { margin-left: 6px; font-variant-numeric: tabular-nums; color: #9a9a9a; font-weight: 500; }
+.hooks-empty { margin: 4px 0 0; font-size: 12.5px; color: #8e8e8e; }
+.hooks-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(0, 220px) 64px; align-items: center; gap: 12px;
+  padding: 9px 2px; border-top: 1px solid rgba(255, 255, 255, .07); font-size: 12.5px; }
+.hooks-row:first-of-type { border-top: 0; }
+.hooks-scope { justify-self: start; padding: 2px 7px; border-radius: 5px; font-size: 11.5px; font-weight: 600; background: rgba(255, 255, 255, .08); color: #d6d6d6; }
+.hooks-scope.all { background: rgba(107, 155, 224, .16); color: #8fb4ec; }
+.hooks-scope.device { background: rgba(88, 192, 164, .15); color: #6fd3b6; }
+.hooks-place, .hooks-engine { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.hooks-place { color: #d6d6d6; }
+.hooks-engine { color: #9a9a9a; }
+.hooks-lock { justify-self: end; font-size: 11.5px; color: #9a9a9a; }
+.hooks-page .setup-block { background: #1c1c1c; box-shadow: inset 0 0 0 1px #262626; border-radius: 10px; }
+.hooks-page input { height: 26px; padding: 0 8px; border-radius: 5px; border: 1px solid #2e2e2e; background: var(--af-field); color: #ededed; }
+.hooks-page input:focus { outline: none; border-color: var(--af-blue); box-shadow: 0 0 0 2px rgba(52, 120, 246, .35); }
+.hooks-page input::placeholder { color: #6a6a6a; }
+.hooks-page .setup-pill { height: 26px; border-radius: 5px; background: var(--af-btn); color: #f2f2f2; }
+.hooks-page .setup-pill:hover:not(:disabled) { background: #686868; }
+.hooks-page .setup-note { color: #8e8e8e; } .hooks-page .setup-note.ok { color: var(--af-lime); } .hooks-page .setup-note.err { color: #ff8b8b; }
+.hooks-page .setup-link { color: #6aa5ff; }
+.hooks-page .setup-choice button { background: var(--af-field); border: 1px solid #2e2e2e; color: #ededed; }
+.hooks-page .setup-choice button.on { background: #192d53; border-color: #3577f6; box-shadow: none; }
+.hooks-page .setup-choice span { color: #9a9a9a; }
+.hooks-page .setup-form label { color: #9a9a9a; }
+.hooks-row .setup-link { justify-self: end; }

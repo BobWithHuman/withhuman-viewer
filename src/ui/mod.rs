@@ -99,7 +99,11 @@ fn first_screen() -> Screen {
         Ok("secrets") => Screen::Secrets,
         #[cfg(feature = "admin")]
         Ok("inventory") => Screen::Inventory,
-        // The developer's app is 기록 alone.
+        #[cfg(not(feature = "admin"))]
+        Ok("hooks") => Screen::Hooks,
+        // The developer's app is 기록 and its hooks: it opens on the hooks while none are set up.
+        #[cfg(not(feature = "admin"))]
+        _ if crate::hooks::installed(&Prefs::load().hook_folders).is_empty() => Screen::Hooks,
         _ if !cfg!(feature = "admin") => Screen::Work,
         _ => Screen::Home,
     }
@@ -197,6 +201,9 @@ pub enum Screen {
     Secrets,
     #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     Inventory,
+    /// The developer's hooks: those installed, and a new setup.
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    Hooks,
 }
 
 impl Screen {
@@ -383,6 +390,22 @@ pub fn App() -> Element {
                 }
             };
         }
+        #[cfg(not(feature = "admin"))]
+        Screen::Hooks => {
+            return rsx! {
+                div { class: "app",
+                    TopBar {}
+                    div { class: "app-body",
+                        div { class: "app-main", dev_setup::HookPage {} }
+                    }
+                    if (state.settings_open)() {
+                        settings::SettingsSheet {}
+                    }
+                }
+            };
+        }
+        #[cfg(feature = "admin")]
+        Screen::Hooks => {}
         Screen::FeatureA | Screen::FeatureB | Screen::Secrets | Screen::Inventory => {
             let screen = (state.screen)();
             return rsx! {
@@ -684,6 +707,7 @@ fn TopBar() -> Element {
         (Screen::FeatureB, _) => "b",
         // The rail's other products sit under the main page in the top bar.
         (s, _) if s.is_product() => "home",
+        (Screen::Hooks, _) => "hooks",
         _ => "graph",
     };
     let (dot, source) = match (p.demo, &*state.sessions.read()) {
@@ -723,27 +747,43 @@ fn TopBar() -> Element {
                 {sidebar_icon()}
             }
             span { class: "tb-logo", "W" }
-            div { class: "tb-seg", hidden: !cfg!(feature = "admin"), onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
-                button { class: "{seg(\"home\")}", onclick: move |_| go((state.page)(), mode),
-                    {line_icon(icons::HOUSE)}
-                    "{HOME_LABEL}"
-                }
-                button { class: "{seg(\"graph\")}", onclick: move |_| go(Screen::Work, Mode::Graph),
-                    {line_icon(icons::ROUTE)}
-                    "{SCREEN_LABELS.0}"
-                }
-                // The security team's app has no second screen here: what 감사 listed is on 메인.
-                if !cfg!(feature = "admin") {
-                    button { class: "{seg(\"a\")}", onclick: move |_| go(Screen::FeatureA, Mode::Graph),
-                        {line_icon(icons::LAYOUT_GRID)}
-                        "{SCREEN_LABELS.1}"
+            // The security team's screens; the developer's have their own below.
+            if cfg!(feature = "admin") {
+                div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
+                    button { class: "{seg(\"home\")}", onclick: move |_| go((state.page)(), mode),
+                        {line_icon(icons::HOUSE)}
+                        "{HOME_LABEL}"
+                    }
+                    button { class: "{seg(\"graph\")}", onclick: move |_| go(Screen::Work, Mode::Graph),
+                        {line_icon(icons::ROUTE)}
+                        "{SCREEN_LABELS.0}"
+                    }
+                    // The security team's app has no second screen here: what 감사 listed is on 메인.
+                    if !cfg!(feature = "admin") {
+                        button { class: "{seg(\"a\")}", onclick: move |_| go(Screen::FeatureA, Mode::Graph),
+                            {line_icon(icons::LAYOUT_GRID)}
+                            "{SCREEN_LABELS.1}"
+                        }
+                    }
+                    // The security team's 정책 waits until it has something to set.
+                    if !cfg!(feature = "admin") {
+                        button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
+                            {line_icon(icons::STAR)}
+                            "{SCREEN_LABELS.2}"
+                        }
                     }
                 }
-                // The security team's 정책 waits until it has something to set.
-                if !cfg!(feature = "admin") {
-                    button { class: "{seg(\"b\")}", onclick: move |_| go(Screen::FeatureB, Mode::Graph),
-                        {line_icon(icons::STAR)}
-                        "{SCREEN_LABELS.2}"
+            }
+            // The developer's app: 기록 and its hooks.
+            if !cfg!(feature = "admin") {
+                div { class: "tb-seg", onmousedown: move |e| e.stop_propagation(), ondoubleclick: move |e| e.stop_propagation(),
+                    button { class: "{seg(\"graph\")}", onclick: move |_| go(Screen::Work, Mode::Graph),
+                        {line_icon(icons::ROUTE)}
+                        "기록"
+                    }
+                    button { class: "{seg(\"hooks\")}", onclick: move |_| go(Screen::Hooks, Mode::Graph),
+                        {line_icon(icons::SHIELD_CHECK)}
+                        "훅"
                     }
                 }
             }
