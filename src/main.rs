@@ -59,8 +59,14 @@ fn main() {
             .with_title_hidden(true)
             .with_fullsize_content_view(true)
     };
+    // Elsewhere the window keeps its own title bar: no room is left for traffic lights.
+    let native_bar = if cfg!(target_os = "macos") {
+        ""
+    } else {
+        "<style>.titlebar, .tb-lights { display: none; }</style>"
+    };
     let head = format!(
-        "<meta charset=\"utf-8\"><style>{}</style>{}",
+        "<meta charset=\"utf-8\"><style>{}</style>{native_bar}{}",
         ui::CSS,
         ui::head_extra()
     );

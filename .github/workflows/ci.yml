@@ -50,6 +50,47 @@ jobs:
       - name: Check dependencies
         uses: EmbarkStudios/cargo-deny-action@v2
 
+  # The developer's app on Windows: built, linted and tested there, and packaged as its
+  # installer, so what only breaks on Windows shows up here.
+  windows:
+    name: Windows developer app
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Install cargo-packager
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Package the installer
+        run: scripts/package-windows.sh
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: withhuman-dev-windows
+          path: dist/*.exe
+          retention-days: 7
+
   # Packages the universal app unsigned, so a change that only breaks inside the bundle shows up
   # before a release does.
   package:

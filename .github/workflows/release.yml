@@ -1,8 +1,9 @@
 name: Release
 
 # A version tag (v1.2.3) builds the universal app (the security team's), signs it with the
-# Developer ID, has Apple notarize it, and drafts a GitHub release with the disk image. Run by hand, it does the same
-# without a release: the signed disk image is left as a workflow artifact, to try the pipeline.
+# Developer ID, has Apple notarize it, and drafts a GitHub release with the disk image; then the
+# developer's app for Windows is packaged as its installer and added to the draft. Run by hand, it
+# does the same without a release: the files are left as workflow artifacts, to try the pipeline.
 on:
   push:
     tags:
@@ -168,3 +169,61 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.app.tar.gz dist/*.app.tar.gz.sig \
             dist/latest.json dist/SHA256SUMS \
             --draft --generate-notes --title "WithHuman Viewer ${GITHUB_REF_NAME#v}"
+
+  # The developer's app for Windows (unsigned: Windows shows SmartScreen's warning the first
+  # time). It installs hooks on the machine it runs on; the security team's app is macOS only.
+  windows:
+    name: Windows developer app
+    needs: release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-packager
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Package the installer
+        run: scripts/package-windows.sh
+
+      # A name without spaces, as the macOS files have.
+      - name: Name the installer
+        working-directory: dist
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' ../Cargo.toml | head -1)
+          name="WithHuman-Dev_${version}_x64-setup.exe"
+          mv ./*.exe "$name"
+          sha256sum "$name" > SHA256SUMS-windows
+          echo "INSTALLER=$name" >> "$GITHUB_ENV"
+
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.exe
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: withhuman-dev-windows
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS-windows
+          retention-days: 14
+
+      - name: Add it to the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "dist/$INSTALLER" dist/SHA256SUMS-windows
