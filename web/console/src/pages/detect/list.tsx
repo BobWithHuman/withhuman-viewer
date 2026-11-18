@@ -124,8 +124,9 @@ const caseColumns = (marks: Record<string, Mark>, ran: boolean): ColumnDef<CaseG
   ) } as ColumnDef<CaseGroup>] : []),
   { id: "sev", header: "심각도", size: 88, accessorFn: (g) => g.risk, cell: ({ row }) => <SevBadge s={worst(row.original)} /> },
   // What the person had it do: the session's short name.
-  { id: "work", header: "작업", size: 260, accessorFn: (g) => named(first(g)) ?? "", cell: ({ row }) => {
-    const c = first(row.original), name = named(c);
+  // The case's newest session: the one it reached last, as the list is read newest first.
+  { id: "work", header: "작업", size: 260, accessorFn: (g) => named(g.calls[0]) ?? "", cell: ({ row }) => {
+    const c = row.original.calls[0], name = named(c);
     return <span className={cn("block truncate", !name && "text-muted-foreground")} title={c.prompt ?? undefined}>{name ?? NO_PROMPT}</span>;
   } },
   { id: "cause", header: "원인", size: 170, accessorFn: (g) => g.calls.find((c) => c.cause)?.cause_name ?? "", cell: ({ row }) => <CauseChip c={row.original.calls.find((c) => c.cause) ?? row.original.calls[0]} /> },
@@ -207,9 +208,14 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
     const open = (g: CaseGroup) => g.sessions.some((s) => isOpen(marks[s]));
     return shownBy === "all" ? allCases : allCases.filter((g) => open(g) === (shownBy === "open"));
   }, [allCases, shownBy, marks]);
-  // Those where something already ran, to answer for; those the engine stopped, to judge.
-  const done = useMemo(() => listed.filter((g) => g.ran > 0), [listed]);
-  const held = useMemo(() => listed.filter((g) => g.ran === 0), [listed]);
+  // Those where something already ran, to answer for; those the engine stopped, to judge: each
+  // Call where it belongs, so a Call stopped today is not hidden in a case that ran before.
+  const split = (calls: Call[]) => {
+    const all = cases(calls);
+    return shownBy === "all" ? all : all.filter((g) => g.sessions.some((s) => isOpen(marks[s])) === (shownBy === "open"));
+  };
+  const done = useMemo(() => split(newest.filter(happened)), [newest, shownBy, marks]);
+  const held = useMemo(() => split(newest.filter((c) => !happened(c))), [newest, shownBy, marks]);
   const causes = useMemo(() => sources(listed), [listed]);
   const sessions = view === "held" ? held : done;
   const columns = useMemo(() => caseColumns(marks, view !== "held"), [marks, view]);
