@@ -121,11 +121,8 @@ export function Judge({ j }: { j: NonNullable<Step["judge"]> }) {
             <i className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-fg ring-2 ring-bg" style={{ left: pct(at) }} />
           </span>
           <span className="flex justify-between text-[10.5px] text-dim tabular-nums">
-            <span>
-              {measure} <b className="font-semibold text-fg/85">{pct(at)}</b>
-              {j.without != null && <> · 지시 없으면 안 함 <b className={cx("font-semibold", j.without >= j.deny ? "text-block" : "text-fg/85")}>{pct(j.without)}</b></>}
-            </span>
-            <span>{j.review > 0 && j.review < j.deny && `확인 ${pct(j.review)} · `}차단 {pct(j.deny)}</span>
+            <span>{measure} <b className="font-semibold text-fg/85">{pct(at)}</b></span>
+            <span>차단 {pct(j.deny)}</span>
           </span>
         </span>
       )}
