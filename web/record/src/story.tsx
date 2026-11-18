@@ -7,7 +7,8 @@ import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { doing } from "./doing";
 import type { RecordData, Step } from "./data";
 import type { Hop } from "./path";
-import { DetailBody, Judge, KIND_ICON, RULE, VerdictChip, WORST, clock, cx, pct, tone } from "./parts";
+import { Output, scripted } from "./code";
+import { DetailBody, Judge, KIND_ICON, VerdictChip, clock, cx, judgeLabel, pct, tone } from "./parts";
 
 
 /** What a step is called here, in full: a tool loaded before use by its server and name
@@ -173,13 +174,15 @@ function ToolCard({ it, num, picked, onPick, cardRef }: {
   const body = s.text?.body;
   const flagged = (s.verdict && s.verdict !== "allow") || !!s.catch;
   const told = s.catch?.para?.trim() || why.by === "result" && why.quote;
+  // A Call the engine stopped is told in red, as it is marked; one it let through, in yellow.
+  const stopped = s.verdict === "deny";
   return (
     <div ref={cardRef} className="relative pb-3 pl-10">
       <span className={cx("absolute top-0 left-0 z-10 grid size-7 place-items-center rounded-full text-[12px] font-bold tabular-nums ring-4 ring-panel", flagged ? tone(s) : "bg-chip text-fg")}>{n}</span>
       <div className={cx("rounded-lg bg-bg px-3 py-2.5 transition-shadow", picked ? "ring-2 ring-pick" : end ? "ring-1 ring-white/25" : "ring-1 ring-white/8")}>
         <div onClick={onPick} className="flex w-full min-w-0 cursor-pointer items-start gap-1.5">
           <span className={cx("mt-px grid size-[18px] shrink-0 place-items-center rounded [&_svg]:size-[11px] [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
-          <span className="min-w-0 flex-1 text-[13px] leading-snug font-semibold text-fg [overflow-wrap:anywhere]">{doingOf(s)}</span>
+          <span className="min-w-0 flex-1 text-[13px] leading-snug font-semibold text-fg [overflow-wrap:break-word] [word-break:keep-all]">{doingOf(s)}</span>
           {flagged && <VerdictChip s={s} />}
           <span className="mt-px shrink-0 text-[11px] text-dim tabular-nums">{clock(s.at)}</span>
         </div>
@@ -187,10 +190,10 @@ function ToolCard({ it, num, picked, onPick, cardRef }: {
           {why.by === "result" && (
             <Field label="이유">
               <span className="flex flex-wrap items-center gap-1.5">
-                <span className="font-semibold text-catch">{num.has(why.from.id) ? `${num.get(why.from.id)}번 ` : ""}{doingOf(why.from)} 결과</span>
-                {why.p != null && <span className="rounded bg-catch/12 px-1.5 text-[11px] text-catch/90 tabular-nums" title="엔진이 이 호출의 원인 후보(요청·결과·없음) 중 가장 유력하다고 본 것">원인 1순위 · {pct(why.p)}</span>}
+                <span className={cx("font-semibold [word-break:keep-all]", stopped ? "text-block" : "text-catch")}>{num.has(why.from.id) ? `${num.get(why.from.id)}번 ` : ""}{doingOf(why.from)} 결과</span>
+                {why.p != null && <span className={cx("rounded px-1.5 text-[11px] tabular-nums", stopped ? "bg-block/12 text-block/90" : "bg-catch/12 text-catch/90")} title="엔진이 이 호출의 원인 후보(요청·결과·없음) 중 가장 유력하다고 본 것">원인 1순위 · {pct(why.p)}</span>}
               </span>
-              {told && <span className="mt-1 line-clamp-4 border-l-2 border-catch/60 pl-2 font-mono text-[11.5px] whitespace-pre-line text-fg/75">{told}</span>}
+              {told && <span className="mt-1.5 block"><Output text={told} shell={scripted(told, why.from.type)} lines={6} /></span>}
             </Field>
           )}
           {why.by === "request" && <Field label="이유" text="요청" />}
@@ -253,12 +256,11 @@ export function StoryHead({ s, turns, steps, onClick }: { s: Step; turns: number
     <button onClick={onClick} className="mx-3 mb-3 flex items-center gap-2.5 rounded-lg bg-bg px-3 py-2.5 text-left ring-1 ring-white/10 hover:ring-white/20">
       <span className={cx("grid size-8 shrink-0 place-items-center rounded-lg [&_svg]:size-4 [&_svg]:stroke-[2.4]", tone(s))}>{KIND_ICON[s.kind]}</span>
       <span className="min-w-0 flex-1">
-        <span className="line-clamp-2 text-[13.5px] leading-snug font-semibold text-fg [overflow-wrap:anywhere]">{doingOf(s)}</span>
+        <span className="line-clamp-2 text-[13.5px] leading-snug font-semibold text-fg [overflow-wrap:break-word] [word-break:keep-all]">{doingOf(s)}</span>
         <span className="flex items-center gap-1.5 text-[11.5px] text-mut tabular-nums">{s.type}<span className="text-dim">|</span>{clock(s.at)}<span className="text-dim">|</span>{steps}단계 · 턴 {turns}</span>
-        {s.judge && (s.judge.rule || s.judge.worst) && (
-          <span className="mt-1 flex flex-wrap gap-1">
-            {s.judge.rule && <span className="rounded bg-white/8 px-1.5 py-px text-[11px] text-fg" title={s.judge.rule}>{RULE[s.judge.rule] ?? s.judge.rule}</span>}
-            {s.judge.worst && <span className="rounded bg-block/15 px-1.5 py-px text-[11px] text-block" title={s.judge.worst}>{WORST[s.judge.worst] ?? s.judge.worst}</span>}
+        {s.judge && judgeLabel(s.judge) && (
+          <span className="mt-1 flex">
+            <span className="rounded bg-block/15 px-1.5 py-px text-[11px] text-block">{judgeLabel(s.judge)}</span>
           </span>
         )}
       </span>
