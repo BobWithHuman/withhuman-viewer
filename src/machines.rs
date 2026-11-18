@@ -2,16 +2,26 @@
 //! several client IDs (a setup per OS account, or one made again under another team), so the
 //! engine's inventory is read into a table of each client ID's machine: the same hardware serial
 //! is one machine, else the same host name; it is named by its host name, and two machines that
-//! share a name are told apart by the end of their serials. Pages ask [`name`] for a client ID's
-//! machine; one the inventory does not know is its client ID cut short.
+//! share a name are told apart by the end of their serials. A client ID no setup registered (one
+//! a script made up for its hooks) is the machine whose sessions ran in the same folders, when one
+//! machine alone did. Pages ask [`name`] for a client ID's machine; one nothing tells of is its
+//! client ID cut short.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{LazyLock, RwLock};
 
-use crate::model::Device;
+use crate::model::{Device, Session};
 
-static NAMES: LazyLock<RwLock<HashMap<String, String>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
+/// What the names are made from: the inventory's devices, and the folders each client ID's
+/// sessions ran in; and the names made.
+#[derive(Default)]
+struct Known {
+    devices: Vec<Device>,
+    folders: HashMap<String, BTreeSet<String>>,
+    names: HashMap<String, String>,
+}
+
+static KNOWN: LazyLock<RwLock<Known>> = LazyLock::new(|| RwLock::new(Known::default()));
 
 /// A host name without its domain and in one case, as two setups of one machine may report it
 /// (`Mac-1.local`, `mac-1`).
@@ -115,20 +125,118 @@ pub fn names(devices: &[Device]) -> HashMap<String, String> {
         .collect()
 }
 
+/// Folders every machine has, which tell nothing of which machine it is.
+const SHARED_FOLDERS: [&str; 7] = [
+    "tmp",
+    "private",
+    "var",
+    "windows",
+    "temp",
+    "program files",
+    "programdata",
+];
+
+/// Where a session's working folder belongs, in one case and with `/`: the user's home
+/// (`users/ana`, `home/ana`, `c:/users/ana`), else a Windows drive's first folder
+/// (`c:/withhuman`), else the first two folders. None for a folder too short, or one every
+/// machine has (a temporary or system folder).
+fn folder_root(cwd: &str) -> Option<String> {
+    let path = cwd.trim().replace('\\', "/").to_lowercase();
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let drive = parts
+        .first()
+        .is_some_and(|p| p.len() == 2 && p.ends_with(':'));
+    let at = usize::from(drive);
+    let first = *parts.get(at)?;
+    if SHARED_FOLDERS.contains(&first) {
+        return None;
+    }
+    let take = if first == "users" || first == "home" {
+        at + 2
+    } else if drive {
+        at + 1
+    } else {
+        2
+    };
+    (parts.len() >= take).then(|| parts[..take].join("/"))
+}
+
+/// The machine of each client ID no setup registered (no host name, no serial), from the folders
+/// its sessions ran in: the one machine whose registered client IDs' sessions ran under the same
+/// roots. None when no machine did, or more than one.
+fn by_folder(
+    devices: &[Device],
+    folders: &HashMap<String, BTreeSet<String>>,
+    names: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let registered = |client: &str| {
+        devices.iter().any(|d| {
+            d.client_id == client
+                && (d.hostname.is_some() || real_serial(d.serial.as_deref()).is_some())
+        })
+    };
+    let mut machines_of: HashMap<&str, BTreeSet<&str>> = HashMap::new();
+    for (client, roots) in folders {
+        let Some(machine) = names.get(client).filter(|_| registered(client)) else {
+            continue;
+        };
+        for root in roots {
+            machines_of.entry(root).or_default().insert(machine);
+        }
+    }
+    folders
+        .iter()
+        .filter(|(client, _)| !registered(client))
+        .filter_map(|(client, roots)| {
+            let found: BTreeSet<&str> = roots
+                .iter()
+                .filter_map(|root| machines_of.get(root.as_str()))
+                .flatten()
+                .copied()
+                .collect();
+            let machine = found.first().filter(|_| found.len() == 1)?;
+            Some((client.clone(), (*machine).to_owned()))
+        })
+        .collect()
+}
+
+/// Makes the names again from what is known.
+fn remake(known: &mut Known) {
+    let mut table = names(&known.devices);
+    let found = by_folder(&known.devices, &known.folders, &table);
+    table.extend(found);
+    known.names = table;
+}
+
 /// Takes the inventory's devices in, for [`name`].
 pub fn learn(devices: &[Device]) {
-    let table = names(devices);
-    if let Ok(mut names) = NAMES.write() {
-        *names = table;
+    if let Ok(mut known) = KNOWN.write() {
+        known.devices = devices.to_vec();
+        remake(&mut known);
     }
 }
 
-/// The machine of a client ID: its name, or the ID cut short while the inventory does not know it.
+/// Takes in the folders the sessions ran in, for [`name`].
+pub fn learn_folders(sessions: &[Session]) {
+    let mut folders: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for s in sessions {
+        let root = s.cwd.as_deref().and_then(folder_root);
+        if let (Some(client), Some(root)) = (s.client.as_ref(), root) {
+            folders.entry(client.clone()).or_default().insert(root);
+        }
+    }
+    if let Ok(mut known) = KNOWN.write() {
+        known.folders = folders;
+        remake(&mut known);
+    }
+}
+
+/// The machine of a client ID: its name, or the ID cut short while nothing tells of it.
 pub fn name(client: &str) -> String {
-    NAMES
+    KNOWN
         .read()
         .ok()
-        .and_then(|n| n.get(client).cloned())
+        .and_then(|k| k.names.get(client).cloned())
         .unwrap_or_else(|| short(client))
 }
 
@@ -178,6 +286,61 @@ mod tests {
             names["team/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
             "team/aaaaaaaa"
         );
+    }
+
+    #[test]
+    fn a_made_up_client_id_is_the_machine_that_ran_in_its_folders() {
+        let bob = "personal/555cfd71-7612-47a9-8d99-407d959e3405";
+        let mac = "default/6427f4b3-f93e-40df-b8a1-85b3a48477b0";
+        let devices = [
+            device(bob, Some("BoBbook"), Some("5CD5479KD6"), 1),
+            device(mac, Some("seonung-mac-2.local"), Some("FV39N23V5H"), 2),
+            // A script's client ID: seen by the hooks, never registered.
+            device("intent-drift-lab/s3", None, None, 3),
+        ];
+        let table = names(&devices);
+        let root = |s: &str| folder_root(s).unwrap();
+        let folders: HashMap<String, BTreeSet<String>> = [
+            (bob, root("C:\\WithHuman\\demo-ec2")),
+            (mac, root("/Users/bagseon-ung/withhuman-viewer")),
+            (
+                "intent-drift-lab/s3",
+                root("C:\\WithHuman\\intent-drift-lab\\runs\\s3\\sandbox"),
+            ),
+            // Its folders are no machine's: unknown still.
+            ("intent-drift-lab/x", root("D:\\elsewhere\\x")),
+        ]
+        .into_iter()
+        .map(|(c, r)| (c.to_owned(), BTreeSet::from([r])))
+        .collect();
+        let found = by_folder(&devices, &folders, &table);
+        assert_eq!(found["intent-drift-lab/s3"], "BoBbook");
+        assert!(!found.contains_key("intent-drift-lab/x"));
+        // A registered machine is never moved, whatever folders it shares.
+        assert!(!found.contains_key(mac) && !found.contains_key(bob));
+    }
+
+    #[test]
+    fn a_folder_belongs_to_its_home_or_its_first_folders() {
+        let root = |s| folder_root(s);
+        assert_eq!(root("C:\\WithHuman\\a\\b").as_deref(), Some("c:/withhuman"));
+        assert_eq!(
+            root("C:\\Users\\qkaeh\\src\\x").as_deref(),
+            Some("c:/users/qkaeh")
+        );
+        assert_eq!(root("/Users/bae/work/x").as_deref(), Some("users/bae"));
+        assert_eq!(root("/home/ubuntu/x").as_deref(), Some("home/ubuntu"));
+        assert_eq!(root("/opt/lab/x").as_deref(), Some("opt/lab"));
+        // Every machine has these, or they are too short to tell.
+        for none in [
+            "/tmp/x/y",
+            "/private/var/folders/x",
+            "C:\\Windows\\System32",
+            "C:\\",
+            "/Users",
+        ] {
+            assert_eq!(root(none), None, "{none}");
+        }
     }
 
     #[test]

@@ -131,7 +131,10 @@ impl Backend {
                 .await
             }
         };
-        typed(value)
+        let sessions: Vec<Session> = typed(value)?;
+        // A client ID no setup registered is named by the folders its sessions ran in.
+        crate::machines::learn_folders(&sessions);
+        Ok(sessions)
     }
 
     pub async fn graph(&self, session: &str) -> Result<GraphData, String> {

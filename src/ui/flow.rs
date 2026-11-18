@@ -514,7 +514,7 @@ pub fn SessionDrop() -> Element {
     let mut query = use_signal(String::new);
     // The machine picked: its client ID, or [`ALL`], or [`NONE`] for sessions no machine sent.
     let mut machine = use_signal(String::new);
-    // The machines' host names, from the inventory.
+    // Each machine's system, from the inventory, by the machine's name.
     let hosts = use_resource(move || {
         let b = backend.clone();
         let _ = (state.reload)();
@@ -522,8 +522,9 @@ pub fn SessionDrop() -> Element {
             let inv = b.inventory().await.ok().flatten().unwrap_or_default();
             inv.clients
                 .into_iter()
-                .filter_map(|c| Some((c.client_id, (c.hostname?, c.os))))
-                .collect::<HashMap<String, (String, Option<String>)>>()
+                .filter(|c| c.hostname.is_some())
+                .map(|c| (crate::machines::name(&c.client_id), c.os))
+                .collect::<HashMap<String, Option<String>>>()
         }
     });
     use_effect(move || {
@@ -546,11 +547,11 @@ pub fn SessionDrop() -> Element {
         return rsx! {};
     }
     let current = state.current.read().clone().unwrap_or_default();
-    let hosts = hosts.read().clone().unwrap_or_default();
+    let systems = hosts.read().clone().unwrap_or_default();
     let name_of = |key: &str| match key {
         ALL => "전체".to_owned(),
         NONE => "기기 모름".to_owned(),
-        k => hosts.get(k).map_or_else(|| clip(k, 24), |(h, _)| h.clone()),
+        k => clip(k, 24),
     };
     let q = query().trim().to_lowercase();
     let found: Vec<Session> = match &*state.sessions.read() {
@@ -643,7 +644,7 @@ pub fn SessionDrop() -> Element {
                         {
                             let key = m.key.clone();
                             let on = key == picked;
-                            let os = hosts.get(&key).and_then(|(_, os)| os.clone()).unwrap_or_default();
+                            let os = systems.get(&key).cloned().flatten().unwrap_or_default();
                             let kind = if key == ALL { "all" } else if key == NONE { "none" } else { "pc" };
                             rsx! {
                                 button {
@@ -725,12 +726,13 @@ pub fn SessionDrop() -> Element {
 const ALL: &str = "*";
 const NONE: &str = "?";
 
-/// The machine a session came from, as the picker keys it.
+/// The machine a session came from, as the picker keys it: by its name, so a machine's several
+/// client IDs, and the client IDs a script made up on it, are one ([`crate::machines`]).
 fn machine_of(s: &Session) -> String {
     s.client
-        .clone()
+        .as_deref()
         .filter(|c| !c.is_empty())
-        .unwrap_or_else(|| NONE.into())
+        .map_or_else(|| NONE.into(), crate::machines::name)
 }
 
 /// A machine in the session picker: its sessions and their Calls blocked and held, and when it
