@@ -41,6 +41,23 @@ pub fn head_script() -> String {
 #[component]
 pub fn RecordGraph() -> Element {
     let state = use_context::<AppState>();
+    let backend = use_context::<std::sync::Arc<crate::api::Backend>>();
+    // The machines' host names, from the inventory, so a session's machine is named as its list
+    // names it rather than by its client ID.
+    let hosts = use_resource({
+        let backend = backend.clone();
+        move || {
+            let b = backend.clone();
+            let _ = (state.reload)();
+            async move {
+                let inv = b.inventory().await.ok().flatten().unwrap_or_default();
+                inv.clients
+                    .into_iter()
+                    .filter_map(|c| Some((c.client_id, c.hostname?)))
+                    .collect::<std::collections::HashMap<String, String>>()
+            }
+        }
+    });
     let data = use_memo(move || {
         let Load::Ready(model) = &*state.graph.read() else {
             return None;
@@ -52,6 +69,10 @@ pub fn RecordGraph() -> Element {
             _ => None,
         };
         let mut out = record_data(model, &metro, session.as_ref(), id.as_deref().unwrap_or(""));
+        if let Some(client) = session.as_ref().and_then(|s| s.client.as_deref()) {
+            let host = hosts.read().as_ref().and_then(|h| h.get(client).cloned());
+            out["session"]["device"] = json!(host.unwrap_or_else(|| short_client(client)));
+        }
         // The Call opened from another page (민감 정보, 메인): the step it stands in, to open on.
         if let Selection::Node(seq) = (state.selected)() {
             let step = metro
@@ -226,6 +247,18 @@ fn station_step(st: &Station) -> Value {
 
 /// The session as the page reads it: its head, its steps in order, the lines between them, and
 /// the causes the engine traced.
+/// A client ID (`<team>/<uuid>`) with its UUID cut to the first part, for a machine the
+/// inventory has no name for; any other ID as it is.
+fn short_client(client: &str) -> String {
+    let (team, id) = client.split_once('/').unwrap_or(("", client));
+    let uuid = id.len() == 36 && id.matches('-').count() == 4;
+    match (uuid, team) {
+        (false, _) => client.to_owned(),
+        (true, "") => id[..8].to_owned(),
+        (true, team) => format!("{team}/{}", &id[..8]),
+    }
+}
+
 fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) -> Value {
     // Requests and Calls by when they came, with the step each became.
     let mut items: Vec<(i64, i64, Value)> = Vec::new();
@@ -448,6 +481,19 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
         "parents": parents,
         "subgraphs": subgraphs,
     })
+}
+
+#[cfg(test)]
+mod short_client_tests {
+    #[test]
+    fn a_client_id_is_cut_to_its_team_and_first_part() {
+        assert_eq!(
+            super::short_client("default/7a345d01-5f75-4ebd-a82f-b8b256aa0000"),
+            "default/7a345d01"
+        );
+        assert_eq!(super::short_client("lab/device-1"), "lab/device-1");
+        assert_eq!(super::short_client("mbp"), "mbp");
+    }
 }
 
 #[cfg(test)]
