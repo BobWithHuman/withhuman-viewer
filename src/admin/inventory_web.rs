@@ -24,6 +24,8 @@ pub(super) struct Around {
     pub reply: Option<Value>,
     /// The tab the page opens on.
     pub tab: &'static str,
+    /// A machine to open (its client ID), asked from elsewhere: 기록's session.
+    pub open_device: Option<String>,
 }
 
 /// What each machine's engine does with its decisions (`enforce`, `shadow` or `record`): the mode
@@ -412,6 +414,7 @@ fn frame(around: &Around) -> Value {
         "actor": around.actor,
         "reply": around.reply,
         "tab": around.tab,
+        "open_device": around.open_device,
         "mcp": null,
     })
 }

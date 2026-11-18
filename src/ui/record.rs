@@ -34,6 +34,8 @@ pub fn head_script() -> String {
            }}\n\
            if (f.contentWindow && f.contentWindow.WHRecord) f.contentWindow.WHRecord.render(d);\n\
          }};\n\
+         window.__whRecordOn = null;\n\
+         window.__whRecordSend = function (m) {{ if (window.__whRecordOn) window.__whRecordOn(m); }};\n\
          window.__whHooksOn = null;\n\
          window.__whHooksSend = function (m) {{ if (window.__whHooksOn) window.__whHooksOn(m); }};\n\
          window.__whHooksSet = function (d) {{\n\
@@ -54,7 +56,7 @@ pub fn head_script() -> String {
 /// The work area of 기록: the frame, handed the open session each time it changes.
 #[component]
 pub fn RecordGraph() -> Element {
-    let state = use_context::<AppState>();
+    let mut state = use_context::<AppState>();
     let backend = use_context::<std::sync::Arc<crate::api::Backend>>();
     // The paragraph of a tool result each Call was traced to, by step: what told it, in the
     // result's own words (the store keeps a result's paragraphs apart from the session's graph).
@@ -119,8 +121,14 @@ pub fn RecordGraph() -> Element {
         };
         let mut out = record_data(model, &metro, session.as_ref(), id.as_deref().unwrap_or(""));
         if let Some(client) = session.as_ref().and_then(|s| s.client.as_deref()) {
-            let host = hosts.read().as_ref().and_then(|h| h.get(client).cloned());
-            out["session"]["device"] = json!(host.unwrap_or_else(|| short_client(client)));
+            // The machine, as the inventory knows it: by its serial, its host name, or the
+            // folders a made-up client ID's sessions ran in.
+            let _ = hosts.read();
+            out["session"]["device"] = json!(crate::machines::name(client));
+            // In the security team's app, the machine opens in the inventory.
+            if cfg!(feature = "admin") {
+                out["session"]["client"] = json!(crate::machines::device(client));
+            }
         }
         // What told each Call, once read.
         if let (Some(found), Some(steps)) = (&*evidence.read(), out["steps"].as_array_mut()) {
@@ -156,6 +164,22 @@ pub fn RecordGraph() -> Element {
             document::eval(&format!(
                 "requestAnimationFrame(() => window.__whRecordSet && window.__whRecordSet({json}))"
             ));
+        }
+    });
+    // What the page asks of the app: in the security team's app, the session's machine opened in
+    // the inventory (its sheet, with the kill switch).
+    use_future(move || async move {
+        let mut eval = document::eval(
+            "window.__whRecordOn = (m) => dioxus.send(m); await new Promise(() => {});",
+        );
+        while let Ok(m) = eval.recv::<Value>().await {
+            if let Some(client) = m["client"]
+                .as_str()
+                .filter(|_| m["do"] == "device" && cfg!(feature = "admin"))
+            {
+                state.open_device.set(Some(client.to_owned()));
+                state.screen.set(super::Screen::Inventory);
+            }
         }
     });
     let waiting = data().is_none();
@@ -362,18 +386,6 @@ fn station_step(model: &Model, st: &Station) -> Value {
 
 /// The session as the page reads it: its head, its steps in order, the lines between them, and
 /// the causes the engine traced.
-/// A client ID (`<team>/<uuid>`) with its UUID cut to the first part, for a machine the
-/// inventory has no name for; any other ID as it is.
-fn short_client(client: &str) -> String {
-    let (team, id) = client.split_once('/').unwrap_or(("", client));
-    let uuid = id.len() == 36 && id.matches('-').count() == 4;
-    match (uuid, team) {
-        (false, _) => client.to_owned(),
-        (true, "") => id[..8].to_owned(),
-        (true, team) => format!("{team}/{}", &id[..8]),
-    }
-}
-
 fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) -> Value {
     // Requests and Calls by when they came, with the step each became.
     let mut items: Vec<(i64, i64, Value)> = Vec::new();
@@ -596,19 +608,6 @@ fn record_data(model: &Model, m: &Metro, session: Option<&Session>, id: &str) ->
         "parents": parents,
         "subgraphs": subgraphs,
     })
-}
-
-#[cfg(test)]
-mod short_client_tests {
-    #[test]
-    fn a_client_id_is_cut_to_its_team_and_first_part() {
-        assert_eq!(
-            super::short_client("default/7a345d01-5f75-4ebd-a82f-b8b256aa0000"),
-            "default/7a345d01"
-        );
-        assert_eq!(super::short_client("lab/device-1"), "lab/device-1");
-        assert_eq!(super::short_client("mbp"), "mbp");
-    }
 }
 
 #[cfg(test)]

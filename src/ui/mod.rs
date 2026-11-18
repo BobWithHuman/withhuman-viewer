@@ -243,6 +243,9 @@ pub struct AppState {
     /// A node for the canvas to bring into view.
     pub focus: Signal<Option<i64>>,
     pub settings_open: Signal<bool>,
+    /// A machine to open in the security team's inventory (its client ID), asked from elsewhere
+    /// (기록's session): the page opens its sheet, then clears it.
+    pub open_device: Signal<Option<String>>,
     pub live: Signal<bool>,
     pub inspector_width: Signal<f64>,
     /// Bumped by the menu to look for an update.
@@ -317,6 +320,7 @@ pub fn App() -> Element {
         inspect: Signal::new(false),
         focus: Signal::new(None),
         settings_open: Signal::new(false),
+        open_device: Signal::new(None),
         live: Signal::new(false),
         inspector_width: Signal::new(width),
         check_updates: Signal::new(0),

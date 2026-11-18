@@ -83,6 +83,8 @@ export type Data = {
   edr_known?: boolean; edr_only?: EdrOnly[];
   /** The tab the lists open on. */
   tab?: Tab;
+  /** A machine to open (its ID), asked from elsewhere: 기록's session. */
+  open_device?: string | null;
   /** The MCP servers on the machines; null while the engine has not collected them. */
   mcp?: Mcp | null;
 };

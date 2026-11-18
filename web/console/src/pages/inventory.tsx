@@ -77,6 +77,17 @@ export default function Page({ data }: { data: unknown | null }) {
       setToast(r.done === "device_stopped" ? "기기 멈춤" : r.done === "device_released" ? "기기 멈춤 풀림" : r.done === "device_deleted" ? "단말 삭제됨" : "완료");
     }
   }, [d.reply, pending, standalone]);
+  // A machine asked for from elsewhere (기록's session): picked, its sheet open, the kill switch
+  // at hand; the app is told it is open.
+  useEffect(() => {
+    const id = d.open_device;
+    if (!id || !d.devices) return;
+    if (d.devices.some((x) => x.id === id)) {
+      setFocus(id);
+      setOpen({ kind: "device", id });
+    }
+    if (!standalone) send("inventory", { type: "opened" });
+  }, [d.open_device, d.devices, standalone]);
   // The app names the tab to open on; it changes the tab again only when it names another.
   useEffect(() => {
     const t = known(d.tab);
