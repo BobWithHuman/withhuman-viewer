@@ -655,6 +655,19 @@ mod tests {
             ),
             (json!("요청 밖 목적"), json!(0.82), json!(0.4))
         );
+        // A service call that changes something: asked as a file change is.
+        let change = second_question(
+            &json!({"check": {"branch": "change", "unwanted": 0.9, "verdict": "DENY"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                change["asked"].clone(),
+                change["score"].clone(),
+                change["deny"].clone()
+            ),
+            (json!("요청 밖 변경"), json!(0.9), json!(0.5))
+        );
         // A service call that grants access: by how much came from a tool result.
         let access = second_question(&json!({"check": {"branch": "access", "verdict": "DENY", "target": {"from_result": 0.7, "unchosen": 0.1}}})).unwrap();
         assert_eq!(
