@@ -152,9 +152,9 @@ export function CaseView({ call, group, data, marks, blocked, saved, ask, onCall
         </section>
         <section className="grid content-start gap-1.5">
           <h3 className="flex items-center gap-1.5 text-[12px] font-medium text-catch"><FileText className="size-3.5" />유도 문구{told && <span className="tnum ml-auto">{Math.round(told.probability * 100)}%</span>}</h3>
-          <Box tone={told?.quote ? "var(--catch)" : undefined} className="max-h-[132px] overflow-y-auto">
+          <Box tone={told?.quote || told?.text ? "var(--catch)" : undefined} className={cn("max-h-[132px] overflow-y-auto", told?.text && "font-mono text-[12px]")}>
             {!read ? <span className="text-muted-foreground">불러오는 중</span>
-              : told?.quote ? told.quote
+              : told?.text || told?.quote ? (told.text ?? told.quote)
                 : <span className="text-muted-foreground">{call.source === "request" ? "없음 · 사용자 요청에서 바로" : told ? "글귀 없음" : "원인 찾지 못함"}</span>}
           </Box>
         </section>
