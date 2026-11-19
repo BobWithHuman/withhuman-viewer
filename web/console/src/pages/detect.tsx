@@ -125,7 +125,7 @@ export default function Page({ data }: { data: unknown | null }) {
               </div>
             </Panel>
           </div>
-          <Watch calls={shown} ask={ask} loading={blank} marks={marks} caseData={d.case} saved={d.saved} blocked={blocked} className="h-[clamp(420px,58vh,760px)] shrink-0" />
+          <Watch calls={shown} ask={ask} loading={blank} marks={marks} last={d.last ?? {}} caseData={d.case} saved={d.saved} blocked={blocked} className="h-[clamp(420px,58vh,760px)] shrink-0" />
         </div>
       </div>
     </div>

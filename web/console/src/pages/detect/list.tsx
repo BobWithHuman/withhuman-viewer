@@ -109,7 +109,25 @@ const whyRan = (g: CaseGroup): Ran[] => {
     did.some((c) => !c.leak && c.verdict !== "review") && "allowed",
   ] as const).filter((w): w is Ran => !!w);
 };
-const caseColumns = (marks: Record<string, Mark>, ran: boolean): ColumnDef<CaseGroup>[] => [
+/** A case's newest session (the one last active) and when: its Calls' sessions' latest activity,
+ * else its newest Call's time. */
+const latest = (g: CaseGroup, last: Record<string, number>) => {
+  let at = g.calls[0].at ?? 0, call = g.calls[0];
+  for (const c of g.calls) {
+    const t = last[c.session] ?? c.at ?? 0;
+    if (t > at) { at = t; call = c; }
+  }
+  return { at, call };
+};
+
+/** The Call a case opens on: the worst of its newest session's, so 기록 opens that session. */
+const opening = (g: CaseGroup, last: Record<string, number>) => {
+  const session = latest(g, last).call.session;
+  const mine = g.calls.filter((c) => c.session === session);
+  return mine.reduce((a, c) => (SEVS.indexOf(c.sev) < SEVS.indexOf(a.sev) ? c : a), mine[0]);
+};
+
+const caseColumns = (marks: Record<string, Mark>, ran: boolean, last: Record<string, number>): ColumnDef<CaseGroup>[] => [
   { id: "mark", header: "처리", size: 92, accessorFn: (g) => stateOf(g, marks) ?? "", cell: ({ row }) => {
     const st = stateOf(row.original, marks);
     if (st === "mixed") return <span className="rounded bg-white/8 px-1.5 text-[11.5px] leading-[20px] font-semibold text-foreground/80">일부</span>;
@@ -124,8 +142,9 @@ const caseColumns = (marks: Record<string, Mark>, ran: boolean): ColumnDef<CaseG
   ) } as ColumnDef<CaseGroup>] : []),
   { id: "sev", header: "심각도", size: 88, accessorFn: (g) => g.risk, cell: ({ row }) => <SevBadge s={worst(row.original)} /> },
   // What the person had it do: the session's short name.
-  { id: "work", header: "작업", size: 260, accessorFn: (g) => named(first(g)) ?? "", cell: ({ row }) => {
-    const c = first(row.original), name = named(c);
+  // The case's newest session: the one it reached last, as the list is read newest first.
+  { id: "work", header: "작업", size: 260, accessorFn: (g) => named(latest(g, last).call) ?? "", cell: ({ row }) => {
+    const c = latest(row.original, last).call, name = named(c);
     return <span className={cn("block truncate", !name && "text-muted-foreground")} title={c.prompt ?? undefined}>{name ?? NO_PROMPT}</span>;
   } },
   { id: "cause", header: "원인", size: 170, accessorFn: (g) => g.calls.find((c) => c.cause)?.cause_name ?? "", cell: ({ row }) => <CauseChip c={row.original.calls.find((c) => c.cause) ?? row.original.calls[0]} /> },
@@ -133,7 +152,8 @@ const caseColumns = (marks: Record<string, Mark>, ran: boolean): ColumnDef<CaseG
   { id: "sessions", header: "세션", size: 64, accessorFn: (g) => g.sessions.length, cell: ({ row }) => <span className="tnum">{row.original.sessions.length}</span> },
   { id: "hits", header: "걸린 호출", size: 280, accessorFn: (g) => didOf(first(g)).name, cell: ({ row }) => <Hits calls={row.original.calls} /> },
   { id: "found", header: "차단 · 확인 · 허용", size: 130, accessorFn: (g) => g.total, cell: ({ row }) => <Verdicts calls={row.original.calls} /> },
-  { id: "at", header: "최근", size: 104, accessorFn: (g) => g.calls[0].at ?? 0, cell: ({ row }) => <When at={row.original.calls[0].at} /> },
+  // The case's sessions' latest activity, as 기록's list shows a session.
+  { id: "at", header: "최근", size: 104, accessorFn: (g) => latest(g, last).at, cell: ({ row }) => <When at={latest(row.original, last).at || null} /> },
 ];
 /** A source that told agents to act: the cases it made, over how many sessions and machines. */
 type Source = { key: string; call: Call; cases: CaseGroup[]; sessions: string[]; machines: string[]; ran: number; held: number; risk: number; at: number };
@@ -177,8 +197,10 @@ const SOURCES: ColumnDef<Source>[] = [
   { id: "at", header: "최근", size: 104, accessorFn: (s) => s.at, cell: ({ row }) => <When at={row.original.at || null} /> },
 ];
 
-export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, className }: {
+export function Watch({ calls, ask, loading, marks, last: active, caseData, saved, blocked, className }: {
   calls: Call[]; ask: Ask; loading?: boolean; className?: string;
+  /** When each session was last active: a case's 최근 is its sessions' latest. */
+  last: Record<string, number>;
   /** The sources the team distrusts. */
   blocked: Blocked[];
   /** What the team marked each session as, the case the app read, and what the last save said. */
@@ -207,12 +229,17 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
     const open = (g: CaseGroup) => g.sessions.some((s) => isOpen(marks[s]));
     return shownBy === "all" ? allCases : allCases.filter((g) => open(g) === (shownBy === "open"));
   }, [allCases, shownBy, marks]);
-  // Those where something already ran, to answer for; those the engine stopped, to judge.
-  const done = useMemo(() => listed.filter((g) => g.ran > 0), [listed]);
-  const held = useMemo(() => listed.filter((g) => g.ran === 0), [listed]);
+  // Those where something already ran, to answer for; those the engine stopped, to judge: each
+  // Call where it belongs, so a Call stopped today is not hidden in a case that ran before.
+  const split = (calls: Call[]) => {
+    const all = cases(calls);
+    return shownBy === "all" ? all : all.filter((g) => g.sessions.some((s) => isOpen(marks[s])) === (shownBy === "open"));
+  };
+  const done = useMemo(() => split(newest.filter(happened)), [newest, shownBy, marks]);
+  const held = useMemo(() => split(newest.filter((c) => !happened(c))), [newest, shownBy, marks]);
   const causes = useMemo(() => sources(listed), [listed]);
   const sessions = view === "held" ? held : done;
-  const columns = useMemo(() => caseColumns(marks, view !== "held"), [marks, view]);
+  const columns = useMemo(() => caseColumns(marks, view !== "held", active), [marks, view, active]);
   const same = (c: Call) => !!picked && c.session === picked.session && c.seq === picked.seq;
   // The Call open as last seen, kept while a search or a period hides it from the list.
   const last = useRef<Call | null>(null);
@@ -251,7 +278,7 @@ export function Watch({ calls, ask, loading, marks, caseData, saved, blocked, cl
     >
       <div className="min-h-0 flex-1 border-t [&_[data-slot=table-container]]:scroll [&_[data-slot=table-container]]:h-full [&_[data-slot=table-container]]:overflow-y-auto [&_td:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:first-child]:pl-4 [&_th:last-child]:pr-4">
         {loading && <div className="flex flex-col gap-2 p-4">{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-8 rounded-md" />)}</div>}
-        {!loading && view !== "sources" && <DataTable columns={columns} rows={sessions.slice(0, ROWS)} onRow={(g) => open(first(g))} picked={(g) => g.calls.some(same)} dense />}
+        {!loading && view !== "sources" && <DataTable columns={columns} rows={sessions.slice(0, ROWS)} onRow={(g) => open(opening(g, active))} picked={(g) => g.calls.some(same)} dense />}
         {!loading && view === "sources" && <DataTable columns={SOURCES} rows={causes.slice(0, ROWS)} onRow={(s) => open(first(s.cases[0]))} picked={(s) => s.cases.some((g) => g.calls.some(same))} dense />}
       </div>
 

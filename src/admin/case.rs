@@ -26,7 +26,28 @@ pub async fn case(backend: &Backend, session: &str, seq: i64, facts: &[CallFact]
             return out;
         }
     };
-    laid_out(&graph, session, seq, facts)
+    let mut out = laid_out(&graph, session, seq, facts);
+    // The words that told it, whole: the store keeps a result's paragraphs apart from the
+    // session's graph, and the graph has only the paragraph's first line.
+    let told = &out["told"];
+    if let (Some(result), Some(paragraph)) = (told["result"].as_i64(), told["paragraph"].as_i64()) {
+        let text = backend
+            .node(session, result)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|d| {
+                d.paragraphs
+                    .into_iter()
+                    .find(|p| p.index == Some(paragraph))
+            })
+            .and_then(|p| p.text)
+            .filter(|t| !t.trim().is_empty());
+        if let Some(text) = text {
+            out["told"]["text"] = json!(text);
+        }
+    }
+    out
 }
 
 /// A Call's command, file, URL or pattern from its payload, as long as the graph keeps it.
@@ -74,6 +95,7 @@ fn laid_out(graph: &crate::model::GraphData, session: &str, seq: i64, facts: &[C
         let by = station(src.by);
         json!({
             "seq": src.by,
+            "result": src.result,
             "tool": by.map(|s| s.tool.clone()),
             "target": by.map(|s| s.what.clone()),
             "at": by.and_then(|s| s.at),

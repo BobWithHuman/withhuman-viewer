@@ -471,6 +471,15 @@ pub(super) fn data(read: &Read) -> String {
             ])
         })
         .collect();
+    // When each session the Calls are of was last active, for a case's 최근.
+    let of: std::collections::HashSet<&str> =
+        calls.iter().filter_map(|c| c["session"].as_str()).collect();
+    let last: BTreeMap<&str, i64> = read
+        .sessions
+        .iter()
+        .filter(|s| of.contains(s.id.as_str()))
+        .filter_map(|s| Some((s.id.as_str(), s.last_at.or(s.created_at)?)))
+        .collect();
     json!({
         "source": read.source,
         "demo": read.demo,
@@ -484,6 +493,7 @@ pub(super) fn data(read: &Read) -> String {
         "failed": read.failed,
         "refreshed": read.refreshed,
         "machines": machines,
+        "last": last,
         "calls": calls,
         "cover": cover,
         "flow": flow
