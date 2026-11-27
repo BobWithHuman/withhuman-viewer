@@ -33,6 +33,9 @@ export interface Step {
     /** The question that decided it: the first (deviation), the second (asked against the
      * prompt, with what it asked), or a rule. */
     stage?: "1차 질문" | "2차 질문" | "규칙"; asked?: string;
+    /** For the rule on a Call's path: how likely the agent would not make it without the
+     * instruction (denied with the path's risk, both from 0.5). */
+    without?: number | null;
     rule?: string | null; worst?: string | null; score?: number | null; review: number; deny: number; link?: string;
   } | null;
   /** For a fold of quiet steps: what is inside. */

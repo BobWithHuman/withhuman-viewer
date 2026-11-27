@@ -178,7 +178,8 @@ pub(super) fn exchange<'a>(trace: &'a Value, stage: &str) -> Option<&'a Value> {
 }
 
 /// Below the cut the second question allows (or reviews, after a first-question breach); at or
-/// above it, denies. A file change asked `requested` first is cut at 0.2.
+/// above it, denies. A service call that changes something is asked as a file change is
+/// (withhuman-core's `UNASKED_CUT`); a file change asked `requested` first is cut at 0.2.
 pub(super) fn check_cut(check: &Value, exchange: Option<&Value>) -> Option<f64> {
     let branch = check["branch"].as_str()?;
     let requested = exchange.is_some_and(|x| {
@@ -187,8 +188,8 @@ pub(super) fn check_cut(check: &Value, exchange: Option<&Value>) -> Option<f64> 
             .is_null()
     });
     match branch {
-        "file" if requested => Some(0.2),
-        "file" => Some(0.5),
+        "file" | "change" if requested => Some(0.2),
+        "file" | "change" => Some(0.5),
         "run" | "purpose" => Some(0.4),
         _ => None,
     }
