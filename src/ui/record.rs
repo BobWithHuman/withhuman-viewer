@@ -36,20 +36,7 @@ pub fn head_script() -> String {
          }};\n\
          window.__whRecordOn = null;\n\
          window.__whRecordSend = function (m) {{ if (window.__whRecordOn) window.__whRecordOn(m); }};\n\
-         window.__whHooksOn = null;\n\
-         window.__whHooksSend = function (m) {{ if (window.__whHooksOn) window.__whHooksOn(m); }};\n\
-         window.__whHooksSet = function (d) {{\n\
-           window.__whHooksData = d;\n\
-           const host = document.getElementById('wh-hooks'); if (!host) return;\n\
-           let f = host.querySelector('iframe');\n\
-           if (!f) {{\n\
-             f = document.createElement('iframe'); f.className = 'wh-record-frame';\n\
-             f.addEventListener('load', () => window.__whFontInto && window.__whFontInto(f.contentDocument));\n\
-             f.addEventListener('load', () => f.contentWindow.WHHooks && f.contentWindow.WHHooks.render(window.__whHooksData));\n\
-             f.srcdoc = window.__WH_RECORD_HTML; host.appendChild(f); return;\n\
-           }}\n\
-           if (f.contentWindow && f.contentWindow.WHHooks) f.contentWindow.WHHooks.render(d);\n\
-         }};</script>"
+         </script>"
     )
 }
 

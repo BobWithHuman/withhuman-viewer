@@ -10,7 +10,8 @@ import {
 } from "@tanstack/react-table";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  siAtlassian, siClaude, siFigma, siGithub, siGoogledrive, siNotion, siPostgresql, siSentry,
+  siAtlassian, siClaude, siCursor, siFigma, siGithub, siGithubcopilot, siGoogle, siGoogledrive, siNotion,
+  siPostgresql, siSentry,
 } from "simple-icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,6 +66,7 @@ export function Warn({ children }: { children: ReactNode }) {
 const SI: Record<string, { path: string; hex: string }> = {
   github: siGithub, atlassian: siAtlassian, notion: siNotion, postgres: siPostgresql, postgresql: siPostgresql,
   claude: siClaude, googledrive: siGoogledrive, figma: siFigma, sentry: siSentry,
+  cursor: siCursor, copilot: siGithubcopilot, antigravity: siGoogle,
 };
 /** A service's logo on a white disc; a server we have no logo for shows its first letter. */
 export function ServiceLogo({ name, size = 20 }: { name: string; size?: number }) {
@@ -79,7 +81,7 @@ export function ServiceLogo({ name, size = 20 }: { name: string; size?: number }
       </svg>
     );
   } else if (key) {
-    const dark = key === "github" || key === "notion";
+    const dark = key === "github" || key === "notion" || key === "cursor" || key === "copilot";
     mark = <svg width={inner} height={inner} viewBox="0 0 24 24" aria-hidden><path d={SI[key].path} fill={dark ? "#111" : `#${SI[key].hex}`} /></svg>;
   } else {
     return <span className="grid shrink-0 place-items-center rounded-full bg-secondary font-semibold text-muted-foreground uppercase" style={{ width: size, height: size, fontSize: size * 0.48 }}>{name.slice(0, 1)}</span>;

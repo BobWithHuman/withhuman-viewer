@@ -44,13 +44,15 @@ pub struct Settings {
     pub admin_token_saved: bool,
 }
 
-/// Where the engine runs: started by the viewer on this Mac, or reached on a server.
+/// Where the engine runs: started by the viewer on this Mac (the security team's, from its
+/// folder with Docker), the developer's own run by the app ([`crate::own`]), or on a server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Engine {
     #[default]
     Unset,
     Local,
+    Own,
     Server,
 }
 
@@ -129,14 +131,38 @@ pub struct Change {
 
 /// The system keychain entry for one Neo4j account.
 mod keychain {
-    const SERVICE: &str = "dev.withhuman.viewer";
+    use crate::api::APP_ID;
 
     fn entry(account: &str) -> Option<keyring::Entry> {
-        keyring::Entry::new(SERVICE, account).ok()
+        keyring::Entry::new(APP_ID, account).ok()
     }
 
+    /// The personal app also finds what it kept under the shared service before it had its
+    /// own, and keeps it under its own from then on.
     pub fn get(account: &str) -> Option<String> {
-        entry(account)?.get_password().ok()
+        if let Some(kept) = entry(account).and_then(|e| e.get_password().ok()) {
+            return Some(kept);
+        }
+        #[cfg(not(feature = "admin"))]
+        {
+            let earlier = keyring::Entry::new(crate::api::EARLIER_APP_ID, account)
+                .ok()?
+                .get_password()
+                .ok()?;
+            let _ = set(account, &earlier);
+            Some(earlier)
+        }
+        #[cfg(feature = "admin")]
+        None
+    }
+
+    /// Takes the account out of the app's keychain service; none there is no error.
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    pub fn forget(account: &str) -> Result<(), String> {
+        match entry(account).map(|e| e.delete_credential()) {
+            None | Some(Ok(())) | Some(Err(keyring::Error::NoEntry)) => Ok(()),
+            Some(Err(e)) => Err(format!("키체인에서 지우지 못했습니다: {e}")),
+        }
     }
 
     pub fn set(account: &str, password: &str) -> Result<(), String> {
@@ -148,19 +174,50 @@ mod keychain {
 }
 
 /// The keychain account the Jev API key is kept under.
-#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 const JEV_ACCOUNT: &str = "jev-api-key";
 
 /// Keeps a Jev API key Jev took in the keychain.
-#[cfg_attr(not(feature = "admin"), allow(dead_code))]
 pub fn save_jev_key(key: &str) -> Result<(), String> {
     keychain::set(JEV_ACCOUNT, key.trim())
+}
+
+/// The Jev API key kept in the keychain.
+#[cfg_attr(feature = "admin", allow(dead_code))]
+pub fn jev_key() -> Option<String> {
+    keychain::get(JEV_ACCOUNT).filter(|k| !k.trim().is_empty())
+}
+
+/// Another secret of the app's in the keychain, such as the own engine's passwords.
+#[cfg_attr(feature = "admin", allow(dead_code))]
+pub fn secret(account: &str) -> Option<String> {
+    keychain::get(account)
+}
+
+#[cfg_attr(feature = "admin", allow(dead_code))]
+pub fn keep_secret(account: &str, value: &str) -> Result<(), String> {
+    keychain::set(account, value)
+}
+
+/// Takes the Jev key and `accounts` out of the app's keychain service.
+#[cfg_attr(feature = "admin", allow(dead_code))]
+pub fn forget_secrets(accounts: &[&str]) -> Result<(), String> {
+    keychain::forget(JEV_ACCOUNT)?;
+    for account in accounts {
+        keychain::forget(account)?;
+    }
+    Ok(())
 }
 
 impl Settings {
     /// The keychain account: the same user on another server is another password.
     fn account(&self) -> String {
         format!("{}@{}/{}", self.user, self.neo4j_url, self.database)
+    }
+
+    /// The keychain account of the store's password, for taking it out.
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    pub fn keychain_account(&self) -> String {
+        self.account()
     }
 
     pub fn public(&self, path: &Path) -> Public {

@@ -56,6 +56,7 @@ pub fn Home() -> Element {
                 "이 맥의 엔진 · {}",
                 p.engine_dir.clone().unwrap_or_default()
             ),
+            Engine::Own => "이 기기 엔진".to_owned(),
             Engine::Server => format!("서버 · {}", p.host()),
             Engine::Unset => p.store(),
         }

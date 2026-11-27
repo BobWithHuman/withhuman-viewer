@@ -6,11 +6,11 @@
 
 import { useSyncExternalStore } from "react";
 
-export type PageName = "detect" | "secrets" | "inventory";
+export type PageName = "detect" | "secrets" | "inventory" | "onboard" | "hooks" | "engine";
 
 type State = { page: PageName; data: unknown | null };
 const hash = location.hash.slice(1) as PageName;
-let state: State = { page: (["detect", "secrets", "inventory"] as PageName[]).includes(hash) ? hash : "inventory", data: null };
+let state: State = { page: (["detect", "secrets", "inventory", "onboard", "hooks", "engine"] as PageName[]).includes(hash) ? hash : "inventory", data: null };
 const subs = new Set<() => void>();
 
 declare global {

@@ -2,10 +2,12 @@
 //! bundled demo) in a desktop app built with Dioxus.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(all(feature = "dev", feature = "admin"))]
-compile_error!("build one app: the developer's (`dev`) or the security team's (`admin`), not both");
-#[cfg(not(any(feature = "dev", feature = "admin")))]
-compile_error!("build one app: `--features dev` or `--no-default-features --features admin`");
+#[cfg(all(feature = "personal", feature = "admin"))]
+compile_error!(
+    "build one app: the personal app (`personal`) or the security team's (`admin`), not both"
+);
+#[cfg(not(any(feature = "personal", feature = "admin")))]
+compile_error!("build one app: `--features personal` or `--no-default-features --features admin`");
 
 #[cfg(feature = "admin")]
 mod admin;
@@ -26,9 +28,15 @@ mod machines;
 mod menu;
 mod metro;
 mod model;
+// The developer's own engine, run by the app's binary with `--engine`.
+#[cfg(not(feature = "admin"))]
+mod own;
 mod pg;
 mod prefs;
 mod settings;
+// The personal app's try: a made-up session sent through its own engine.
+#[cfg(not(feature = "admin"))]
+mod trial;
 mod ui;
 mod updater;
 
@@ -37,7 +45,21 @@ use std::sync::Arc;
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 
 fn main() {
+    #[cfg(not(feature = "admin"))]
+    if std::env::args().nth(1).as_deref() == Some("--engine") {
+        std::process::exit(own::serve());
+    }
+    api::set_launch(std::env::args().skip(1));
     let backend = Arc::new(api::Backend::load());
+    // The developer's own engine runs whenever the app is open, and after it on a Mac.
+    #[cfg(not(feature = "admin"))]
+    if backend.settings().engine == settings::Engine::Own {
+        std::thread::spawn(|| {
+            if let Err(e) = own::ensure_started() {
+                eprintln!("withhuman engine: {e}");
+            }
+        });
+    }
     // The first launch opens small, on the setup; the app grows to its full size after it.
     let setup = backend.needs_setup();
     let (size, min) = if setup {

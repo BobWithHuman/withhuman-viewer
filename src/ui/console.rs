@@ -1,5 +1,5 @@
-//! The security team's dashboards are drawn by a page built from `web/console` (`npm run build`
-//! there writes `console.html`): React, Tailwind and shadcn's components, in one file. A screen
+//! The security team's dashboards, and the personal app's first launch, are drawn by a page built
+//! from `web/console` (`npm run build` there writes `src/admin/console.html`): React, Tailwind and shadcn's components, in one file. A screen
 //! shows it in a frame with [`Frame`], handing it the screen's data as JSON, and hears back what
 //! the person did there. The page keeps its own styles, so the app's do not reach it.
 
@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use serde_json::Value;
 
 /// The page, one file with its script and styles inside.
-const PAGE: &str = include_str!("console.html");
+const PAGE: &str = include_str!("../admin/console.html");
 
 /// What goes in the app's head: the page as a string, how a screen's frame is made and given its
 /// data, and where the page's messages go. `</` is escaped so the page's own closing tags do not
@@ -36,7 +36,7 @@ pub fn head_script() -> String {
     )
 }
 
-/// One of the page's screens (`detect`, `mcp`, `secrets`, `inventory`) in a frame filling its
+/// One of the page's screens (`detect`, `secrets`, `inventory`, `onboard`) in a frame filling its
 /// place: `data` is the screen's data as JSON text, sent again whenever it changes; `onmsg` gets
 /// each message the page sends (`send(page, {...})` in `web/console/src/bridge.ts`).
 #[component]

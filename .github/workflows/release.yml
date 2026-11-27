@@ -1,8 +1,9 @@
 name: Release
 
 # A version tag (v1.2.3) builds the universal app (the security team's), signs it with the
-# Developer ID, has Apple notarize it, and drafts a GitHub release with the disk image; then both
-# apps for Windows are packaged as their installers and added to the draft. Run by hand, it
+# Developer ID, has Apple notarize it, and drafts a GitHub release with the disk image; then the
+# personal app for macOS, with its engine, is built the same way, and both apps for Windows are
+# packaged as their installers, each added to the draft. Run by hand, it
 # does the same without a release: the files are left as workflow artifacts, to try the pipeline.
 on:
   push:
@@ -26,7 +27,7 @@ jobs:
     timeout-minutes: 60
     env:
       SIGNING_IDENTITY: "Developer ID Application: seonung park (T77ZY4CF39)"
-      # The app released: the security team's (`admin`), or the developer's (`dev`).
+      # This job's app: the security team's. The personal app has its own job below.
       VIEWER_APP: admin
     steps:
       - name: Checkout repository
@@ -170,6 +171,138 @@ jobs:
             dist/latest.json dist/SHA256SUMS \
             --draft --generate-notes --title "WithHuman Viewer ${GITHUB_REF_NAME#v}"
 
+  # The personal app for macOS, with its own engine inside (withhuman-core's `withhuman-local` at
+  # the version engine.ref names): signed, notarized, archived for its own updater manifest
+  # (latest-personal.json) and added to the draft, with a copy of its disk image under a name
+  # that stays the same from one release to the next, for the download link.
+  personal-mac:
+    name: Personal app for macOS
+    needs: release
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      SIGNING_IDENTITY: "Developer ID Application: seonung park (T77ZY4CF39)"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: personal
+          workspaces: |
+            .
+            target/withhuman-core
+
+      - name: Install cargo-packager
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
+
+      - name: Write the notarization key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+          chmod 600 "$key"
+          echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+
+      - name: Package, sign and notarize the app
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD }}
+          # PostgreSQL is fetched from GitHub's releases while the engine builds.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/package-personal-mac.sh
+
+      - name: Notarize the disk image
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          dmg=$(ls dist/WithHuman\ Personal*.dmg)
+          xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" \
+            --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$dmg"
+
+      - name: Check signature, notarization and architectures
+        run: |
+          app="dist/WithHuman Personal.app"
+          test -f "dist/WithHuman Personal.app.tar.gz.sig"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose "$app"
+          xcrun stapler validate "$app"
+          for binary in withhuman-viewer withhuman-local; do
+            lipo -info "$app/Contents/MacOS/$binary" | grep -q "x86_64 arm64"
+          done
+
+      - name: Name the release files
+        working-directory: dist
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' ../Cargo.toml | head -1)
+          name="WithHuman-Personal_${version}_universal"
+          mv "WithHuman Personal_${version}_universal.dmg" "$name.dmg"
+          mv "WithHuman Personal.app.tar.gz" "$name.app.tar.gz"
+          mv "WithHuman Personal.app.tar.gz.sig" "$name.app.tar.gz.sig"
+          rm -f *.dmg.sig
+          # releases/latest/download/WithHuman-Personal.dmg, whatever the version.
+          cp "$name.dmg" WithHuman-Personal.dmg
+          echo "RELEASE_NAME=$name" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Write the update manifest
+        working-directory: dist
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          url="https://github.com/$REPOSITORY/releases/download/v$VERSION/$RELEASE_NAME.app.tar.gz"
+          jq -n --arg version "$VERSION" --arg url "$url" \
+                --arg signature "$(cat "$RELEASE_NAME.app.tar.gz.sig")" \
+                --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg notes "WithHuman Personal $VERSION" '
+            {version: $version, notes: $notes, pub_date: $date,
+             platforms: {
+               "macos-aarch64": {url: $url, signature: $signature, format: "app"},
+               "macos-x86_64":  {url: $url, signature: $signature, format: "app"}}}' > latest-personal.json
+          jq . latest-personal.json
+          shasum -a 256 WithHuman-Personal*.dmg *.app.tar.gz > SHA256SUMS-personal
+
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/WithHuman-Personal*.dmg
+            dist/WithHuman-Personal*.app.tar.gz
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: withhuman-personal-signed
+          path: |
+            dist/WithHuman-Personal*
+            dist/latest-personal.json
+            dist/SHA256SUMS-personal
+          retention-days: 14
+
+      - name: Add it to the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" dist/WithHuman-Personal* dist/latest-personal.json \
+            dist/SHA256SUMS-personal
+
   # Both apps for Windows (unsigned: Windows shows SmartScreen's warning the first time), each
   # packaged as its installer and added to the draft. They do not update themselves.
   windows:
@@ -179,7 +312,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       matrix:
-        app: [dev, admin]
+        app: [personal, admin]
     defaults:
       run:
         shell: bash

@@ -40,6 +40,28 @@ pub async fn check_jev(client: &reqwest::Client, key: &str) -> Result<(), String
     }
 }
 
+/// The models Jev serves the key (`GET /v1/models`), by name.
+#[cfg_attr(feature = "admin", allow(dead_code))]
+pub async fn jev_models(client: &reqwest::Client, key: &str) -> Result<Vec<String>, String> {
+    let url = format!("{}/v1/models", jev_url().trim_end_matches('/'));
+    let response = client
+        .get(&url)
+        .bearer_auth(key.trim())
+        .send()
+        .await
+        .map_err(|e| format!("Jev({url})에 닿지 못했습니다. ({e})"))?;
+    if !response.status().is_success() {
+        return Err(format!("Jev 모델 목록 HTTP {}", response.status().as_u16()));
+    }
+    let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    Ok(body["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["name"].as_str().map(str::to_owned))
+        .collect())
+}
+
 /// The engine's folder on this Mac: `WITHHUMAN_CORE`, else `~/withhuman-core`, if it holds the
 /// engine's compose file.
 pub fn find_dir() -> Option<PathBuf> {

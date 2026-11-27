@@ -1,264 +1,22 @@
-//! The developer's first launch, in a small window: the engine's store the record is read from
-//! (its PostgreSQL, with the viewer's read-only login), tried before it is kept, and the hooks,
-//! for one folder or every folder, installed with the engine's own setup. Done, the window grows
-//! and the record opens.
+//! The personal app's 훅 page: the agents' hook setups found on this machine, each to take out,
+//! and new ones, every found agent at once or one at a time. The first launch is `onboard`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use dioxus::prelude::*;
 
-use super::setup::grow;
-use super::{AppState, Screen, Selection};
+use super::AppState;
 use crate::api::Backend;
 use crate::hooks::{self, Scope};
-use crate::settings::Change;
 use serde_json::{Value, json};
 
-/// The engine's store as the engine's own Compose file serves it to the viewer.
-const STORE: &str = "postgres://127.0.0.1:15432/withhuman";
-const STORE_USER: &str = "withhuman_viewer";
-
-#[derive(Clone, PartialEq)]
-enum Status {
-    Idle,
-    Busy,
-    Ok(String),
-    Err(String),
+/// Whether hooks for `server` report to the app's own engine on this machine.
+pub fn own_engine(server: &str) -> bool {
+    server.trim().trim_end_matches('/') == crate::own::collector_url()
 }
 
-#[component]
-pub fn DevSetup() -> Element {
-    let backend = use_context::<Arc<Backend>>();
-    let mut state = use_context::<AppState>();
-    let current = state.public.peek().clone();
-    let postgres = current.neo4j_url.starts_with("postgres");
-    let mut url = use_signal(|| {
-        if postgres {
-            current.neo4j_url.clone()
-        } else {
-            STORE.into()
-        }
-    });
-    let mut user = use_signal(|| {
-        if postgres {
-            current.user.clone()
-        } else {
-            STORE_USER.into()
-        }
-    });
-    let mut database = use_signal(|| {
-        if postgres {
-            current.database.clone()
-        } else {
-            "withhuman".into()
-        }
-    });
-    let mut password = use_signal(String::new);
-    let mut store = use_signal(|| Status::Idle);
-    let change = move || Change {
-        neo4j_url: url(),
-        database: database(),
-        user: user(),
-        password: Some(password()).filter(|p| !p.is_empty()),
-        demo: false,
-    };
-    let check = {
-        let backend = backend.clone();
-        move |_| {
-            let backend = backend.clone();
-            store.set(Status::Busy);
-            spawn(async move {
-                store.set(match backend.test(change()).await {
-                    Ok(probe) => Status::Ok(format!("연결됨 · 세션 {}", probe.sessions)),
-                    Err(e) => Status::Err(e),
-                });
-            });
-        }
-    };
-    let start = {
-        let backend = backend.clone();
-        move |_| match backend.save(change()) {
-            Ok(next) => {
-                state.public.set(next);
-                state.current.set(None);
-                state.selected.set(Selection::None);
-                state.reload += 1;
-                grow(state);
-                state.screen.set(Screen::Work);
-            }
-            Err(e) => store.set(Status::Err(e)),
-        }
-    };
-    let connected = matches!(store(), Status::Ok(_));
-    let busy = store() == Status::Busy;
-
-    rsx! {
-        div { class: "setup",
-            super::TitleBar { overlay: true }
-            div { class: "setup-glow" }
-            header { class: "setup-top",
-                span { class: "setup-mark", "W" }
-                span { "WithHuman Viewer" }
-                span { class: "setup-step", if connected { "2 / 2" } else { "1 / 2" } }
-            }
-            h1 { class: "setup-title", "엔진 연결" }
-
-            section { class: "setup-block",
-                div { class: "setup-k", span { class: "n", "01" } "기록 저장소" }
-                fieldset { class: "setup-form", disabled: busy,
-                    label { "주소"
-                        input { r#type: "text", value: "{url}", placeholder: STORE, oninput: move |e| { url.set(e.value()); store.set(Status::Idle); } }
-                    }
-                    div { class: "row",
-                        label { "사용자"
-                            input { r#type: "text", value: "{user}", oninput: move |e| { user.set(e.value()); store.set(Status::Idle); } }
-                        }
-                        label { "데이터베이스"
-                            input { r#type: "text", value: "{database}", oninput: move |e| { database.set(e.value()); store.set(Status::Idle); } }
-                        }
-                    }
-                    div { class: "setup-field",
-                        input { r#type: "password", value: "{password}", placeholder: "비밀번호",
-                            oninput: move |e| { password.set(e.value()); store.set(Status::Idle); } }
-                        button { class: "setup-pill", disabled: busy || url().trim().is_empty(), onclick: check,
-                            if busy { "확인 중…" } else { "연결 확인" }
-                        }
-                    }
-                }
-                match store() {
-                    Status::Ok(t) => rsx! { p { class: "setup-note ok", "✓ {t}" } },
-                    Status::Err(t) => rsx! { p { class: "setup-note err", "{t}" } },
-                    _ => rsx! {},
-                }
-            }
-
-            section { class: "setup-block",
-                div { class: "setup-k", span { class: "n", "02" } "훅" }
-                HookSetup {}
-            }
-
-            footer { class: "setup-foot",
-                button { class: "setup-go", disabled: !connected, onclick: start, "시작하기" }
-            }
-        }
-    }
-}
-
-/// Where the hooks go and the engine they report to, and the button that installs them. Shared by
-/// the first launch and the hooks' page, which `on_done` tells to look again.
-#[component]
-pub fn HookSetup(on_done: Option<EventHandler<()>>) -> Element {
-    let backend = use_context::<Arc<Backend>>();
-    let mut state = use_context::<AppState>();
-    let mut server = use_signal(|| state.public.peek().engine_api.clone());
-    let mut scope = use_signal(|| Scope::Device);
-    let mut folder = use_signal(|| None::<PathBuf>);
-    let mut key = use_signal(String::new);
-    let mut status = use_signal(|| match hooks::device_id() {
-        Some(id) => Status::Ok(format!("기기 {id}")),
-        None => Status::Idle,
-    });
-    let pick = move |_| {
-        spawn(async move {
-            if let Some(f) = rfd::AsyncFileDialog::new().pick_folder().await {
-                folder.set(Some(f.path().to_path_buf()));
-                scope.set(Scope::Folder);
-            }
-        });
-    };
-    let install = move |_| {
-        let backend = backend.clone();
-        let (s, f, srv, k) = (scope(), folder(), server(), key());
-        status.set(Status::Busy);
-        spawn(async move {
-            // The engine's address is kept for the next setup, as the security team's is.
-            if let Ok(next) = backend.save_admin(&srv, None) {
-                state.public.set(next);
-            }
-            let at = f.clone();
-            let done = tokio::task::spawn_blocking(move || {
-                hooks::run(s, f.as_deref(), &srv, Some(&k), false)
-            })
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r);
-            let added = at
-                .filter(|_| done.is_ok() && s == Scope::Folder)
-                .map(|f| f.display().to_string());
-            if let Some(at) = added {
-                let mut prefs = state.prefs.write();
-                if !prefs.hook_folders.contains(&at) {
-                    prefs.hook_folders.push(at);
-                }
-            }
-            status.set(match done {
-                Ok(d) => Status::Ok(match d.client_id {
-                    Some(id) => format!("설치됨 · 기기 {id}"),
-                    None => "설치됨".into(),
-                }),
-                Err(e) => Status::Err(e),
-            });
-            if let Some(done) = on_done {
-                done.call(());
-            }
-        });
-    };
-    let busy = status() == Status::Busy;
-    let ready =
-        !busy && !server().trim().is_empty() && (scope() != Scope::Folder || folder().is_some());
-    let folder_name = folder()
-        .map(|f| f.display().to_string())
-        .unwrap_or_else(|| "폴더 고르기".into());
-
-    rsx! {
-        div { class: "setup-choice three",
-            button {
-                class: if scope() == Scope::Device { "on" } else { "" },
-                disabled: busy,
-                onclick: move |_| scope.set(Scope::Device),
-                strong { "기기 전체" }
-                span { "관리자 · 다른 훅 막음" }
-            }
-            button {
-                class: if scope() == Scope::Everywhere { "on" } else { "" },
-                disabled: busy,
-                onclick: move |_| scope.set(Scope::Everywhere),
-                strong { "모든 폴더" }
-                span { "~/.claude/settings.json" }
-            }
-            button {
-                class: if scope() == Scope::Folder { "on" } else { "" },
-                disabled: busy,
-                onclick: pick,
-                strong { "이 폴더만" }
-                span { title: "{folder_name}", "{folder_name}" }
-            }
-        }
-        fieldset { class: "setup-form", disabled: busy,
-            div { class: "row",
-                label { "엔진 주소"
-                    input { r#type: "text", value: "{server}", placeholder: "http://127.0.0.1:3000", oninput: move |e| server.set(e.value()) }
-                }
-                label { "키 (선택)"
-                    input { r#type: "password", value: "{key}", disabled: scope() == Scope::Device, placeholder: if scope() == Scope::Device { "사용자마다" } else { "whk_…" }, oninput: move |e| key.set(e.value()) }
-                }
-            }
-        }
-        div { class: "setup-actions",
-            button { class: "setup-pill", disabled: !ready, onclick: install,
-                if busy { "설치 중…" } else { "훅 설치" }
-            }
-        }
-        match status() {
-            Status::Ok(t) => rsx! { p { class: "setup-note ok", "✓ {t}" } },
-            Status::Err(t) => rsx! { p { class: "setup-note err", "{t}" } },
-            _ => rsx! {},
-        }
-    }
-}
-
-/// The hooks' own page, drawn by 기록's page (`web/record`, `hooks.tsx`) in its frame: the
+/// The hooks' own page, drawn by the console page (`web/console`, `pages/hooks.tsx`) in its frame: the
 /// setups found on this machine (the device's, the user's, the folders the app installed in),
 /// each with the engine it reports to and a button to take it out, and a new setup. What is
 /// pressed there comes back here to be done.
@@ -270,11 +28,14 @@ pub fn HookPage() -> Element {
     let mut folder = use_signal(|| None::<PathBuf>);
     let mut busy = use_signal(|| None::<String>);
     let mut note = use_signal(|| None::<(bool, String)>);
+    // Which panel the note is of: `agents`, or the new setup's.
+    let mut note_at = use_signal(|| "setup");
     let found = use_memo(move || {
         let _ = looked();
         hooks::installed(&state.prefs.read().hook_folders)
     });
     let machine = use_hook(hooks::this_machine);
+    let agents = use_hook(|| hooks::Agent::ALL.to_vec());
     // The engine checked: the one the hooks use, or one typed to try (`check`).
     let mut try_server = use_signal(|| None::<String>);
     let health = use_resource(move || {
@@ -320,8 +81,9 @@ pub fn HookPage() -> Element {
                     hooks::Where::Device => ("device", i.file.display().to_string()),
                     hooks::Where::Everywhere => ("all", i.file.display().to_string()),
                     hooks::Where::Folder(f) => ("folder", f.display().to_string()),
+                    hooks::Where::Profile => ("profile", i.file.display().to_string()),
                 };
-                json!({"at": at, "place": place, "file": i.file.display().to_string(), "engine": i.engine, "installed_at": i.at_ms, "removable": true})
+                json!({"agent": i.agent.kind(), "agent_name": i.agent.name(), "at": at, "place": place, "file": i.file.display().to_string(), "engine": i.engine, "installed_at": i.at_ms, "removable": true})
             })
             .collect();
         json!({
@@ -330,24 +92,31 @@ pub fn HookPage() -> Element {
             "record": record.read().clone().flatten(),
             "device": hooks::device_id(),
             "engine": state.public.read().engine_api,
+            // The app's own engine: no company EDR or blocking, but how Calls are judged.
+            "own": own_engine(&state.public.read().engine_api),
+            "jev": crate::own::jev_in_use().is_some(),
             "installs": installs,
+            "agents": agents.iter().map(|a| json!({
+                "kind": a.kind(), "name": a.name(), "found": a.found(),
+                "per_folder": a.per_folder(), "per_profile": a.per_profile(),
+            })).collect::<Vec<_>>(),
             "folder": folder().map(|f| f.display().to_string()),
             "busy": busy(),
-            "note": note().map(|(ok, text)| json!({"ok": ok, "text": text})),
+            "note": note().map(|(ok, text)| json!({"ok": ok, "text": text, "at": note_at()})),
         })
         .to_string()
     });
     use_effect(move || {
         let d = data();
         document::eval(&format!(
-            "requestAnimationFrame(() => window.__whHooksSet && window.__whHooksSet({d}))"
+            "requestAnimationFrame(() => window.__whConsoleSet && window.__whConsoleSet('hooks', {d}))"
         ));
     });
     use_future(move || {
         let backend = backend.clone();
         async move {
             let mut eval = document::eval(
-                "window.__whHooksOn = (m) => dioxus.send(m); await new Promise(() => {});",
+                "window.__whConsoleOn['hooks'] = (m) => dioxus.send(m); await new Promise(() => {});",
             );
             while let Ok(m) = eval.recv::<Value>().await {
                 match m["do"].as_str() {
@@ -362,13 +131,19 @@ pub fn HookPage() -> Element {
                         });
                     }
                     Some("install") => {
+                        note_at.set("setup");
                         let scope = match m["scope"].as_str() {
                             Some("folder") => Scope::Folder,
-                            Some("all") => Scope::Everywhere,
+                            Some("all" | "profile") => Scope::Everywhere,
                             _ => Scope::Device,
                         };
                         let server = m["server"].as_str().unwrap_or_default().to_owned();
                         let key = m["key"].as_str().unwrap_or_default().to_owned();
+                        let agent = m["agent"]
+                            .as_str()
+                            .and_then(hooks::Agent::from_kind)
+                            .unwrap_or(hooks::Agent::Claude);
+                        let own = own_engine(&server);
                         let at = folder();
                         if let Ok(next) = backend.save_admin(&server, None) {
                             state.public.set(next);
@@ -378,13 +153,32 @@ pub fn HookPage() -> Element {
                         spawn(async move {
                             let into = at.clone();
                             let done = tokio::task::spawn_blocking(move || {
-                                hooks::run(scope, into.as_deref(), &server, Some(&key), false)
+                                if agent == hooks::Agent::Claude {
+                                    hooks::run(
+                                        scope,
+                                        into.as_deref(),
+                                        &server,
+                                        Some(&key),
+                                        false,
+                                        own,
+                                    )
+                                } else {
+                                    hooks::run_agent(
+                                        agent,
+                                        into.as_deref(),
+                                        &server,
+                                        Some(&key),
+                                        false,
+                                    )
+                                }
                             })
                             .await
                             .map_err(|e| e.to_string())
                             .and_then(|r| r);
                             let added = at
-                                .filter(|_| done.is_ok() && scope == Scope::Folder)
+                                .filter(|_| {
+                                    done.is_ok() && (scope == Scope::Folder || agent.per_folder())
+                                })
                                 .map(|f| f.display().to_string());
                             if let Some(at) = added {
                                 let mut prefs = state.prefs.write();
@@ -402,6 +196,7 @@ pub fn HookPage() -> Element {
                         });
                     }
                     Some("remove") => {
+                        note_at.set("setup");
                         let file = m["file"].as_str().unwrap_or_default().to_owned();
                         let Some(install) = found
                             .peek()
@@ -411,9 +206,12 @@ pub fn HookPage() -> Element {
                         else {
                             continue;
                         };
+                        let agent = install.agent;
                         let (scope, at) = match &install.at {
                             hooks::Where::Device => (Scope::Device, None),
-                            hooks::Where::Everywhere => (Scope::Everywhere, None),
+                            hooks::Where::Everywhere | hooks::Where::Profile => {
+                                (Scope::Everywhere, None)
+                            }
                             hooks::Where::Folder(f) => (Scope::Folder, Some(f.clone())),
                         };
                         busy.set(Some(file));
@@ -421,15 +219,25 @@ pub fn HookPage() -> Element {
                         spawn(async move {
                             let from = at.clone();
                             let done = tokio::task::spawn_blocking(move || {
-                                hooks::run(scope, from.as_deref(), "", None, true)
+                                if agent == hooks::Agent::Claude {
+                                    hooks::run(scope, from.as_deref(), "", None, true, false)
+                                } else {
+                                    hooks::run_agent(agent, from.as_deref(), "", None, true)
+                                }
                             })
                             .await
                             .map_err(|e| e.to_string())
                             .and_then(|r| r);
                             match done {
                                 Ok(_) => {
+                                    // The folder stays listed while another agent's setup is in it.
                                     if let Some(at) = at.map(|f| f.display().to_string()) {
-                                        state.prefs.write().hook_folders.retain(|f| *f != at);
+                                        let left = hooks::installed(std::slice::from_ref(&at)).iter().any(|i| {
+                                            matches!(&i.at, hooks::Where::Folder(f) if f.display().to_string() == at)
+                                        });
+                                        if !left {
+                                            state.prefs.write().hook_folders.retain(|f| *f != at);
+                                        }
                                     }
                                     note.set(Some((true, "제거됨".into())));
                                 }
@@ -439,7 +247,138 @@ pub fn HookPage() -> Element {
                             looked += 1;
                         });
                     }
+                    // One agent's hooks, or every agent's found here: Claude Code for every
+                    // folder, Hermes and OpenClaw in their profile, the others in the folder
+                    // picked (left out without one).
+                    Some(what @ ("install_agent" | "install_all")) => {
+                        note_at.set("agents");
+                        let server = state.public.peek().engine_api.clone();
+                        let own = own_engine(&server);
+                        let at = folder();
+                        let agents: Vec<hooks::Agent> = if what == "install_all" {
+                            hooks::Agent::ALL
+                                .into_iter()
+                                .filter(|a| {
+                                    (*a == hooks::Agent::Claude || a.found())
+                                        && (!a.per_folder() || at.is_some())
+                                })
+                                .collect()
+                        } else {
+                            m["agent"]
+                                .as_str()
+                                .and_then(hooks::Agent::from_kind)
+                                .into_iter()
+                                .collect()
+                        };
+                        if agents.iter().any(|a| a.per_folder()) && at.is_none() {
+                            note.set(Some((false, "폴더를 골라 주세요.".into())));
+                            continue;
+                        }
+                        busy.set(Some(if what == "install_all" {
+                            "all".into()
+                        } else {
+                            format!("agent:{}", m["agent"].as_str().unwrap_or_default())
+                        }));
+                        note.set(None);
+                        spawn(async move {
+                            let mut failed = Vec::new();
+                            for agent in agents {
+                                let (server, into) = (server.clone(), at.clone());
+                                let done = tokio::task::spawn_blocking(move || {
+                                    if agent == hooks::Agent::Claude {
+                                        hooks::run(
+                                            Scope::Everywhere,
+                                            None,
+                                            &server,
+                                            None,
+                                            false,
+                                            own,
+                                        )
+                                    } else {
+                                        hooks::run_agent(
+                                            agent,
+                                            into.as_deref(),
+                                            &server,
+                                            None,
+                                            false,
+                                        )
+                                    }
+                                })
+                                .await
+                                .map_err(|e| e.to_string())
+                                .and_then(|r| r);
+                                match done {
+                                    Ok(_) => {
+                                        if let Some(f) = at.as_ref().filter(|_| agent.per_folder())
+                                        {
+                                            let f = f.display().to_string();
+                                            let mut prefs = state.prefs.write();
+                                            if !prefs.hook_folders.contains(&f) {
+                                                prefs.hook_folders.push(f);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => failed.push(format!("{} · {e}", agent.name())),
+                                }
+                                looked += 1;
+                            }
+                            note.set(Some(if failed.is_empty() {
+                                (true, "설치됨".into())
+                            } else {
+                                (false, failed.join(" / "))
+                            }));
+                            busy.set(None);
+                        });
+                    }
+                    Some("remove_agent") => {
+                        note_at.set("agents");
+                        let Some(agent) = m["agent"].as_str().and_then(hooks::Agent::from_kind)
+                        else {
+                            continue;
+                        };
+                        let targets: Vec<hooks::Install> = found
+                            .peek()
+                            .iter()
+                            .filter(|i| i.agent == agent)
+                            .cloned()
+                            .collect();
+                        busy.set(Some(format!("agent:{}", agent.kind())));
+                        note.set(None);
+                        spawn(async move {
+                            let mut failed = Vec::new();
+                            for install in targets {
+                                let (scope, from) = match &install.at {
+                                    hooks::Where::Device => (Scope::Device, None),
+                                    hooks::Where::Everywhere | hooks::Where::Profile => {
+                                        (Scope::Everywhere, None)
+                                    }
+                                    hooks::Where::Folder(f) => (Scope::Folder, Some(f.clone())),
+                                };
+                                let done = tokio::task::spawn_blocking(move || {
+                                    if agent == hooks::Agent::Claude {
+                                        hooks::run(scope, from.as_deref(), "", None, true, false)
+                                    } else {
+                                        hooks::run_agent(agent, from.as_deref(), "", None, true)
+                                    }
+                                })
+                                .await
+                                .map_err(|e| e.to_string())
+                                .and_then(|r| r);
+                                if let Err(e) = done {
+                                    failed.push(e);
+                                }
+                            }
+                            note.set(Some(if failed.is_empty() {
+                                (true, "제거됨".into())
+                            } else {
+                                (false, failed.join(" / "))
+                            }));
+                            busy.set(None);
+                            looked += 1;
+                        });
+                    }
                     Some("reset") => {
+                        note_at.set("setup");
                         let folders = state.prefs.peek().hook_folders.clone();
                         busy.set(Some("reset".into()));
                         note.set(None);
@@ -465,6 +404,6 @@ pub fn HookPage() -> Element {
         }
     });
     rsx! {
-        div { id: "wh-hooks", class: "wh-record" }
+        div { id: "wh-console-hooks", class: "wh-console" }
     }
 }
