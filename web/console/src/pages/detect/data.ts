@@ -44,6 +44,8 @@ export type FlowCount = [number, number, string, string, string, number];
 export type Data = {
   source: string; demo: boolean; loading: boolean; failed: string | null; refreshed: number | null;
   machines: string[]; calls: Call[]; cover: Cover[]; flow: FlowCount[];
+  /** When each session the Calls are of was last active. */
+  last?: Record<string, number>;
   /** What the team marked each session as, the case opened, and what the last save said. */
   triage?: Record<string, Mark>; case?: Case | null; saved?: string | null;
   /** The sources the team distrusts, and the machines to tell it about. */
@@ -73,7 +75,9 @@ export type Case = {
   request?: { seq: number; text: string; intent: string | null; at: number | null } | null;
   /** What the Call was on, whole (the list's is cut short). */
   target?: string | null;
-  told?: { seq: number; tool: string | null; target: string | null; at: number | null; quote: string | null; paragraph: number | null; probability: number; error: boolean } | null;
+  told?: { seq: number; tool: string | null; target: string | null; at: number | null; quote: string | null; paragraph: number | null; probability: number; error: boolean;
+    /** The paragraph that told it, whole, as the tool gave it back; `quote` is its first line. */
+    text?: string | null } | null;
   traced?: boolean;
   elsewhere?: { session: string; seq: number; machine: string; at: number | null; prompt: string | null; title?: string | null; flagged: number }[];
   elsewhere_total?: number;
