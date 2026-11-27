@@ -88,8 +88,8 @@ jobs:
         with:
           tool: cargo-packager@0.11.8
 
-      - name: Package the developer's app
-        run: scripts/package-windows.sh dev
+      - name: Package the personal app
+        run: scripts/package-windows.sh personal
 
       - name: Package the security team's app
         run: scripts/package-windows.sh admin

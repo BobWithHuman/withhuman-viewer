@@ -13,8 +13,11 @@
 ```sh
 git clone https://github.com/BobWithHuman/withhuman-viewer.git
 cd withhuman-viewer
-cargo admin #보안 담당자 단말
-cargo run   #개발자 단말
+cargo personal  #개인 사용자 (앱 안 엔진)
+cargo developer #개발자 단말 (회사 엔진)
+cargo admin     #보안 담당자
+
+cargo personal -- --onboard  #첫 설정 다시 보기
 ```
 
 ## 보안

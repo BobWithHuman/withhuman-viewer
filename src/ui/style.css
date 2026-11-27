@@ -1388,6 +1388,15 @@ button.primary { background: var(--c-accent); border-color: var(--c-accent); }
   border-right: .5px solid rgba(0, 0, 0, .09); }
 .sb-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: #34c759; }
 .sb-dot.demo { background: #a1a1a6; } .sb-dot.down { background: #ff3b30; } .sb-dot.wait { background: #c7c7cc; }
+.sb-dot.idle { background: #0a84ff; } .sb-dot.off { background: transparent; box-shadow: inset 0 0 0 1px #8e8e93; }
+.setup-models button { display: inline-flex; align-items: center; gap: 6px; }
+.tb-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 11px; font-weight: 600; background: rgba(255,255,255,.06); color: var(--muted); }
+.tb-chip.jev { color: #ffb340; background: rgba(255,179,64,.12); }
+.tb-chip.local { color: #30d158; background: rgba(48,209,88,.12); }
+.danger { color: #ff453a !important; }
+.danger.armed { background: #ff453a !important; color: #fff !important; }
+.sb-try { margin: 8px 12px; height: 28px; border-radius: 7px; border: 0; background: #0a84ff; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.sb-try:disabled { opacity: .5; cursor: default; }
 .sb-list { display: flex; flex-direction: column; gap: 1px; }
 .sb-row { width: 100%; height: 28px; display: flex; align-items: center; gap: 9px; padding: 0 8px; border: 0; border-radius: 7px;
   background: none; color: var(--c-text); font-size: 13px; text-align: left; }
@@ -1488,6 +1497,13 @@ button.primary { background: var(--c-accent); border-color: var(--c-accent); }
 .setup-go { height: 30px; padding: 0 16px; border: 0; border-radius: 999px; background: #111214; color: #fff !important; font-size: 13px; font-weight: 500; }
 .setup-go:hover:not(:disabled) { background: #111214; filter: brightness(1.25); }
 .setup-go:disabled { opacity: .3; }
+.setup-models { display: flex; flex-wrap: wrap; gap: 6px; }
+.setup-models button { height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid #dcdfe3; background: #f6f7f8; color: var(--c-ink);
+  font: 500 11.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.setup-models button.on { border-color: var(--c-accent); background: #fff; box-shadow: 0 0 0 3px rgba(47, 124, 246, .14); }
+.setup-parts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+.setup-parts span { display: inline-flex; align-items: center; gap: 6px; }
+.setup-parts .muted { color: var(--c-mute); font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* ----- The main page: warm off-white, a soft sky, serif headings, pastel cards. ----- */
 .home { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; background: var(--c-warm); color: var(--c-ink); user-select: none; }
@@ -1632,6 +1648,9 @@ button.primary { background: var(--c-accent); border-color: var(--c-accent); }
 .setup-note { color: #8e8e8e; } .setup-note.ok { color: var(--af-lime); } .setup-note.err { color: #ff8b8b; }
 .setup-link { color: #6aa5ff; }
 .setup-choice button { background: var(--af-field); border: 1px solid #2e2e2e; color: #ededed; }
+.setup-models button { background: var(--af-field); border-color: #2e2e2e; color: #ededed; }
+.setup-models button.on { background: #1c1c1c; border-color: var(--af-blue); box-shadow: 0 0 0 2px rgba(52, 120, 246, .35); }
+.setup-parts .muted { color: #8e8e8e; }
 .setup-choice button:hover:not(:disabled) { background: #1a1a1a; }
 .setup-choice button.on { background: #192d53; border-color: #3577f6; box-shadow: none; }
 .setup-choice span { color: #9a9a9a; }
@@ -2030,3 +2049,18 @@ div.admin-hbar:hover { background: none; }
 .tb-seg button.on, .tb-seg button.on:hover:not(:disabled) { background: #3a3a40; color: #fff; font-weight: 600; }
 .tb-seg button.on svg { color: #fff; }
 .rail button.product.on { background: #2e2e32; color: #fff; box-shadow: inset 2px 0 0 #6b9be0; }
+
+/* The app's own engine in the connection sheet. */
+.own-parts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 2px 0 12px; font-size: 12px; }
+.own-parts span { display: inline-flex; align-items: center; gap: 6px; }
+.own-models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.own-models button { height: 26px; padding: 0 10px; border-radius: 999px; font: 500 11.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.own-models button.on { outline: 2px solid var(--c-accent, #2f7cf6); outline-offset: -1px; }
+
+/* The personal app's first launch: 기록's page in a frame filling the window, under the title bar's drag strip. */
+.onboard { position: fixed; inset: 0; display: flex; background: #1f1f21; }
+.onboard > .wh-console { flex: 1; }
+
+/* The personal app's engine sheet: the console page fills it. */
+.sheet.engine-sheet { width: 560px; max-width: calc(100vw - 48px); height: 700px; max-height: calc(100vh - 48px); padding: 0; overflow: hidden; display: flex; border-radius: 12px; }
+.sheet.engine-sheet > .wh-console { flex: 1; }

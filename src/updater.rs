@@ -11,9 +11,13 @@ use cargo_packager_updater::{Config, Update};
 /// The minisign public key the update archives are signed with.
 const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyOTJFMkU0OUE0RUM2RUUKUldUdXhrNmE1T0tTUWpzcmVNbDMvQmRGTDc0S0hOUXNqSGMrZUxVS1VMbmtyTWoyUkdJT0xGMG4K";
 
-/// The newest published release's manifest; drafts and pre-releases are not "latest".
+/// The newest published release's manifest; drafts and pre-releases are not "latest". Each app
+/// has its own: the personal app updating from the security team's would become that app.
+#[cfg(feature = "admin")]
 const ENDPOINT: &str =
     "https://github.com/BobWithHuman/withhuman-viewer/releases/latest/download/latest.json";
+#[cfg(not(feature = "admin"))]
+const ENDPOINT: &str = "https://github.com/BobWithHuman/withhuman-viewer/releases/latest/download/latest-personal.json";
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

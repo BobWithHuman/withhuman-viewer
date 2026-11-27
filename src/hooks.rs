@@ -1,13 +1,222 @@
-//! The developer's hooks: the engine's Claude Code setup (`client/`, from withhuman-core's
-//! `deploy/client`), written to the app's settings folder and run with Python, for one folder or
-//! every folder of the user. The setup itself writes the hooks, the device's client ID and its
-//! registration with the engine; the app only runs it and reads what it printed.
+//! The developer's hooks: the engine's agent setup (`client/`, from withhuman-core's
+//! `deploy/client`), written to the app's settings folder and run with Python. Claude Code is set
+//! up for one folder or every folder of the user; the other agents the setup knows each as it
+//! takes it: Codex, Cursor, Copilot and Antigravity in a project folder, Hermes and OpenClaw in
+//! the user's own profile of theirs. The setup itself writes the hooks, the device's client ID
+//! and its registration with the engine; the app only runs it and reads what it printed.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const CONFIGURE: &str = include_str!("../client/configure.py");
-const HOOK: &str = include_str!("../client/hooks/pre-tool-use.py");
+/// The setup's files, by their place beside `configure.py` (scripts/sync-client.sh copies them).
+const FILES: &[(&str, &str)] = &[
+    ("configure.py", include_str!("../client/configure.py")),
+    (
+        "hooks/pre-tool-use.py",
+        include_str!("../client/hooks/pre-tool-use.py"),
+    ),
+    (
+        "hooks/withhuman_bridge.py",
+        include_str!("../client/hooks/withhuman_bridge.py"),
+    ),
+    (
+        "antigravity/withhuman-hook.py",
+        include_str!("../client/antigravity/withhuman-hook.py"),
+    ),
+    (
+        "antigravity/antigravity_transcript.py",
+        include_str!("../client/antigravity/antigravity_transcript.py"),
+    ),
+    (
+        "codex/withhuman-hook.py",
+        include_str!("../client/codex/withhuman-hook.py"),
+    ),
+    (
+        "codex/codex_transcript.py",
+        include_str!("../client/codex/codex_transcript.py"),
+    ),
+    (
+        "copilot/withhuman-hook.py",
+        include_str!("../client/copilot/withhuman-hook.py"),
+    ),
+    (
+        "copilot/copilot_transcript.py",
+        include_str!("../client/copilot/copilot_transcript.py"),
+    ),
+    (
+        "cursor/withhuman-hook.py",
+        include_str!("../client/cursor/withhuman-hook.py"),
+    ),
+    (
+        "hermes/__init__.py",
+        include_str!("../client/hermes/__init__.py"),
+    ),
+    (
+        "hermes/plugin.yaml",
+        include_str!("../client/hermes/plugin.yaml"),
+    ),
+    (
+        "hermes/withhuman-hook.py",
+        include_str!("../client/hermes/withhuman-hook.py"),
+    ),
+    (
+        "openclaw/index.js",
+        include_str!("../client/openclaw/index.js"),
+    ),
+    (
+        "openclaw/openclaw.plugin.json",
+        include_str!("../client/openclaw/openclaw.plugin.json"),
+    ),
+    (
+        "openclaw/package.json",
+        include_str!("../client/openclaw/package.json"),
+    ),
+    (
+        "openclaw/withhuman-hook.py",
+        include_str!("../client/openclaw/withhuman-hook.py"),
+    ),
+];
+
+/// A coding agent the setup knows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Agent {
+    Claude,
+    Codex,
+    Cursor,
+    Copilot,
+    Antigravity,
+    Hermes,
+    OpenClaw,
+}
+
+impl Agent {
+    pub const ALL: [Agent; 7] = [
+        Agent::Claude,
+        Agent::Codex,
+        Agent::Cursor,
+        Agent::Copilot,
+        Agent::Antigravity,
+        Agent::Hermes,
+        Agent::OpenClaw,
+    ];
+
+    /// The setup's name for it (`--agent`).
+    pub fn kind(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude",
+            Agent::Codex => "codex",
+            Agent::Cursor => "cursor",
+            Agent::Copilot => "copilot",
+            Agent::Antigravity => "antigravity",
+            Agent::Hermes => "hermes",
+            Agent::OpenClaw => "openclaw",
+        }
+    }
+
+    pub fn from_kind(kind: &str) -> Option<Agent> {
+        Agent::ALL.into_iter().find(|a| a.kind() == kind)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Agent::Claude => "Claude Code",
+            Agent::Codex => "Codex",
+            Agent::Cursor => "Cursor",
+            Agent::Copilot => "Copilot",
+            Agent::Antigravity => "Antigravity",
+            Agent::Hermes => "Hermes",
+            Agent::OpenClaw => "OpenClaw",
+        }
+    }
+
+    /// Set up one project folder at a time (Claude Code can be either).
+    pub fn per_folder(self) -> bool {
+        matches!(
+            self,
+            Agent::Codex | Agent::Cursor | Agent::Copilot | Agent::Antigravity
+        )
+    }
+
+    /// Set up once for the user, in its own profile, whatever the folder.
+    pub fn per_profile(self) -> bool {
+        matches!(self, Agent::Hermes | Agent::OpenClaw)
+    }
+
+    /// The commands it is run by, and the folder in the home it keeps its own state in.
+    fn marks(self) -> (&'static [&'static str], Option<&'static str>) {
+        match self {
+            Agent::Claude => (&["claude"], Some(".claude")),
+            Agent::Codex => (&["codex"], Some(".codex")),
+            Agent::Cursor => (&["cursor-agent", "cursor"], Some(".cursor")),
+            Agent::Copilot => (&["copilot"], Some(".copilot")),
+            Agent::Antigravity => (&["antigravity"], Some(".antigravity")),
+            Agent::Hermes => (&["hermes"], Some(".hermes")),
+            Agent::OpenClaw => (&["openclaw"], Some(".openclaw")),
+        }
+    }
+
+    /// Whether it is on this machine: its command on `PATH` or where installers put one, or
+    /// its folder in the home.
+    pub fn found(self) -> bool {
+        let (commands, folder) = self.marks();
+        let home = dirs::home_dir();
+        if let (Some(home), Some(folder)) = (&home, folder)
+            && home.join(folder).is_dir()
+        {
+            return true;
+        }
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        dirs.extend(python_dirs());
+        if let Some(home) = &home {
+            dirs.extend(
+                [".local/bin", ".npm-global/bin", ".bun/bin", ".cargo/bin"].map(|d| home.join(d)),
+            );
+        }
+        dirs.iter().any(|d| {
+            commands.iter().any(|c| {
+                let exe = if cfg!(windows) {
+                    format!("{c}.exe")
+                } else {
+                    (*c).to_owned()
+                };
+                d.join(exe).is_file() || (cfg!(windows) && d.join(format!("{c}.cmd")).is_file())
+            })
+        })
+    }
+
+    /// The file a project folder's setup of it is in.
+    fn folder_file(self, folder: &Path) -> PathBuf {
+        folder.join(match self {
+            Agent::Claude => ".claude/settings.json",
+            Agent::Codex => ".codex/hooks.json",
+            Agent::Cursor => ".cursor/hooks.json",
+            Agent::Copilot => ".github/hooks/withhuman-copilot.json",
+            Agent::Antigravity => ".agents/hooks.json",
+            Agent::Hermes | Agent::OpenClaw => "",
+        })
+    }
+
+    /// Where the user's setup of an agent set up in its own profile is.
+    fn profile_dir(self) -> Option<PathBuf> {
+        let home = dirs::home_dir()?;
+        match self {
+            Agent::Hermes => Some(
+                std::env::var_os("HERMES_HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".hermes"))
+                    .join("plugins/withhuman"),
+            ),
+            Agent::OpenClaw => Some(
+                std::env::var_os("OPENCLAW_STATE_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".openclaw"))
+                    .join("withhuman-setup"),
+            ),
+            _ => None,
+        }
+    }
+}
 
 /// Where the hooks go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,7 +304,11 @@ fn python() -> Result<PathBuf, String> {
         &["python3"]
     };
     let path = std::env::var_os("PATH").unwrap_or_default();
+    let stub = mac_stub();
     for dir in std::env::split_paths(&path).chain(python_dirs()) {
+        if stub && dir == Path::new("/usr/bin") {
+            continue;
+        }
         if let Some(found) = names.iter().map(|n| dir.join(n)).find(|c| usable(c)) {
             return Ok(found);
         }
@@ -114,26 +327,64 @@ fn python() -> Result<PathBuf, String> {
     Err("Python 3.8 이상을 찾지 못했습니다.".into())
 }
 
-/// The setup's two files, written where the app keeps its own; the hook beside it as the setup
-/// expects (`hooks/pre-tool-use.py`).
+/// Whether macOS's `/usr/bin/python3` is only the stand-in that asks to install Apple's command
+/// line tools: run, it opens that dialog, so it is not tried while they are not installed.
+fn mac_stub() -> bool {
+    cfg!(target_os = "macos")
+        && !Command::new("/usr/bin/xcode-select")
+            .arg("-p")
+            .output()
+            .is_ok_and(|o| o.status.success())
+}
+
+/// The Python the hooks would run with, if there is one.
+pub fn python_found() -> Option<PathBuf> {
+    python().ok()
+}
+
+/// Asks for a Python: on a Mac, Apple's command line tools, which carry one; elsewhere
+/// python.org's download page.
+pub fn get_python() {
+    if cfg!(target_os = "macos") {
+        let _ = Command::new("/usr/bin/xcode-select")
+            .arg("--install")
+            .spawn();
+    } else {
+        let opener = if cfg!(windows) {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        let _ = command(opener)
+            .arg("https://www.python.org/downloads/")
+            .spawn();
+    }
+}
+
+/// The setup's files, written where the app keeps its own, each where the setup looks for it.
 fn files() -> Result<PathBuf, String> {
     let dir = crate::api::config_dir().join("client");
-    let hooks = dir.join("hooks");
-    std::fs::create_dir_all(&hooks).map_err(|e| format!("설치 파일을 쓰지 못했습니다: {e}"))?;
-    std::fs::write(dir.join("configure.py"), CONFIGURE)
-        .and_then(|()| std::fs::write(hooks.join("pre-tool-use.py"), HOOK))
-        .map_err(|e| format!("설치 파일을 쓰지 못했습니다: {e}"))?;
+    for (name, text) in FILES {
+        let path = dir.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("설치 파일을 쓰지 못했습니다: {e}"))?;
+        }
+        std::fs::write(&path, text).map_err(|e| format!("설치 파일을 쓰지 못했습니다: {e}"))?;
+    }
     Ok(dir)
 }
 
 /// The setup's arguments: where, against which engine, with the user's key when given; or
-/// taking a setup out.
+/// taking a setup out. The developer's own engine on this machine (`own_engine`) lets calls go
+/// on while it is away, for a setup of every folder of the user: the setup refuses it elsewhere.
 fn arguments(
     scope: Scope,
     folder: Option<&Path>,
     server: &str,
     key: Option<&str>,
     uninstall: bool,
+    own_engine: bool,
 ) -> Result<Vec<String>, String> {
     let mut args = vec![
         "--scope".to_owned(),
@@ -162,6 +413,10 @@ fn arguments(
     }
     args.push("--server".into());
     args.push(server.to_owned());
+    if own_engine && scope == Scope::Everywhere {
+        args.push("--on-unreachable".into());
+        args.push("allow".into());
+    }
     // A device's setup is for every user: each keeps their own key.
     if let Some(key) = key
         .map(str::trim)
@@ -189,12 +444,61 @@ pub fn run(
     server: &str,
     key: Option<&str>,
     uninstall: bool,
+    own_engine: bool,
 ) -> Result<Done, String> {
-    let args = arguments(scope, folder, server, key, uninstall)?;
+    let args = arguments(scope, folder, server, key, uninstall, own_engine)?;
     let out = setup(&args, scope == Scope::Device)?;
     Ok(Done {
         client_id: client_id(&out),
     })
+}
+
+/// Sets up an agent other than Claude Code, or takes its setup out (`uninstall`): in `folder`
+/// for one set up per project folder, in the user's own profile of it otherwise. Blocks while the
+/// setup runs. Its hooks deny while the engine is away: only Claude Code's setup of every folder
+/// may let calls go on.
+pub fn run_agent(
+    agent: Agent,
+    folder: Option<&Path>,
+    server: &str,
+    key: Option<&str>,
+    uninstall: bool,
+) -> Result<Done, String> {
+    let args = agent_arguments(agent, folder, server, key, uninstall)?;
+    let out = setup(&args, false)?;
+    Ok(Done {
+        client_id: client_id(&out),
+    })
+}
+
+fn agent_arguments(
+    agent: Agent,
+    folder: Option<&Path>,
+    server: &str,
+    key: Option<&str>,
+    uninstall: bool,
+) -> Result<Vec<String>, String> {
+    let mut args = vec!["--agent".to_owned(), agent.kind().to_owned()];
+    if agent.per_folder() {
+        let folder = folder.ok_or("폴더를 골라 주세요.")?;
+        args.push("--project".into());
+        args.push(folder.display().to_string());
+    }
+    if uninstall {
+        args.push("--uninstall".into());
+        return Ok(args);
+    }
+    let server = server.trim();
+    if server.is_empty() {
+        return Err("엔진 주소를 넣어 주세요.".into());
+    }
+    args.push("--server".into());
+    args.push(server.to_owned());
+    if let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) {
+        args.push("--key".into());
+        args.push(key.to_owned());
+    }
+    Ok(args)
 }
 
 /// Takes every WithHuman setup on this machine out at once (`--reset`): the device's, the
@@ -477,12 +781,15 @@ pub enum Where {
     Folder(PathBuf),
     /// Every user and folder of the device, set by an administrator.
     Device,
+    /// The user's own profile of an agent (Hermes's, OpenClaw's), for every folder.
+    Profile,
 }
 
-/// A WithHuman setup found on this machine: where, its settings file, and the engine its hooks
-/// report to.
+/// A WithHuman setup found on this machine: of which agent, where, its settings file, and the
+/// engine its hooks report to.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Install {
+    pub agent: Agent,
     pub at: Where,
     pub file: PathBuf,
     pub engine: Option<String>,
@@ -518,16 +825,78 @@ fn found(at: Where, file: PathBuf) -> Option<Install> {
     let text = std::fs::read_to_string(&file).ok()?;
     let settings: serde_json::Value = serde_json::from_str(&text).ok()?;
     let engine = engine_of(&settings)?;
-    let at_ms = std::fs::metadata(&file)
+    Some(Install {
+        agent: Agent::Claude,
+        at,
+        at_ms: modified(&file),
+        file,
+        engine,
+    })
+}
+
+fn modified(file: &Path) -> Option<i64> {
+    std::fs::metadata(file)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64);
+        .map(|d| d.as_millis() as i64)
+}
+
+/// The first engine address in `text`: what an agent's hooks file, or the `server` file beside
+/// its hook, names.
+fn address_in(text: &str) -> Option<String> {
+    let start = text.find("http://").or_else(|| text.find("https://"))?;
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ','))
+        .unwrap_or(rest.len());
+    let url = &rest[..end];
+    Some(
+        url.split("/v1/hooks")
+            .next()
+            .unwrap_or(url)
+            .trim_end_matches('/')
+            .to_owned(),
+    )
+}
+
+/// Another agent's setup in `folder`, if its hooks file holds WithHuman's hooks.
+fn found_agent(agent: Agent, folder: &Path) -> Option<Install> {
+    let file = agent.folder_file(folder);
+    let text = std::fs::read_to_string(&file).ok()?;
+    if !text.contains("withhuman") {
+        return None;
+    }
+    // Cursor keeps the address beside its hook, not in the file.
+    let engine = address_in(&text).or_else(|| {
+        let beside = file.parent()?.join("withhuman/server");
+        address_in(&std::fs::read_to_string(beside).ok()?)
+    });
     Some(Install {
-        at,
+        agent,
+        at: Where::Folder(folder.to_path_buf()),
+        at_ms: modified(&file),
         file,
         engine,
-        at_ms,
+    })
+}
+
+/// The user's setup of an agent set up in its own profile.
+fn found_profile(agent: Agent) -> Option<Install> {
+    let dir = agent.profile_dir()?;
+    let hook = dir.join("withhuman-hook.py");
+    if !hook.is_file() {
+        return None;
+    }
+    let engine = std::fs::read_to_string(dir.join("server"))
+        .ok()
+        .and_then(|t| address_in(&t));
+    Some(Install {
+        agent,
+        at: Where::Profile,
+        at_ms: modified(&hook),
+        file: dir,
+        engine,
     })
 }
 
@@ -551,10 +920,16 @@ pub fn installed(folders: &[String]) -> Vec<Install> {
     if let Some(home) = dirs::home_dir() {
         out.extend(found(Where::Everywhere, home.join(".claude/settings.json")));
     }
+    for agent in Agent::ALL.into_iter().filter(|a| a.per_profile()) {
+        out.extend(found_profile(agent));
+    }
     for folder in folders {
         let folder = PathBuf::from(folder);
         let file = folder.join(".claude/settings.json");
-        out.extend(found(Where::Folder(folder), file));
+        out.extend(found(Where::Folder(folder.clone()), file));
+        for agent in Agent::ALL.into_iter().filter(|a| a.per_folder()) {
+            out.extend(found_agent(agent, &folder));
+        }
     }
     out
 }
@@ -562,6 +937,59 @@ pub fn installed(folders: &[String]) -> Vec<Install> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_agent_is_set_up_as_the_setup_takes_it() {
+        let folder = Path::new("/work/app");
+        assert_eq!(
+            agent_arguments(Agent::Codex, Some(folder), " http://e:3000 ", None, false).unwrap(),
+            [
+                "--agent",
+                "codex",
+                "--project",
+                "/work/app",
+                "--server",
+                "http://e:3000"
+            ]
+        );
+        assert!(agent_arguments(Agent::Cursor, None, "http://e", None, false).is_err());
+        assert_eq!(
+            agent_arguments(Agent::Hermes, None, "http://e", Some("whk_x"), false).unwrap(),
+            [
+                "--agent", "hermes", "--server", "http://e", "--key", "whk_x"
+            ]
+        );
+        assert_eq!(
+            agent_arguments(Agent::OpenClaw, None, "", None, true).unwrap(),
+            ["--agent", "openclaw", "--uninstall"]
+        );
+        // Every file the setup copies for an agent is one the app carries.
+        for agent in [
+            "antigravity",
+            "codex",
+            "copilot",
+            "cursor",
+            "hermes",
+            "openclaw",
+        ] {
+            assert!(
+                FILES
+                    .iter()
+                    .any(|(name, _)| name.starts_with(&format!("{agent}/"))),
+                "{agent}"
+            );
+        }
+        assert_eq!(
+            address_in(
+                r#"{"command": "\"/py\" \"/h/withhuman-hook.py\" http://127.0.0.1:47380 PreToolUse"}"#
+            ),
+            Some("http://127.0.0.1:47380".into())
+        );
+        assert_eq!(
+            address_in("http://e:3000/v1/hooks/x\n"),
+            Some("http://e:3000".into())
+        );
+    }
 
     #[test]
     fn finds_the_engine_withhumans_hooks_report_to() {
@@ -586,7 +1014,8 @@ mod tests {
                 Some(folder),
                 " http://e:3000 ",
                 Some(" "),
-                false
+                false,
+                true
             )
             .unwrap(),
             [
@@ -599,16 +1028,24 @@ mod tests {
             ]
         );
         assert_eq!(
-            arguments(Scope::Everywhere, None, "http://e", Some("whk_x"), false).unwrap(),
+            arguments(
+                Scope::Everywhere,
+                None,
+                "http://e",
+                Some("whk_x"),
+                false,
+                false
+            )
+            .unwrap(),
             ["--scope", "user", "--server", "http://e", "--key", "whk_x"]
         );
         assert_eq!(
-            arguments(Scope::Everywhere, None, "", None, true).unwrap(),
+            arguments(Scope::Everywhere, None, "", None, true, true).unwrap(),
             ["--scope", "user", "--uninstall"]
         );
         // The device's setup runs no other hooks beside it, and takes no one's key.
         assert_eq!(
-            arguments(Scope::Device, None, "http://e", Some("whk_x"), false).unwrap(),
+            arguments(Scope::Device, None, "http://e", Some("whk_x"), false, true).unwrap(),
             [
                 "--scope",
                 "managed",
@@ -618,11 +1055,23 @@ mod tests {
             ]
         );
         assert_eq!(
-            arguments(Scope::Device, None, "", None, true).unwrap(),
+            arguments(Scope::Device, None, "", None, true, false).unwrap(),
             ["--scope", "managed", "--uninstall"]
         );
-        assert!(arguments(Scope::Folder, None, "http://e", None, false).is_err());
-        assert!(arguments(Scope::Everywhere, None, " ", None, false).is_err());
+        assert!(arguments(Scope::Folder, None, "http://e", None, false, false).is_err());
+        assert!(arguments(Scope::Everywhere, None, " ", None, false, false).is_err());
+        // The developer's own engine lets calls go on while it is away, for every folder only.
+        assert_eq!(
+            arguments(Scope::Everywhere, None, "http://e", None, false, true).unwrap(),
+            [
+                "--scope",
+                "user",
+                "--server",
+                "http://e",
+                "--on-unreachable",
+                "allow"
+            ]
+        );
     }
 
     #[test]

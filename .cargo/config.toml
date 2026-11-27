@@ -1,5 +1,10 @@
-# `cargo admin` runs the security team's app; `cargo run` stays the developer's (Cargo.toml).
+# One app per kind of user. `cargo personal` (or `cargo run`): a person's own machine, with the
+# engine inside the app. `cargo developer`: a developer's machine at a company, the same app set up
+# on the company's engine. `cargo admin`: the security team's app. Add `--onboard` (after `--`)
+# to see the first launch's setup again, as `cargo personal -- --onboard`.
 [alias]
+personal = "run"
+developer = "run -- --developer"
 admin = "run --no-default-features --features admin"
 
 # `cargo run` on macOS signs the app with a fixed identity first (scripts/dev-run.sh), so the

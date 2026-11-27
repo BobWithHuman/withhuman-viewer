@@ -2,6 +2,7 @@
 //! open, its graph, and what is selected in it.
 
 mod compare;
+pub mod console;
 // The developer's first launch: the engine's store and the hooks.
 #[cfg(not(feature = "admin"))]
 mod dev_setup;
@@ -10,6 +11,8 @@ pub(crate) mod home;
 mod icons;
 mod inspector;
 mod metro;
+#[cfg(not(feature = "admin"))]
+mod onboard;
 // 기록's graph, drawn by the page in `web/record`: the security team's, and the developer's
 // whole app.
 mod record;
@@ -45,12 +48,17 @@ pub fn head_extra() -> String {
             "{}{}{}",
             font_script(),
             record::head_script(),
-            crate::admin::web::head_script()
+            console::head_script()
         )
     }
     #[cfg(not(feature = "admin"))]
     {
-        format!("{}{}", font_script(), record::head_script())
+        format!(
+            "{}{}{}",
+            font_script(),
+            record::head_script(),
+            console::head_script()
+        )
     }
 }
 
@@ -217,7 +225,11 @@ impl Screen {
 pub const WORK_SIZE: (f64, f64) = (1440.0, 900.0);
 pub const WORK_MIN: (f64, f64) = (1000.0, 620.0);
 /// The setup's small window.
+#[cfg(feature = "admin")]
 pub const SETUP_SIZE: (f64, f64) = (560.0, 760.0);
+/// The personal app's first launch, at OpenClaw's onboarding window size.
+#[cfg(not(feature = "admin"))]
+pub const SETUP_SIZE: (f64, f64) = (630.0, 752.0);
 
 #[derive(Clone, Copy)]
 pub struct AppState {
@@ -375,7 +387,7 @@ pub fn App() -> Element {
         #[cfg(feature = "admin")]
         Screen::Setup => return rsx! { setup::Setup {} },
         #[cfg(not(feature = "admin"))]
-        Screen::Setup => return rsx! { dev_setup::DevSetup {} },
+        Screen::Setup => return rsx! { onboard::OnboardPage {} },
         Screen::Home => {
             return rsx! {
                 div { class: "app home-on",
@@ -734,6 +746,7 @@ fn TopBar() -> Element {
             "ok",
             match p.engine {
                 crate::settings::Engine::Local => "이 맥의 엔진".to_owned(),
+                crate::settings::Engine::Own => "이 기기 엔진".to_owned(),
                 _ => p.host(),
             },
         ),
@@ -744,6 +757,15 @@ fn TopBar() -> Element {
         state.mode.set(m);
         state.screen.set(s);
     };
+    // The personal app's own engine: whether Calls leave the machine for Jev, and a try while
+    // the record is still empty.
+    let own = !cfg!(feature = "admin") && p.engine == crate::settings::Engine::Own && !p.demo;
+    let sends = use_memo(move || {
+        let _ = (state.reload)();
+        own_sends_to_jev()
+    });
+    let empty = matches!(&*state.sessions.read(), Load::Ready(list) if list.is_empty());
+    let mut trying = use_signal(|| false);
     let seg = |key: &'static str| if cur == key { "on" } else { "" };
     rsx! {
         header {
@@ -814,6 +836,30 @@ fn TopBar() -> Element {
             }
             div { class: "tb-spacer" }
             span { class: "tb-status", i { class: "sb-dot {dot}" } "{source}" }
+            if own {
+                span {
+                    class: if sends() { "tb-chip jev" } else { "tb-chip local" },
+                    title: if sends() { "호출 내용 → Jev API" } else { "이 기기 안에서만" },
+                    if sends() { "Jev ↗" } else { "로컬" }
+                }
+            }
+            if own && empty {
+                button {
+                    class: "tb-btn",
+                    disabled: trying(),
+                    onmousedown: move |e| e.stop_propagation(),
+                    ondoubleclick: move |e| e.stop_propagation(),
+                    onclick: move |_| {
+                        trying.set(true);
+                        spawn(async move {
+                            let _ = try_once().await;
+                            state.reload += 1;
+                            trying.set(false);
+                        });
+                    },
+                    if trying() { "체험 중…" } else { "체험" }
+                }
+            }
             button {
                 class: "tb-btn",
                 onmousedown: move |e| e.stop_propagation(),
@@ -823,6 +869,26 @@ fn TopBar() -> Element {
             }
         }
     }
+}
+
+/// Whether the personal app's own engine sends Calls to Jev: sending is on and a key is kept.
+#[cfg(not(feature = "admin"))]
+fn own_sends_to_jev() -> bool {
+    crate::own::jev_in_use().is_some()
+}
+#[cfg(feature = "admin")]
+fn own_sends_to_jev() -> bool {
+    false
+}
+
+/// The personal app's try, through its own engine.
+#[cfg(not(feature = "admin"))]
+async fn try_once() -> Result<String, String> {
+    crate::trial::run(&crate::own::collector_url()).await
+}
+#[cfg(feature = "admin")]
+async fn try_once() -> Result<String, String> {
+    Err(String::new())
 }
 
 /// An outline icon in the current colour.

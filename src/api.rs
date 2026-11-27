@@ -30,11 +30,76 @@ pub struct Probe {
     pub ms: u128,
 }
 
-/// The folder the app keeps its files in.
+/// How the app was started: `--onboard` shows the first launch's setup again, `--developer` starts
+/// it on the company's engine (a developer's machine) rather than an engine of its own.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Launch {
+    pub onboard: bool,
+    pub developer: bool,
+}
+
+static LAUNCH: std::sync::OnceLock<Launch> = std::sync::OnceLock::new();
+
+/// Reads the command line once, at start.
+pub fn set_launch(args: impl Iterator<Item = String>) {
+    let mut launch = Launch::default();
+    for arg in args {
+        match arg.as_str() {
+            "--onboard" => launch.onboard = true,
+            "--developer" => launch.developer = true,
+            _ => {}
+        }
+    }
+    let _ = LAUNCH.set(launch);
+}
+
+pub fn launch() -> Launch {
+    LAUNCH.get().copied().unwrap_or_default()
+}
+
+/// The app's identifier: its settings folder and its keychain service. The two apps have their
+/// own, so both can be installed on one machine without sharing settings or passwords.
+#[cfg(feature = "admin")]
+pub const APP_ID: &str = "dev.withhuman.viewer";
+#[cfg(not(feature = "admin"))]
+pub const APP_ID: &str = "dev.withhuman.personal";
+/// What the personal app was kept under before it had its own, shared with the security team's.
+#[cfg(not(feature = "admin"))]
+pub const EARLIER_APP_ID: &str = "dev.withhuman.viewer";
+
+/// The folder the app keeps its files in. The personal app's first run copies what it kept in
+/// the shared folder before: the copy, so hooks installed from there go on working.
 pub fn config_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("dev.withhuman.viewer")
+    let base = dirs::config_dir().unwrap_or_else(std::env::temp_dir);
+    let dir = base.join(APP_ID);
+    // Not from a test run: the machine's real settings are not a test's to copy.
+    #[cfg(not(any(feature = "admin", test)))]
+    {
+        let earlier = base.join(EARLIER_APP_ID);
+        if !dir.exists()
+            && earlier.is_dir()
+            && let Err(e) = copy_dir(&earlier, &dir)
+        {
+            eprintln!("withhuman: could not copy the earlier settings: {e}");
+        }
+    }
+    dir
+}
+
+#[cfg(not(any(feature = "admin", test)))]
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
 }
 
 impl Backend {
@@ -670,11 +735,23 @@ impl Backend {
         Ok(settings.public(&self.path))
     }
 
+    /// Saves a store on a server as where the record is read from, in place of the app's own
+    /// engine if it was that.
+    #[cfg(not(feature = "admin"))]
+    pub fn save_server(&self, change: Change) -> Result<Public, String> {
+        let mut settings = self.settings.lock().expect("settings lock");
+        let mut next = settings.apply(change)?;
+        next.engine = Engine::Server;
+        next.save(&self.path)?;
+        *settings = next;
+        Ok(settings.public(&self.path))
+    }
+
     /// Whether the first launch's setup is still to do: the security team's app has no Jev key
     /// registered, the developer's no settings saved yet. `VIEWER_ONBOARD=1` shows it again; the
     /// demo (`VIEWER_MOCK=1`) skips the security team's.
     pub fn needs_setup(&self) -> bool {
-        if std::env::var("VIEWER_ONBOARD").is_ok_and(|v| v == "1") {
+        if std::env::var("VIEWER_ONBOARD").is_ok_and(|v| v == "1") || launch().onboard {
             return true;
         }
         if !cfg!(feature = "admin") {
@@ -690,9 +767,104 @@ impl Backend {
     }
 
     /// Asks Jev whether it takes the key.
-    #[cfg_attr(not(feature = "admin"), allow(dead_code))]
     pub async fn check_jev(&self, key: &str) -> Result<(), String> {
         crate::engine::check_jev(&self.client, key).await
+    }
+
+    /// The Jev models the key can ask, the engine's own default first.
+    #[cfg(not(feature = "admin"))]
+    pub async fn jev_models(&self, key: &str) -> Vec<String> {
+        let mut models = vec![crate::own::DEFAULT_MODEL.to_owned()];
+        if let Ok(served) = crate::engine::jev_models(&self.client, key).await {
+            for m in served {
+                if !models.contains(&m) {
+                    models.push(m);
+                }
+            }
+        }
+        models
+    }
+
+    /// Takes the personal app off this machine, all but the app itself: every WithHuman hook
+    /// setup it finds (`folders`, the ones it installed in, besides the user's and the device's),
+    /// the engine with its record, the app's secrets and its settings folder. The app quits
+    /// after.
+    #[cfg(not(feature = "admin"))]
+    pub fn remove_everything(&self, folders: &[String]) -> Result<(), String> {
+        crate::hooks::reset(folders)?;
+        crate::own::uninstall()?;
+        let mut accounts: Vec<&str> = crate::own::ACCOUNTS.to_vec();
+        let store = self
+            .settings
+            .lock()
+            .expect("settings lock")
+            .keychain_account();
+        accounts.push(&store);
+        crate::settings::forget_secrets(&accounts)?;
+        match std::fs::remove_dir_all(config_dir()) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("설정 폴더를 지우지 못했습니다: {e}")),
+        }
+    }
+
+    /// Starts the personal app's own engine, with the Jev key (kept when given; none keeps the
+    /// one kept before, or none at all) and model, sending Calls to Jev or not (`jev`), then
+    /// waits for every part to answer. Gives the connection the record is read with: the
+    /// engine's store, with the viewer's read-only login.
+    #[cfg(not(feature = "admin"))]
+    pub async fn start_own(&self, key: &str, model: &str, jev: bool) -> Result<Change, String> {
+        if !key.trim().is_empty() {
+            crate::settings::save_jev_key(key)?;
+        }
+        crate::own::Config {
+            model: model.to_owned(),
+            jev,
+        }
+        .save()?;
+        let (_, viewer) = crate::own::passwords()?;
+        let running = crate::own::health().await.iter().all(|(_, up)| *up);
+        tokio::task::spawn_blocking(move || {
+            if running {
+                crate::own::restart()
+            } else {
+                crate::own::ensure_started()
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        // A restart takes a moment to stop the old engine first.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        for _ in 0..180 {
+            if crate::own::health().await.iter().all(|(_, up)| *up) {
+                return Ok(Change {
+                    neo4j_url: crate::own::store_url(),
+                    database: "withhuman".into(),
+                    user: crate::own::VIEWER_USER.into(),
+                    password: Some(viewer),
+                    demo: false,
+                });
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+        Err(format!(
+            "엔진이 3분 안에 다 뜨지 않았습니다. 로그: {}",
+            crate::own::logs().display()
+        ))
+    }
+
+    /// Keeps the developer's own engine as where the record is read from and the hooks report.
+    #[cfg(not(feature = "admin"))]
+    pub fn finish_own(&self, change: Change) -> Result<Public, String> {
+        let mut settings = self.settings.lock().expect("settings lock");
+        let mut next = settings.apply(change)?;
+        next.engine = Engine::Own;
+        next.engine_api = crate::own::collector_url();
+        next.jev_saved = true;
+        next.demo = false;
+        next.save(&self.path)?;
+        *settings = next;
+        Ok(settings.public(&self.path))
     }
 
     /// Starts the engine in `dir` with the Jev key, then waits for its Neo4j to answer. Docker's

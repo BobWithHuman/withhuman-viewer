@@ -22,7 +22,8 @@ mod inventory_web;
 mod mcp_tools;
 mod mcp_web;
 mod secrets_web;
-pub mod web;
+// The page drawn with web/console, shared with the personal app.
+pub use crate::ui::console as web;
 
 use std::sync::Arc;
 

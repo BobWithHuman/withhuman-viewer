@@ -14,12 +14,13 @@ repository = "https://github.com/BobWithHuman/withhuman-viewer"
 name = "withhuman-viewer"
 path = "src/main.rs"
 
-# Two apps from one source: `dev`, the developer's app on the machine the agent runs on, and
-# `admin`, the security team's app over every machine's sessions. A build is exactly one of
-# them: `cargo run` makes the developer's, `cargo admin` (.cargo/config.toml) the security team's.
+# Two apps from one source: `personal`, the developer's app on the machine the agent runs on, with
+# its own engine (withhuman-core's `withhuman-local`) or the company's, and `admin`, the security
+# team's app over every machine's sessions. A build is exactly one of them: `cargo run` makes the
+# personal app, `cargo admin` (.cargo/config.toml) the security team's.
 [features]
-default = ["dev"]
-dev = []
+default = ["personal"]
+personal = []
 admin = []
 
 [dependencies]
