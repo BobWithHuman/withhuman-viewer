@@ -230,6 +230,19 @@ pub enum Scope {
     Device,
 }
 
+/// The setups are rehearsed, not run: every button goes through its steps (and takes a moment,
+/// as the real setup does) but no agent's settings are touched. On until the hooks are to go in
+/// for real; a launch with `VIEWER_INSTALL=1` runs them.
+pub fn rehearsal() -> bool {
+    !std::env::var("VIEWER_INSTALL").is_ok_and(|v| v == "1")
+}
+
+/// What a rehearsed setup ends with, after the moment a real one takes.
+fn rehearsed() -> Result<Done, String> {
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    Ok(Done { client_id: None })
+}
+
 /// What a setup ended with: the device's client ID, when it printed one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Done {
@@ -345,6 +358,9 @@ pub fn python_found() -> Option<PathBuf> {
 /// Asks for a Python: on a Mac, Apple's command line tools, which carry one; elsewhere
 /// python.org's download page.
 pub fn get_python() {
+    if rehearsal() {
+        return;
+    }
     if cfg!(target_os = "macos") {
         let _ = Command::new("/usr/bin/xcode-select")
             .arg("--install")
@@ -446,6 +462,9 @@ pub fn run(
     uninstall: bool,
     own_engine: bool,
 ) -> Result<Done, String> {
+    if rehearsal() {
+        return rehearsed();
+    }
     let args = arguments(scope, folder, server, key, uninstall, own_engine)?;
     let out = setup(&args, scope == Scope::Device)?;
     Ok(Done {
@@ -464,6 +483,9 @@ pub fn run_agent(
     key: Option<&str>,
     uninstall: bool,
 ) -> Result<Done, String> {
+    if rehearsal() {
+        return rehearsed();
+    }
     let args = agent_arguments(agent, folder, server, key, uninstall)?;
     let out = setup(&args, false)?;
     Ok(Done {
@@ -506,6 +528,9 @@ fn agent_arguments(
 /// a setup made after is the same device. Asks for an administrator's password when a
 /// device-wide setup is there to take out.
 pub fn reset(folders: &[String]) -> Result<(), String> {
+    if rehearsal() {
+        return rehearsed().map(|_| ());
+    }
     let mut args = vec!["--reset".to_owned()];
     args.extend(folders.iter().cloned());
     let device =
