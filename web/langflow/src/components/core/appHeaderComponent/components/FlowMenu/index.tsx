@@ -27,6 +27,7 @@ import { uiLocale } from "@/utils/format-date";
 import { getProjectDisplayName } from "@/utils/project-display-name";
 import { swatchColors } from "@/utils/styleUtils";
 import { cn, getNumberFromString } from "@/utils/utils";
+import { LiveChip } from "@/withhuman/live/LiveChip";
 
 // withhuman: a recorded session is only looked at: the name opens no details
 // editor (Langflow's name / description / lock form). The project crumb keeps
@@ -202,6 +203,8 @@ export const MenuBar = memo((): JSX.Element => {
             </Button>
           </PopoverTrigger>
           <div className={"ml-5 hidden shrink-0 items-center sm:flex"}>
+            {/* withhuman: the 실시간 chip while the open session is still running. */}
+            <LiveChip />
             {!autoSaving && (
               <ShadTooltip
                 content={

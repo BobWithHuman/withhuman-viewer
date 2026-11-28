@@ -32,9 +32,10 @@ It loads Langflow's own `vite.config.mts` and adds a plugin that:
 ## Pieces
 
 - `main.tsx` - imports the bridge, the mock, the local fonts, `i18n/`,
-  Langflow's `src/index.tsx`, then `flow/sync.ts` and `chrome/alerts.ts`
-  (they need Langflow's stores), then `launch.tsx` (onboarding, tour);
-  `onboard/demo.ts` right after the bridge.
+  Langflow's `src/index.tsx`, then `flow/sync.ts`, `live/follow.ts` and
+  `chrome/alerts.ts` (they need Langflow's stores), then `launch.tsx`
+  (onboarding, tour); `onboard/demo.ts` and `live/demo.ts` right after the
+  bridge.
 - `i18n/` - Korean from the first launch: Langflow's own `ko.json` plus
   `ko.ts` (overrides of Langflow's keys: short nouns, `""` for description
   lines, no "Langflow") registered on Langflow's i18next instance before its
@@ -301,7 +302,7 @@ Langflow files changed for it (each marked `withhuman:` in place):
 | `hooks/use-document-title.ts` | tab title = the page's name alone (WithHuman when none), no "\| Langflow" |
 | `pages/SettingsPage/use-settings-sidebar-items.tsx` | settings menu = 훅, 엔진 only (Langflow's list kept as `useLangflowSettingsSidebarItems`, unused) |
 | `components/core/appHeaderComponent/index.tsx` | 80 px left for the traffic lights, drag / zoom on bare header, mounts `AppSync`, no logo button, no notifications / separator |
-| `components/core/appHeaderComponent/components/FlowMenu/index.tsx` | flow name opens no details editor (`WITHHUMAN_VIEW_ONLY`); the project crumb keeps Langflow's navigation to the flows list |
+| `components/core/appHeaderComponent/components/FlowMenu/index.tsx` | flow name opens no details editor (`WITHHUMAN_VIEW_ONLY`); the project crumb keeps Langflow's navigation to the flows list; the 실시간 chip (`live/LiveChip.tsx`) beside the name |
 | `pages/FlowPage/index.tsx` | `SessionSidebar` instead of `FlowSidebarComponent`; panel 20rem instead of 17.5rem; `RecordPanel` beside the canvas; `CanvasMark` (loading / empty mark) over the page |
 | `pages/FlowPage/components/flowSidebarComponent/components/sidebar-nav-items.ts` | rail (and the collapsed rail on the canvas) = 기록 only; Langflow's list kept as `LANGFLOW_NAV_ITEMS` |
 | `components/core/flowToolbarComponent/index.tsx` | no Playground / Share / run toolbar, its shortcuts off; the record panel's 경로 / 상세 buttons (`RecordToolbar`) in its box |
@@ -310,3 +311,59 @@ Langflow files changed for it (each marked `withhuman:` in place):
 | `components/common/loadingComponent/index.tsx` | WithHuman's icon instead of Langflow's logo, no "Loading..." line |
 | `CustomNodes/GenericNode/components/NodeStatus/index.tsx` | no run (▶) button in node headers: the canvas is read-only (`WITHHUMAN_READ_ONLY`) |
 | `components/core/parameterRenderComponent/components/copyFieldAreaComponent/index.tsx` | copy toast "복사됨" instead of "Endpoint URL copied"; button label 복사 / 복사됨 instead of Copy / Copied |
+
+## Overview charts (`viz/`)
+
+Above the overview's list (`chrome/SessionsPage.tsx`), from `shell.sessions` only (each session's
+`calls` / `denied` / `review` / `outside`, counted on the day of its `at`):
+
+- `viz/OverviewCharts.tsx` - three panels in Langflow's border and type:
+  - 일별 호출: a bar per day from the oldest listed session to today (7 to 31 days), stacked
+    허용 / 확인 / 차단 (allowed = calls - denied - review), 2 px gaps, a legend;
+  - 폴더: a stacked bar per folder (the folder's last part), the five biggest, `+N` for the rest;
+  - 외부 지시: a ring of outside / calls, with the count, the calls and the sessions with any.
+  Hover on a bar or a row: Langflow's tooltip (`ShadTooltip`) with 세션, 차단, 확인, 허용, 호출.
+  A day or a folder pressed filters the list (pressed again lets it go; the others dim); the ring
+  toggles the 외부 지시 tab. Each chart counts what the other picks leave (the day range stays the
+  whole list's).
+- `viz/colors.ts` - the charts' colours from Langflow's tokens (it ships no chart palette and no
+  chart library; nothing was installed): emerald (quiet) / `--status-yellow` / destructive, indigo
+  for 외부 지시.
+- In `SessionsPage.tsx`: the search feeds the charts; the list = search, then day, folder and tab;
+  chips under the search field for the tab, the day and the folder (each `×` lets it go, `전체`
+  resets all when there are two or more).
+
+## A live session (`live/`)
+
+- `live/follow.ts` - on Langflow's flow store: when the open flow's nodes change (flow/sync.ts set
+  a newer graph of the same session), the nodes and the step rows (`step_*` template keys) that
+  were not there before play an entrance (Web Animations: fade and slide; a row flashes emerald),
+  and while the session is `live` nodes glide to their new places (a transform transition). The
+  view then centres the newest step's row at the current zoom, unless the person dragged or
+  wheeled on the canvas since the session opened (a click does not count). `useLive` = { live,
+  following }.
+- `live/LiveChip.tsx` - in the header beside the session's name while it is `live`: the live dot
+  and 실시간; once the view was moved, a crosshair too, and pressing it follows again.
+- `live/demo.ts` - opened on its own with `?live` in the hash (`#/flow/<demo id>?live`): the demo
+  session starts with two steps and gets one more every 1.8 s, then a third turn (Grep, Read,
+  Edit, Bash, a GitHub PR held for 확인, an answer), then `live` goes off. Its row's counts follow.
+
+## Compare two sessions (`compare/`)
+
+`/all?compare=<a>,<b>` (the overview's route; no Langflow route added). Opened from the overview
+(each row's checkbox, two at a time -> 선택 2 / 비교) or the session sidebar's row menu (`…` ->
+비교: with the session on the canvas; on the overview it picks, and the second pick opens it).
+
+- `compare/load.ts` - the app hands one open session at a time, so each is fetched the mock's way
+  (`flowFor`: `send({do:"open", id})`, awaiting the `render` that brings it), the open one first,
+  one after the other; both kept in memory with their `RecordData`, converted and `processFlows`ed.
+  Opened on its own, the other sessions get a record made up from their counts
+  (`compare/demo.ts`).
+- `compare/CompareView.tsx` - a strip on top as a butterfly chart (A's bar grows left, B's right)
+  for 호출, 차단, 확인 (from `shell.sessions`), 외부 지시, 단계, 턴 (from the records), with Δ; a row
+  pressed lights those steps on both canvases and dims the rest (a chip lets it go). Below, both
+  canvases: React Flow instances of their own with Langflow's `nodeTypes` (GenericNode), read-only,
+  flagged rows barred in their colour, each fitted once Langflow's nodes have laid out. Langflow's
+  `DefaultEdge` reads its ends from the main canvas' store, so the compare canvases draw their
+  edges with React Flow's bezier from the ends it gives. 동기 moves both views together.
+- `compare/store.ts` - the picks (zustand), `comparePath`.

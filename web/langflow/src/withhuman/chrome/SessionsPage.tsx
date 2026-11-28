@@ -8,13 +8,14 @@
 // app's sessions (read-only). The rows come straight from `shell.sessions`.
 
 import { useMemo, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useSearchParams } from "react-router-dom";
 import ForwardedIconComponent from "@/components/common/genericIconComponent";
 import LoadingComponent from "@/components/common/loadingComponent";
 import ShadTooltip from "@/components/common/shadTooltipComponent";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { ENABLE_NEW_SIDEBAR } from "@/customization/feature-flags";
@@ -27,6 +28,9 @@ import { send, type Shell, type ShellSession, useWithHuman } from "../bridge";
 import { ago } from "../flow/sessions";
 import { flowPath, PAGES } from "./app";
 import { DAYS, dayOf, SessionSidebar } from "./SessionSidebar";
+import { CompareView } from "../compare/CompareView";
+import { comparePath, useComparePicks } from "../compare/store";
+import { dayKey, dayLabel, folderOf, OverviewCharts } from "../viz/OverviewCharts";
 
 /** The overview's routes inside the same frame as the flow page: our session list on the left. */
 export function SessionsLayout() {
@@ -107,6 +111,8 @@ const Live = () => <i aria-label="실행 중" className="h-1.5 w-1.5 shrink-0 an
 /** One session as ListComponent's row (list view) or card (grid view). */
 function SessionCard({ s, grid, open }: { s: ShellSession; grid: boolean; open: (id: string) => void }) {
   const folder = s.folder?.split("/").filter(Boolean).pop();
+  const picked = useComparePicks((p) => p.ids.includes(s.id));
+  const toggle = useComparePicks((p) => p.toggle);
   return (
     <Card
       className={cn(
@@ -122,7 +128,14 @@ function SessionCard({ s, grid, open }: { s: ShellSession; grid: boolean; open: 
         aria-label={s.title}
         data-testid={`session-card-${s.id}`}
       />
-      <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-4">
+      <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3">
+        {/* withhuman: picked for 비교 (two at a time). */}
+        <span
+          className={cn("pointer-events-auto flex h-5 w-5 shrink-0 items-center justify-center transition-opacity", !picked && "opacity-0 group-hover:opacity-100")}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Checkbox checked={picked} onCheckedChange={() => toggle(s.id)} aria-label="비교 선택" data-testid={`compare-pick-${s.id}`} />
+        </span>
         <Swatch s={s} />
         <div className="flex min-w-0 flex-col justify-start">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -206,7 +219,12 @@ export function SessionsOverview() {
   const navigate = useCustomNavigate();
   const open = (id: string) => navigate(flowPath(id));
   const [filter, setFilter] = useState<Filter>("all");
+  const [day, setDay] = useState<string | null>(null);
+  const [folder, setFolder] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [params] = useSearchParams();
+  const picks = useComparePicks((p) => p.ids);
+  const clearPicks = useComparePicks((p) => p.clear);
   const [view, setView] = useState<"list" | "grid">(() => {
     try {
       return localStorage.getItem("view") === "grid" ? "grid" : "list";
@@ -224,9 +242,14 @@ export function SessionsOverview() {
 
   const sessions = useMemo(() => [...(shell?.sessions ?? [])].sort((a, b) => b.at - a.at), [shell?.sessions]);
   const k = search.trim().toLowerCase();
-  const found = useMemo(
+  const searched = useMemo(
     () => sessions.filter((s) => !k || s.title.toLowerCase().includes(k) || !!s.folder?.toLowerCase().includes(k)),
     [sessions, k],
+  );
+  // The charts' picks: a day, a folder.
+  const found = useMemo(
+    () => searched.filter((s) => (!day || dayKey(s.at) === day) && (!folder || folderOf(s) === folder)),
+    [searched, day, folder],
   );
   const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.id, found.filter(f.test).length])) as Record<Filter, number>, [found]);
   const list = useMemo(() => found.filter(FILTERS.find((f) => f.id === filter)!.test), [found, filter]);
@@ -235,6 +258,19 @@ export function SessionsOverview() {
     [list],
   );
   const none = sessions.length === 0;
+  const resetAll = () => {
+    setDay(null);
+    setFolder(null);
+    setFilter("all");
+  };
+  const chips = [
+    ...(filter !== "all" ? [{ id: "verdict", label: FILTERS.find((f) => f.id === filter)!.label, off: () => setFilter("all") }] : []),
+    ...(day ? [{ id: "day", label: dayLabel(day), off: () => setDay(null) }] : []),
+    ...(folder ? [{ id: "folder", label: folder, off: () => setFolder(null) }] : []),
+  ];
+
+  const pair = params.get("compare")?.split(",").filter(Boolean);
+  if (pair && pair.length === 2) return <CompareView a={pair[0]} b={pair[1]} />;
 
   return (
     <div className="flex h-full w-full flex-col overflow-y-auto" data-testid="cards-wrapper">
@@ -260,6 +296,15 @@ export function SessionsOverview() {
             ) : (
               <>
                 {shell && !shell.engine.up && <EngineDown shell={shell} />}
+                <OverviewCharts
+                  sessions={searched}
+                  day={day}
+                  folder={folder}
+                  outside={filter === "outside"}
+                  pickDay={setDay}
+                  pickFolder={setFolder}
+                  toggleOutside={() => setFilter(filter === "outside" ? "all" : "outside")}
+                />
                 <div className="flex pb-4" role="tablist" aria-label="판정">
                   {FILTERS.map((f) => (
                     <Button
@@ -325,10 +370,55 @@ export function SessionsOverview() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                    {picks.length > 0 && (
+                      <span className="flex items-center gap-1.5" data-testid="compare-bar">
+                        <Badge variant="secondaryStatic" size="tag" className="cursor-pointer gap-1 tabular-nums" onClick={clearPicks}>
+                          선택 {picks.length}
+                          <ForwardedIconComponent name="X" className="h-3 w-3" aria-hidden="true" />
+                        </Badge>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="h-7 gap-1.5"
+                          disabled={picks.length < 2}
+                          onClick={() => {
+                            navigate(comparePath(picks[0], picks[1]));
+                            clearPicks();
+                          }}
+                          data-testid="compare-open"
+                        >
+                          <ForwardedIconComponent name="Columns2" className="h-3.5 w-3.5" aria-hidden="true" />
+                          비교
+                        </Button>
+                      </span>
+                    )}
                     <span>세션 {list.length}</span>
                     <span>호출 {list.reduce((n, s) => n + s.calls, 0)}</span>
                   </div>
                 </div>
+                {chips.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-3" data-testid="filter-chips">
+                    {chips.map((c) => (
+                      <Badge
+                        key={c.id}
+                        variant="secondaryStatic"
+                        size="tag"
+                        className="cursor-pointer gap-1"
+                        onClick={c.off}
+                        data-testid={`chip-${c.id}`}
+                      >
+                        {c.label}
+                        <ForwardedIconComponent name="X" className="h-3 w-3" aria-hidden="true" />
+                      </Badge>
+                    ))}
+                    {chips.length > 1 && (
+                      <Badge variant="outline" size="tag" className="cursor-pointer gap-1" onClick={resetAll} data-testid="chip-clear">
+                        <ForwardedIconComponent name="RotateCcw" className="h-3 w-3" aria-hidden="true" />
+                        전체
+                      </Badge>
+                    )}
+                  </div>
+                )}
                 {groups.length === 0 ? (
                   <div className="pt-24 text-center text-sm text-secondary-foreground">결과 없음</div>
                 ) : (

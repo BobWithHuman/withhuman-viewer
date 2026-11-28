@@ -9,6 +9,7 @@ import { useParams } from "react-router-dom";
 import ForwardedIconComponent from "@/components/common/genericIconComponent";
 import ShadTooltip from "@/components/common/shadTooltipComponent";
 import { Badge } from "@/components/ui/badge";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Sidebar,
@@ -18,6 +19,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
@@ -29,6 +31,7 @@ import { useSidebarHotkeys } from "@/pages/FlowPage/components/flowSidebarCompon
 import ShortcutDisplay from "@/pages/FlowPage/components/nodeToolbarComponent/shortcutDisplay";
 import { cn } from "@/utils/utils";
 import { type ShellSession, useWithHuman } from "../bridge";
+import { comparePath, useComparePicks } from "../compare/store";
 import { flowPath } from "./app";
 
 export const DAYS = ["오늘", "어제", "이번 주", "이전"] as const;
@@ -56,7 +59,42 @@ export function useOpenSession() {
   return (id: string) => navigate(flowPath(id));
 }
 
-function SessionRow({ s, active, open }: { s: ShellSession; active: boolean; open: (id: string) => void }) {
+/** A row's menu: 열기, and 비교 - with the session on the canvas (flow page), else picked for the
+ * overview's compare (two at a time; the second pick opens the compare view). */
+function RowMenu({ s, here }: { s: ShellSession; here: string }) {
+  const navigate = useCustomNavigate();
+  const picked = useComparePicks((p) => p.ids.includes(s.id));
+  const compare = () => {
+    if (here && here !== s.id) return navigate(comparePath(here, s.id));
+    const { ids, toggle } = useComparePicks.getState();
+    const other = ids.find((x) => x !== s.id);
+    if (!picked && other) {
+      toggle(s.id);
+      navigate(comparePath(other, s.id));
+    } else toggle(s.id);
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuAction showOnHover aria-label="메뉴" data-testid={`session-menu-${s.id}`}>
+          <ForwardedIconComponent name="Ellipsis" className="h-4 w-4" />
+        </SidebarMenuAction>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="right" align="start" className="min-w-[8rem]">
+        <DropdownMenuItem onSelect={() => navigate(flowPath(s.id))} className="gap-2">
+          <ForwardedIconComponent name="SquareArrowOutUpRight" className="h-4 w-4" />
+          열기
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={compare} disabled={here === s.id} className="gap-2" data-testid={`session-compare-${s.id}`}>
+          <ForwardedIconComponent name="Columns2" className="h-4 w-4" />
+          {here ? "비교" : picked ? "비교 해제" : "비교 선택"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SessionRow({ s, active, open, here }: { s: ShellSession; active: boolean; open: (id: string) => void; here: string }) {
   const icon = s.denied > 0 ? "OctagonX" : s.review > 0 ? "CircleAlert" : s.outside > 0 ? "TriangleAlert" : "Workflow";
   const tone = s.denied > 0 ? "text-destructive" : s.review > 0 ? "text-accent-amber-foreground" : "text-muted-foreground";
   const tip = (
@@ -72,7 +110,7 @@ function SessionRow({ s, active, open }: { s: ShellSession; active: boolean; ope
           isActive={active}
           onClick={() => open(s.id)}
           data-testid={`session-${s.id}`}
-          className="gap-2 px-2"
+          className="gap-2 px-2 group-focus-within/menu-item:pr-7 group-hover/menu-item:pr-7"
         >
           <ForwardedIconComponent name={icon} className={cn("h-4 w-4 shrink-0", tone)} />
           <span className="min-w-0 flex-1 truncate">{s.title}</span>
@@ -89,11 +127,12 @@ function SessionRow({ s, active, open }: { s: ShellSession; active: boolean; ope
           {s.live && <i aria-label="실행 중" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent-emerald-foreground" />}
         </SidebarMenuButton>
       </ShadTooltip>
+      <RowMenu s={s} here={here} />
     </SidebarMenuItem>
   );
 }
 
-function Group({ label, list, active, open }: { label: string; list: ShellSession[]; active: string; open: (id: string) => void }) {
+function Group({ label, list, active, open, here }: { label: string; list: ShellSession[]; active: string; open: (id: string) => void; here: string }) {
   return (
     <SidebarGroup className="p-3 pr-2 pb-0 last:pb-3">
       <SidebarGroupLabel className="flex w-full cursor-default items-center justify-between">
@@ -103,7 +142,7 @@ function Group({ label, list, active, open }: { label: string; list: ShellSessio
       <SidebarGroupContent>
         <SidebarMenu>
           {list.map((s) => (
-            <SessionRow key={s.id} s={s} active={s.id === active} open={open} />
+            <SessionRow key={s.id} s={s} active={s.id === active} open={open} here={here} />
           ))}
         </SidebarMenu>
       </SidebarGroupContent>
@@ -177,7 +216,7 @@ export function SessionSidebar() {
           </SidebarHeader>
           <SidebarContent segmentedSidebar className="gutter-stable flex-1 group-data-[collapsible=icon]:hidden">
             {groups.length > 0 ? (
-              groups.map(([label, l]) => <Group key={label} label={label} list={l} active={active} open={open} />)
+              groups.map(([label, l]) => <Group key={label} label={label} list={l} active={active} open={open} here={active} />)
             ) : (
               <NoResultsMessage
                 message={k ? "결과 없음" : "세션 없음"}
