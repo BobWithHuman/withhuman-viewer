@@ -7,3 +7,5 @@
 /web/langflow/dist/
 /web/langflow/dist-*/
 /web/console/dist/
+/web/onboard/node_modules/
+/web/onboard/dist/

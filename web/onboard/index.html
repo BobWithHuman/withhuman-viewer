@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WithHuman</title>
+  <meta name="theme-color" content="#fbfaf8" />
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="progress" aria-hidden="true"><i id="progress"></i></div>
+  <div class="cursor gone" id="cursor" aria-hidden="true"><div class="c-ring" id="c-ring"><span id="c-lab"></span></div><div class="c-dot" id="c-dot"></div></div>
+  <div class="intro" id="intro" aria-hidden="true"><div class="intro-in"><span id="intro-t">WithHuman</span><i><b id="intro-bar"></b></i></div></div>
+  <canvas class="burst" id="burst" aria-hidden="true"></canvas>
+  <div class="drag" id="drag" aria-hidden="true"><span class="brand" id="brand"></span></div>
+
+  <main id="stage">
+    <section class="scene hero" data-scene="intro">
+      <canvas class="field" aria-hidden="true"></canvas>
+      <div class="lens-tag" aria-hidden="true"><i></i>시키지 않은 호출</div>
+      <div class="hero-in">
+        <h1><span class="l1">에이전트가 방금</span> <span class="l2"><span class="rot">main에 강제 푸시했다.</span><span class="caret"></span></span></h1>
+        <p class="sub"><b>WithHuman</b>은 <em>당신이 시킨 호출만</em> 통과시킵니다.</p>
+        <div class="acts"><button class="btn pri big mag" data-go="next">시작 <span class="ar" data-ic="arrowRight"></span></button></div>
+        <div class="works" id="works"></div>
+      </div>
+    </section>
+
+    <section class="scene" data-scene="gate">
+      <div class="head">
+        <span class="kick"><b>01</b> 누가 시켰나</span>
+        <h2 class="split">호출마다 묻는다. <span class="b">누가 시켰나?</span></h2>
+        <p class="lead">출처를 눌러 보세요</p>
+      </div>
+      <div class="field-gate rv"><canvas></canvas><div class="gtip"></div></div>
+    </section>
+  </main>
+
+  <footer class="bar" id="bar">
+    <div class="bar-l"><button class="btn sec sm mag" id="back"><span data-ic="arrowLeft"></span>이전</button></div>
+    <div class="dots" id="dots"></div>
+    <div class="bar-r" id="acts"></div>
+  </footer>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

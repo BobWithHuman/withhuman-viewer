@@ -60,10 +60,11 @@ pub fn head_extra() -> String {
     #[cfg(not(feature = "admin"))]
     {
         format!(
-            "{}{}{}",
+            "{}{}{}{}",
             font_script(),
             record::head_script(),
-            console::head_script()
+            console::head_script(),
+            onboard::head_script()
         )
     }
 }
@@ -243,10 +244,10 @@ pub const WORK_MIN: (f64, f64) = (1000.0, 620.0);
 /// The setup's small window.
 #[cfg(feature = "admin")]
 pub const SETUP_SIZE: (f64, f64) = (560.0, 760.0);
-/// The personal app's first launch, a small window of Langflow's step modal (`web/langflow`,
-/// 813×582) under a strip for the traffic lights.
+/// The personal app's first launch, a tutorial in the landing's look (`web/onboard`) filling a
+/// small window, the traffic lights over it.
 #[cfg(not(feature = "admin"))]
-pub const SETUP_SIZE: (f64, f64) = (813.0, 620.0);
+pub const SETUP_SIZE: (f64, f64) = (960.0, 680.0);
 
 #[derive(Clone, Copy)]
 pub struct AppState {
@@ -445,11 +446,9 @@ pub fn App() -> Element {
         Screen::Setup => {
             return rsx! {
                 div { class: "app",
-                    TitleBar { overlay: false }
                     div { class: "app-body",
-                        div { class: "app-main", record::RecordGraph {} }
+                        div { class: "app-main", onboard::OnboardPage { inline: true } }
                     }
-                    onboard::OnboardPage { inline: true }
                 }
             };
         }
