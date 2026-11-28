@@ -260,7 +260,7 @@ pub fn RecordGraph() -> Element {
 }
 
 /// The session laid out with every Call its own step: 기록 lists each one, none folded.
-fn unfolded(model: &Model) -> Metro {
+pub(super) fn unfolded(model: &Model) -> Metro {
     let calls = model
         .nodes
         .iter()
@@ -922,8 +922,10 @@ const LIVE_MS: i64 = 3 * 60_000;
 /// first, the one open, where the data comes from, and the agents set up.
 #[cfg(not(feature = "admin"))]
 fn shell(state: AppState, agents: Vec<Value>, jev: bool) -> Value {
+    use super::Polling;
     use crate::settings::Engine;
     let p = (state.public)();
+    let polling = (state.polling)();
     let now = chrono::Utc::now().timestamp_millis();
     let (sessions, up): (Vec<Value>, bool) = match &*state.sessions.read() {
         Load::Ready(list) => (
@@ -968,11 +970,21 @@ fn shell(state: AppState, agents: Vec<Value>, jev: bool) -> Value {
             "has_key": crate::settings::jev_key().is_some(),
         },
         "agents": agents,
+        // The app's own reads of new records: `up` every few seconds, `hidden` slowly behind a
+        // closed or minimised window, `retry` after reads failed (`failed` in a row); `every`,
+        // the wait between reads in milliseconds.
+        "live": {
+            "state": match polling { Polling::Up => "up", Polling::Hidden => "hidden", Polling::Retrying(_) => "retry" },
+            "failed": match polling { Polling::Retrying(n) => n, _ => 0 },
+            "every": super::live::wait(polling).as_millis() as u64,
+        },
+        // Notifications of Calls refused or held.
+        "notify": !state.prefs.read().notify_off,
     })
 }
 
 /// What the personal app's frame asks: another session, the window moved or zoomed, the hooks,
-/// the settings, the record read again, or its dark or light.
+/// the settings, the record read again, its dark or light, or notifications on or off.
 #[cfg(not(feature = "admin"))]
 fn asked(mut state: AppState, m: &Value) {
     match m["do"].as_str() {
@@ -1028,6 +1040,12 @@ fn asked(mut state: AppState, m: &Value) {
             state.reload += 1;
             state.full += 1;
             state.refresh += 1;
+        }
+        // Notifications on or off: `{do: "notify", on}`.
+        Some("notify") => {
+            if let Some(on) = m["on"].as_bool() {
+                state.prefs.write().notify_off = !on;
+            }
         }
         _ => {}
     }

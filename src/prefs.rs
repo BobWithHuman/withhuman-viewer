@@ -22,6 +22,10 @@ pub struct Prefs {
     pub condition_names: std::collections::BTreeMap<String, String>,
     /// The folders the developer's app installed hooks in, to list and take them out again.
     pub hook_folders: Vec<String>,
+    /// The personal app's notifications of refused and held Calls are turned off (on unless
+    /// turned off).
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    pub notify_off: bool,
 }
 
 /// Where the window was, in logical points.

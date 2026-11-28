@@ -178,6 +178,20 @@ pub async fn health() -> Vec<(Part, bool)> {
     out
 }
 
+/// Whether the Collector, where the hooks send, takes a connection: cheap enough to ask every few
+/// seconds.
+pub async fn collector_answers() -> bool {
+    tokio::task::spawn_blocking(|| {
+        std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], COLLECTOR_PORT)),
+            Duration::from_millis(500),
+        )
+        .is_ok()
+    })
+    .await
+    .unwrap_or(false)
+}
+
 async fn answers(client: &reqwest::Client, part: Part) -> bool {
     if part == Part::Store {
         let port = part.port();

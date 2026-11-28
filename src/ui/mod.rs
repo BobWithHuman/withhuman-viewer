@@ -10,6 +10,9 @@ mod flow;
 pub(crate) mod home;
 mod icons;
 mod inspector;
+// The personal app keeping up with the engine by itself, and its notifications.
+#[cfg(not(feature = "admin"))]
+mod live;
 mod metro;
 #[cfg(not(feature = "admin"))]
 mod onboard;
@@ -24,6 +27,9 @@ mod setup;
 #[allow(dead_code)]
 mod sidebar;
 mod trace;
+// The personal app in the menu bar.
+#[cfg(all(not(feature = "admin"), target_os = "macos"))]
+mod tray;
 mod update;
 
 use std::sync::Arc;
@@ -188,6 +194,16 @@ pub enum Selection {
     Node(i64),
 }
 
+/// How the personal app reads new records by itself: every few seconds while its window is up,
+/// slowly while it is hidden, and less often after reads fail (how many in a row).
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "admin", allow(dead_code))]
+pub enum Polling {
+    Up,
+    Hidden,
+    Retrying(u32),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Graph,
@@ -259,6 +275,13 @@ pub struct AppState {
     /// (기록's session): the page opens its sheet, then clears it.
     pub open_device: Signal<Option<String>>,
     pub live: Signal<bool>,
+    /// The personal app's own reads of new records.
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    pub polling: Signal<Polling>,
+    /// Whether the engine answered the last read (for the app's own engine, its Collector too);
+    /// none before the first.
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    pub engine_up: Signal<Option<bool>>,
     pub inspector_width: Signal<f64>,
     /// Bumped by the menu to look for an update.
     pub check_updates: Signal<u32>,
@@ -337,6 +360,8 @@ pub fn App() -> Element {
         settings_open: Signal::new(false),
         open_device: Signal::new(None),
         live: Signal::new(false),
+        polling: Signal::new(Polling::Up),
+        engine_up: Signal::new(None),
         inspector_width: Signal::new(width),
         check_updates: Signal::new(0),
         reload: Signal::new(0),
@@ -353,6 +378,12 @@ pub fn App() -> Element {
     crate::admin::use_facts_loader(backend.clone(), state);
     use_menu(backend.clone(), state);
     use_window_place(state);
+    #[cfg(not(feature = "admin"))]
+    live::use_live(backend.clone(), state);
+    #[cfg(all(not(feature = "admin"), target_os = "macos"))]
+    tray::use_tray(state);
+    #[cfg(all(not(feature = "admin"), target_os = "macos"))]
+    use_reopen();
     // The page open when the work opens is the one 메인 goes back to.
     use_effect(move || {
         let s = (state.screen)();
@@ -550,7 +581,10 @@ const INSPECTOR_WIDTH: (f64, f64, f64) = (300.0, 380.0, 760.0);
 
 /// What the menu items and their shortcuts do.
 fn use_menu(backend: Arc<Backend>, mut state: AppState) {
+    // The menu bar's items come here too: muda takes one handler for every menu, the first set.
     dioxus::desktop::use_muda_event_handler(move |event| match event.id().as_ref() {
+        #[cfg(all(not(feature = "admin"), target_os = "macos"))]
+        id if tray::on_menu(id, state) => {}
         menu::SETTINGS => state.settings_open.toggle(),
         menu::RELOAD => {
             state.reload += 1;
@@ -566,6 +600,21 @@ fn use_menu(backend: Arc<Backend>, mut state: AppState) {
         menu::DEMO => state.toggle_demo(&backend),
         menu::CHECK_UPDATES => state.check_updates += 1,
         _ => {}
+    });
+}
+
+/// A click on the Dock's icon with the window closed to the menu bar brings it back.
+#[cfg(all(not(feature = "admin"), target_os = "macos"))]
+fn use_reopen() {
+    use dioxus::desktop::tao::event::Event;
+    dioxus::desktop::use_wry_event_handler(move |event, _| {
+        if let Event::Reopen {
+            has_visible_windows: false,
+            ..
+        } = event
+        {
+            live::bring_up();
+        }
     });
 }
 
@@ -652,6 +701,49 @@ fn use_window_place(mut state: AppState) {
     });
 }
 
+/// The sessions the app shows: in the developer's app this machine's alone, by the device's
+/// client ID its hooks send. A database named by hand (`VIEWER_DB`, to look at another engine's
+/// record) or the demo record shows every machine's sessions.
+fn mine(state: AppState, list: Vec<Session>) -> Vec<Session> {
+    #[cfg(not(feature = "admin"))]
+    let list = if std::env::var("VIEWER_DB").is_ok() || state.public.peek().demo {
+        list
+    } else {
+        crate::hooks::mine(list)
+    };
+    let _ = state;
+    list
+}
+
+/// Shows the sessions read, keeping the open one: even one the list leaves out (opened from
+/// another page, a session with no start time); else the last one opened, else the newest.
+fn take_sessions(mut state: AppState, list: Vec<Session>) {
+    let mut current = state.current;
+    let open = current.peek().clone();
+    let last = state
+        .prefs
+        .peek()
+        .last_session
+        .clone()
+        .filter(|id| list.iter().any(|s| &s.id == id));
+    // VIEWER_SESSION names one to open first by the start of its ID.
+    let asked = std::env::var("VIEWER_SESSION").ok().and_then(|p| {
+        list.iter()
+            .find(|s| s.id.starts_with(&p))
+            .map(|s| s.id.clone())
+    });
+    let pick = open
+        .or(asked)
+        .or(last)
+        .or_else(|| list.first().map(|s| s.id.clone()));
+    if *current.peek() != pick {
+        current.set(pick);
+    }
+    if *state.sessions.peek() != Load::Ready(list.clone()) {
+        state.sessions.set(Load::Ready(list));
+    }
+}
+
 /// Reads the sessions and the open session's graph whenever what they depend on changes.
 fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
     // Sessions: on launch, on reload, after the settings change.
@@ -662,48 +754,10 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
         let b = b.clone();
         spawn(async move {
             let found = b.sessions().await;
-            let mut current = state.current;
             match found {
-                Ok(list) => {
-                    // The developer's app shows this machine's sessions alone: the device's
-                    // client ID its hooks send.
-                    // A database named by hand (`VIEWER_DB`, to look at another engine's record)
-                    // or the demo record shows every machine's sessions.
-                    #[cfg(not(feature = "admin"))]
-                    let list = if std::env::var("VIEWER_DB").is_ok() || state.public.peek().demo {
-                        list
-                    } else {
-                        crate::hooks::mine(list)
-                    };
-                    // Keep the open session, even one the list leaves out (opened from another
-                    // page, a session with no start time); else the last one opened, else the
-                    // newest.
-                    let open = current.peek().clone();
-                    let last = state
-                        .prefs
-                        .peek()
-                        .last_session
-                        .clone()
-                        .filter(|id| list.iter().any(|s| &s.id == id));
-                    // VIEWER_SESSION names one to open first by the start of its ID.
-                    let asked = std::env::var("VIEWER_SESSION").ok().and_then(|p| {
-                        list.iter()
-                            .find(|s| s.id.starts_with(&p))
-                            .map(|s| s.id.clone())
-                    });
-                    let pick = open
-                        .or(asked)
-                        .or(last)
-                        .or_else(|| list.first().map(|s| s.id.clone()));
-                    if *current.peek() != pick {
-                        current.set(pick);
-                    }
-                    if *state.sessions.peek() != Load::Ready(list.clone()) {
-                        state.sessions.set(Load::Ready(list));
-                    }
-                }
+                Ok(list) => take_sessions(state, mine(state, list)),
                 Err(e) => {
-                    current.set(None);
+                    state.current.set(None);
                     state.sessions.set(Load::Failed(e));
                 }
             }
