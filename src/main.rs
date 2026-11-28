@@ -28,6 +28,9 @@ mod machines;
 mod menu;
 mod metro;
 mod model;
+// The personal app's notifications of refused and held Calls.
+#[cfg(not(feature = "admin"))]
+mod notify;
 // The developer's own engine, run by the app's binary with `--engine`.
 #[cfg(not(feature = "admin"))]
 mod own;
@@ -98,6 +101,12 @@ fn main() {
         .with_window(window)
         .with_menu(menu::build())
         .with_custom_head(head);
+    // The personal app stays in the menu bar on a Mac: closing the window hides it, ⌘Q quits.
+    // The menu bar icon opens its menu; the window comes back from the menu's 기록 열기.
+    #[cfg(all(not(feature = "admin"), target_os = "macos"))]
+    let config = config
+        .with_close_behaviour(dioxus::desktop::WindowCloseBehaviour::WindowHides)
+        .with_tray_icon_show_window_on_click(false);
     dioxus::LaunchBuilder::desktop()
         .with_cfg(config)
         .with_context(backend)

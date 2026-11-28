@@ -20,12 +20,12 @@ path = "src/main.rs"
 # personal app, `cargo admin` (.cargo/config.toml) the security team's.
 [features]
 default = ["personal"]
-personal = []
+personal = ["dep:mac-notification-sys"]
 admin = []
 
 [dependencies]
 dioxus = { version = "0.7.10", features = ["desktop"] }
-tokio = { version = "1", features = ["time", "rt", "macros"] }
+tokio = { version = "1", features = ["time", "rt", "macros", "sync"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 rfd = "0.17.2"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
@@ -42,6 +42,12 @@ regex = "1"
 base64 = "0.22"
 dirs = "6"
 cargo-packager-updater = "0.2.3"
+
+# The personal app's notifications on a Mac (src/notify.rs): NSUserNotificationCenter, which the
+# bare binary `cargo run` signs can post under the app's identifier as the packaged app does,
+# where UNUserNotificationCenter needs an app bundle.
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = { version = "0.6.15", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"

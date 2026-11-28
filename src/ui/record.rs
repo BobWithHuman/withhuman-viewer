@@ -10,8 +10,14 @@ use crate::layout::Model;
 use crate::metro::{AskParent, Metro, ParentOf, Station, mcp_parts};
 use crate::model::Session;
 
-/// The page, one file with its script and styles inside.
+/// The page, one file with its script and styles inside: the security team's 기록 from
+/// `web/record`; the personal app's from `web/langflow` (Langflow's frontend made ours: its canvas,
+/// its sidebar holding the sessions, its settings holding the hooks and the engine; `npm run
+/// build:app` there writes `langflow.html`). Both take the same data and send the same asks.
+#[cfg(feature = "admin")]
 const PAGE: &str = include_str!("record.html");
+#[cfg(not(feature = "admin"))]
+const PAGE: &str = include_str!("langflow.html");
 
 /// What goes in the app's head: the page as a string, and how it is put in its frame and given
 /// its data. `</` is escaped so the page's own closing tags do not end this script.
@@ -29,13 +35,23 @@ pub fn head_script() -> String {
              f = document.createElement('iframe'); f.className = 'wh-record-frame';\n\
              f.addEventListener('load', () => window.__whFontInto && window.__whFontInto(f.contentDocument));\n\
              f.addEventListener('load', () => f.contentWindow.WHRecord && f.contentWindow.WHRecord.render(window.__whRecordData));\n\
+             f.addEventListener('load', () => Object.entries(window.__whRecordViews).forEach(([p, v]) => f.contentWindow.WHRecord && f.contentWindow.WHRecord.view && f.contentWindow.WHRecord.view(p, v)));\n\
              f.addEventListener('load', () => f.contentWindow.focus());\n\
              f.srcdoc = window.__WH_RECORD_HTML; host.appendChild(f); return;\n\
            }}\n\
            if (f.contentWindow && f.contentWindow.WHRecord) f.contentWindow.WHRecord.render(d);\n\
          }};\n\
          window.__whRecordOn = null;\n\
-         window.__whRecordSend = function (m) {{ if (window.__whRecordOn) window.__whRecordOn(m); }};\n\
+         window.__whRecordViews = {{}};\n\
+         window.__whRecordView = function (page, d) {{\n\
+           window.__whRecordViews[page] = d;\n\
+           const f = document.querySelector('#wh-record iframe');\n\
+           if (f && f.contentWindow && f.contentWindow.WHRecord && f.contentWindow.WHRecord.view) f.contentWindow.WHRecord.view(page, d);\n\
+         }};\n\
+         window.__whRecordSend = function (m) {{\n\
+           const on = m && m.page && window.__whConsoleOn && window.__whConsoleOn[m.page];\n\
+           if (on) on(m); else if (window.__whRecordOn) window.__whRecordOn(m);\n\
+         }};\n\
          </script>"
     )
 }
@@ -96,8 +112,44 @@ pub fn RecordGraph() -> Element {
                 .collect::<std::collections::HashMap<String, String>>()
         }
     });
+    // The personal app draws the whole of 기록 in the frame: the agents whose hooks are set up and
+    // whether Calls go to Jev, read again with the sessions.
+    #[cfg(not(feature = "admin"))]
+    let around = use_memo(move || {
+        let _ = (state.reload)();
+        let folders = state.prefs.peek().hook_folders.clone();
+        let mut agents: Vec<crate::hooks::Agent> = Vec::new();
+        for found in crate::hooks::installed(&folders) {
+            if !agents.contains(&found.agent) {
+                agents.push(found.agent);
+            }
+        }
+        let agents: Vec<Value> = agents
+            .into_iter()
+            .map(|a| json!({ "name": a.name(), "logo": logo(a), "up": true }))
+            .collect();
+        (agents, super::own_sends_to_jev())
+    });
     let data = use_memo(move || {
         let Load::Ready(model) = &*state.graph.read() else {
+            #[cfg(not(feature = "admin"))]
+            {
+                let nothing = match &*state.sessions.read() {
+                    Load::Ready(list) => list.iter().all(Session::empty),
+                    Load::Failed(_) => true,
+                    Load::Loading => false,
+                };
+                let setup = (state.screen)() == super::Screen::Setup;
+                if nothing || setup || matches!(&*state.graph.read(), Load::Failed(_)) {
+                    let (agents, jev) = around();
+                    let mut out = json!({
+                        "session": { "title": "", "device": crate::hooks::this_machine().0, "id": "" },
+                        "steps": [], "links": [], "causes": [],
+                    });
+                    out["shell"] = shell(state, agents, jev);
+                    return Some(out.to_string());
+                }
+            }
             return None;
         };
         let metro = unfolded(model);
@@ -107,6 +159,11 @@ pub fn RecordGraph() -> Element {
             _ => None,
         };
         let mut out = record_data(model, &metro, session.as_ref(), id.as_deref().unwrap_or(""));
+        #[cfg(not(feature = "admin"))]
+        {
+            let (agents, jev) = around();
+            out["shell"] = shell(state, agents, jev);
+        }
         if let Some(client) = session.as_ref().and_then(|s| s.client.as_deref()) {
             // The machine, as the inventory knows it: by its serial, its host name, or the
             // folders a made-up client ID's sessions ran in.
@@ -160,6 +217,8 @@ pub fn RecordGraph() -> Element {
             "window.__whRecordOn = (m) => dioxus.send(m); await new Promise(() => {});",
         );
         while let Ok(m) = eval.recv::<Value>().await {
+            #[cfg(not(feature = "admin"))]
+            asked(state, &m);
             if let Some(client) = m["client"]
                 .as_str()
                 .filter(|_| m["do"] == "device" && cfg!(feature = "admin"))
@@ -176,7 +235,14 @@ pub fn RecordGraph() -> Element {
         _ => None,
     };
     let mut settings = state.settings_open;
+    // The personal app's frame draws its own empty and failed states.
+    let (waiting, failed) = if cfg!(feature = "admin") {
+        (waiting, failed)
+    } else {
+        (false, None)
+    };
     rsx! {
+        {inline_pages(state)}
         div { id: "wh-record", class: "wh-record",
             if let Some(e) = failed {
                 div { class: "wh-record-wait",
@@ -194,7 +260,7 @@ pub fn RecordGraph() -> Element {
 }
 
 /// The session laid out with every Call its own step: 기록 lists each one, none folded.
-fn unfolded(model: &Model) -> Metro {
+pub(super) fn unfolded(model: &Model) -> Metro {
     let calls = model
         .nodes
         .iter()
@@ -832,4 +898,174 @@ mod dump {
             .collect();
         std::fs::write(to, serde_json::to_string(&all).unwrap()).unwrap();
     }
+}
+
+/// The logo the page draws for an agent.
+#[cfg(not(feature = "admin"))]
+fn logo(agent: crate::hooks::Agent) -> &'static str {
+    use crate::hooks::Agent;
+    match agent {
+        Agent::Claude => "claude",
+        Agent::Codex => "codex",
+        Agent::Cursor => "cursor",
+        Agent::Copilot => "copilot",
+        Agent::Antigravity => "gemini",
+        Agent::Hermes | Agent::OpenClaw => "other",
+    }
+}
+
+/// A session counts as running while its last activity is this recent.
+#[cfg(not(feature = "admin"))]
+const LIVE_MS: i64 = 3 * 60_000;
+
+/// The personal app's frame around 기록 (`shell` in `web/record/src/data.ts`): the sessions, newest
+/// first, the one open, where the data comes from, and the agents set up.
+#[cfg(not(feature = "admin"))]
+fn shell(state: AppState, agents: Vec<Value>, jev: bool) -> Value {
+    use super::Polling;
+    use crate::settings::Engine;
+    let p = (state.public)();
+    let polling = (state.polling)();
+    let now = chrono::Utc::now().timestamp_millis();
+    let (sessions, up): (Vec<Value>, bool) = match &*state.sessions.read() {
+        Load::Ready(list) => (
+            list.iter()
+                .filter(|s| !s.empty())
+                .map(|s| {
+                    let at = s.last_at.or(s.created_at).unwrap_or(0);
+                    json!({
+                        "id": s.id,
+                        "title": s.title(),
+                        "folder": s.folder(),
+                        "at": at,
+                        "calls": s.calls,
+                        "denied": s.denied,
+                        "review": s.reviewed,
+                        "outside": s.from_result,
+                        "live": now - at < LIVE_MS,
+                    })
+                })
+                .collect(),
+            true,
+        ),
+        _ => (Vec::new(), false),
+    };
+    let label = match (&*state.sessions.read(), p.engine) {
+        _ if p.demo => "데모 데이터".to_owned(),
+        (Load::Failed(_), _) => "연결 안 됨".to_owned(),
+        (Load::Loading, _) => "연결하는 중".to_owned(),
+        (_, Engine::Own) => "이 기기 엔진".to_owned(),
+        (_, Engine::Local) => "이 맥의 엔진".to_owned(),
+        _ => p.host(),
+    };
+    json!({
+        "page": if (state.screen)() == super::Screen::Setup { "onboard" } else { (state.web)() },
+        "own": p.engine == Engine::Own,
+        "sessions": sessions,
+        "current": (state.current)().unwrap_or_default(),
+        // Jev chosen and whether its key is kept, apart: chosen without a key is a thing to fix.
+        "engine": {
+            "label": label, "up": up, "jev": jev,
+            "jev_on": crate::own::Config::load().jev,
+            "has_key": crate::settings::jev_key().is_some(),
+        },
+        "agents": agents,
+        // The app's own reads of new records: `up` every few seconds, `hidden` slowly behind a
+        // closed or minimised window, `retry` after reads failed (`failed` in a row); `every`,
+        // the wait between reads in milliseconds.
+        "live": {
+            "state": match polling { Polling::Up => "up", Polling::Hidden => "hidden", Polling::Retrying(_) => "retry" },
+            "failed": match polling { Polling::Retrying(n) => n, _ => 0 },
+            "every": super::live::wait(polling).as_millis() as u64,
+        },
+        // Notifications of Calls refused or held.
+        "notify": !state.prefs.read().notify_off,
+    })
+}
+
+/// What the personal app's frame asks: another session, the window moved or zoomed, the hooks,
+/// the settings, the record read again, its dark or light, or notifications on or off.
+#[cfg(not(feature = "admin"))]
+fn asked(mut state: AppState, m: &Value) {
+    match m["do"].as_str() {
+        Some("open") => {
+            if let Some(id) = m["id"].as_str() {
+                state.open_session(id.to_owned());
+                state.mode.set(super::Mode::Graph);
+                state.screen.set(super::Screen::Work);
+            }
+        }
+        Some("drag") => dioxus::desktop::window().drag(),
+        Some("zoom") => {
+            let window = dioxus::desktop::window();
+            window.set_maximized(!window.is_maximized());
+        }
+        Some("hooks") => state.web.set("hooks"),
+        Some("page") => {
+            let page = match m["page"].as_str() {
+                Some("hooks") => "hooks",
+                Some("settings") => "settings",
+                _ => "record",
+            };
+            state.web.set(page);
+        }
+        // The try, while the record is empty: a session made through the app's own engine.
+        Some("try") => {
+            spawn(async move {
+                let _ = super::try_once().await;
+                state.reload += 1;
+            });
+        }
+        // The frame's dark or light: the area behind it takes the same ground, so a switch or a
+        // reload does not flash the other.
+        Some("theme") => {
+            let ground = if m["theme"] == "light" {
+                "#ffffff"
+            } else {
+                "#17191d"
+            };
+            document::eval(&format!(
+                "document.querySelector('.wh-record')?.style.setProperty('background', '{ground}')"
+            ));
+        }
+        // The app's own engine is set on the frame's 설정 page; another engine in its sheet.
+        Some("settings") => {
+            if state.public.peek().engine == crate::settings::Engine::Own {
+                state.web.set("settings");
+            } else {
+                state.settings_open.set(true);
+            }
+        }
+        Some("reload") => {
+            state.reload += 1;
+            state.full += 1;
+            state.refresh += 1;
+        }
+        // Notifications on or off: `{do: "notify", on}`.
+        Some("notify") => {
+            if let Some(on) = m["on"].as_bool() {
+                state.prefs.write().notify_off = !on;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The frame's other pages while one is open: the hooks, or the app's own engine's settings. Their
+/// components draw nothing here; they hand the frame their data and do what is pressed there.
+#[cfg(not(feature = "admin"))]
+fn inline_pages(state: AppState) -> Element {
+    let own = state.public.read().engine == crate::settings::Engine::Own;
+    rsx! {
+        if (state.web)() == "hooks" {
+            super::dev_setup::HookPage { inline: true }
+        }
+        if own && (state.web)() == "settings" {
+            super::settings::OwnSheet { inline: true }
+        }
+    }
+}
+#[cfg(feature = "admin")]
+fn inline_pages(_: AppState) -> Element {
+    rsx! {}
 }
