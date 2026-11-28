@@ -17,7 +17,7 @@ import { SplitText } from "gsap/SplitText";
 import { ScrambleTextPlugin } from "gsap/ScrambleTextPlugin";
 import { $, $$, calm, hydrateIcons, q, reduced } from "./lib";
 import { ICON } from "./icons";
-import { initBurst, initCursor, initMagnets } from "./fx";
+import { initBurst, initMagnets } from "./fx";
 import { initField, introAndHeadline } from "./hero";
 import { initGate } from "./gate";
 import { sceneIn, sceneOut } from "./sections";
@@ -60,7 +60,7 @@ $$<HTMLElement>(".scene", stage).forEach((s) => gsap.set(s, { autoAlpha: 0 }));
 const hero = el("intro");
 const field = initField(hero);
 const gate = initGate($(".field-gate", el("gate")));
-initCursor();
+// No custom cursor in the app: a ring trailing the pointer reads as lag in a window.
 const burst = initBurst();
 
 // ---- The rules (Onboard.tsx's) ----

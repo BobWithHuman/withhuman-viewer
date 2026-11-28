@@ -31,7 +31,8 @@ svg { flex-shrink: 0; }
 .mono { font-family: var(--mono); }
 
 /* Film grain over everything */
-.grain { position: fixed; inset: -10%; z-index: 9990; pointer-events: none; opacity: .045; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); animation: grain 1s steps(6) infinite; }
+.grain { position: fixed; inset: -10%; z-index: 9990; pointer-events: none; opacity: .045; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+/* Still in the app: a moving layer over everything has the whole window composited again six times a second. */
 @keyframes grain { 0% { transform: translate(0, 0); } 20% { transform: translate(-3%, 2%); } 40% { transform: translate(2%, -3%); } 60% { transform: translate(-2%, -1%); } 80% { transform: translate(3%, 3%); } }
 .progress { position: fixed; left: 0; right: 0; top: 0; height: 3px; z-index: 9980; pointer-events: none; }
 .progress i { display: block; height: 100%; background: linear-gradient(90deg, var(--red), var(--blue)); transform-origin: 0 50%; transform: scaleX(0); transition: transform .8s var(--ease); }
