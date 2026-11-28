@@ -40,6 +40,9 @@ export interface StepperModalProps {
   sidePanelOpen?: boolean;
   /** Called when the dialog closes and focus would return to the trigger. */
   onCloseAutoFocus?: (event: Event) => void;
+  /** withhuman: passed to DialogContent (a modal that cannot be closed, on a plain backdrop). */
+  hideCloseButton?: boolean;
+  overlayClassName?: string;
 }
 
 export interface StepperStepConfig {

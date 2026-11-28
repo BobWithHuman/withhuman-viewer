@@ -4,7 +4,7 @@
 see `../../LICENSE`) copied as is, minus `tests/`, Dockerfiles, playwright
 configs and `.husky`. Everything added for withhuman lives in
 `src/withhuman/` plus `vite.single.config.mts`; the Langflow source files
-changed for it (18, each marked `withhuman:`) are listed further down.
+changed for it (21, each marked `withhuman:`) are listed further down.
 
 ## Build
 
@@ -166,29 +166,54 @@ The flow page's right-hand panel (mounted beside the canvas in
 
 `launch.tsx` mounts a React root of its own in `<body id="body">` (Langflow's
 theme class and tokens apply; its own `TooltipProvider`), over whatever route
-Langflow is on. No Langflow source file is changed for it.
+Langflow is on. Langflow's stepper modal got two small hooks for it (table
+below).
 
 - `onboard/` - the personal app's first launch, ported from web/console's
-  `pages/onboard.tsx`: shown full-window (z 60) while `shell.page` is
-  `"onboard"` (or before any `render` once `views.onboard` came). Data =
-  `views.onboard` (src/ui/onboard.rs `OnboardPage`, through
-  `__whRecordView('onboard', d)`); messages = `send({ page: "onboard", do })`
-  with the old page's `do`s and fields (`check_jev {key}`, `model {model}`,
-  `pick {agent}`, `python`, `start {jev,key,model,agents}`, `open {try}`,
-  `server_test` / `server_save` `{url,user,database,password,engine,key}`).
-  `Onboard.tsx` - step rail, the step, back / dots / next; steps 시작 (the
-  `WelcomeCanvas` picture, the name, 시작), 엔진 (이 기기 with the parts' dots
-  / 회사 엔진), 판정 (규칙 / Jev: key, 확인, state, model `Select`), 에이전트
-  (전부 / 따로 / 나중에, a card per agent with its logo, folder pick, checkbox,
-  install state; Python 없음 -> 설치), 준비 (`ReadyCanvas`: the engine as a
-  node with its parts, 판정, Python, a tie per agent flowing while it goes
-  in; then 기록 / 체험), 회사 엔진 (store form, 연결 확인 -> 세션 N, 열기).
-  `data.ts` the types, `parts.tsx` state icon / chip / choice card.
-  `demo.ts` - opened on its own, `#/onboard` shows it over the demo and
-  answers its messages as the app would; `?step=…&jev=…&agents=…&run=…&up=N&
-  done=1&role=developer&server=…&kept=1&python=0&folder=1&hooks=pick` set a
-  state; `?nokey` / `?nohook` (on any route) take the key / the hooks away
-  for the engine menu's dots.
+  `pages/onboard.tsx`, in Langflow's own multi-step modal
+  (`modals/stepperModal`) the way its `knowledgeBaseUploadModal` uses it:
+  `StepperModal` (header icon tile + title + `ProgressIndicator`, the step
+  in the bordered content box), `SidePanel` (the live status),
+  `StepperModalFooter` (이전 / 다음 / the primary; its left "help" button
+  for a second action), `useStepperState` for the steps. Shown while
+  `shell.page` is `"onboard"` (or before any `render` once `views.onboard`
+  came), always open: no close button, Escape and outside presses ignored,
+  the backdrop plain `bg-background` instead of the dimming; a press on the
+  header moves the window. Size: Langflow's dialog width 512 px
+  (`max-w-lg`) x the knowledge-base modal's `MODAL_HEIGHT_DEFAULT` 580 px,
+  plus the side panel (`SIDE_PANEL_WIDTH_PX` 300 + 1 px rule), so the app's
+  first-launch window is 813 x 582 logical px. Data = `views.onboard`
+  (src/ui/onboard.rs `OnboardPage`, through `__whRecordView('onboard', d)`);
+  messages = `send({ page: "onboard", do })` with the old page's `do`s and
+  fields (`check_jev {key}`, `model {model}`, `pick {agent}`, `python`,
+  `start {jev,key,model,agents}`, `open {try}`, `server_test` /
+  `server_save` `{url,user,database,password,engine,key}`).
+  - `Onboard.tsx` - the modal and the flow: 엔진 -> 판정 -> 에이전트 -> 준비
+    (this Mac), or 엔진 -> 회사 엔진 (the company's engine; `role:
+    "developer"` starts there). Footer: 다음 (판정 gated on the key), 시작
+    (`start`, spinning until done; again after a failed hook), then 체험
+    (`open {try:true}`) with 기록 (`open`) on the left; 회사 엔진: 연결 확인
+    on the left, 열기 (`server_save`) once the test is ok.
+  - `steps.tsx` - the steps' content: 엔진 and 판정 as Langflow's radio
+    option rows (`RadioGroup` in a bordered row, as the deploy dialog's
+    provider phase) with `Badge`s; Jev's key (`Label` + `Input` + 확인,
+    state as a `Badge`) and model (`Select` from `jev.models`), as
+    StepConfiguration's fields; 에이전트 as checkbox rows with the logo
+    (`chrome/agent-icon.tsx`), found or not, a folder button for per-folder
+    agents, a Python row with 설치 when it is missing; 준비 as StepReview's
+    summary (`SummaryItem` rows: engine, address, judging, model, agents'
+    logos, Python); 회사 엔진 the store and hook fields.
+  - `StatusPanel.tsx` - the side panel in FilesPanel's layout: 상태 with the
+    parts up, rows for the engine's parts, the judging, the agents picked
+    (each state as a Langflow icon: circle / `Loader2` / check / mark with
+    the app's text on hover), or the company's engine with its session
+    count.
+  - `data.ts` the types; `demo.ts` - opened on its own, `#/onboard` shows it
+    over the demo and answers its messages as the app would;
+    `?step=where|judge|agents|ready|store&judge=jev&jev=busy|ok|err&kept=1&
+    folder=1&python=0&agents=busy|done|err&run=busy|ok|err&up=N&done=1&
+    role=developer&server=busy|ok|err` set a state; `?nokey` / `?nohook`
+    (on any route) take the key / the hooks away for the engine menu's dots.
 - `tour/` - the first session's tour. `store.ts`: `wantTour()` (the
   onboarding finished; localStorage `withhuman.tour` = `want`), `startTour()`
   (engine menu 둘러보기), done once finished or skipped. `Tour.tsx`: waits
@@ -310,6 +335,8 @@ Langflow files changed for it (each marked `withhuman:` in place):
 | `components/core/canvasControlsComponent/CanvasControls.tsx` | no Langflow Assistant button, no "Try the new Langflow Assistant" banner, no help menu (Langflow links) |
 | `components/common/loadingComponent/index.tsx` | WithHuman's icon instead of Langflow's logo, no "Loading..." line |
 | `CustomNodes/GenericNode/components/NodeStatus/index.tsx` | no run (▶) button in node headers: the canvas is read-only (`WITHHUMAN_READ_ONLY`) |
+| `modals/stepperModal/StepperModal.tsx`, `modals/stepperModal/types.ts` | `hideCloseButton` and `overlayClassName` passed through to `DialogContent` (the first launch: not closable, no dimming) |
+| `modals/stepperModal/components/ProgressIndicator.tsx` | the "N/M completed" label through i18n (`stepper.completed`, Langflow's English as default; `ko.ts` gives `N/M`) |
 | `components/core/parameterRenderComponent/components/copyFieldAreaComponent/index.tsx` | copy toast "복사됨" instead of "Endpoint URL copied"; button label 복사 / 복사됨 instead of Copy / Copied |
 
 ## Overview charts (`viz/`)

@@ -243,9 +243,10 @@ pub const WORK_MIN: (f64, f64) = (1000.0, 620.0);
 /// The setup's small window.
 #[cfg(feature = "admin")]
 pub const SETUP_SIZE: (f64, f64) = (560.0, 760.0);
-/// The personal app's first launch is a page of the app itself (`web/langflow`), at its size.
+/// The personal app's first launch, a small window of Langflow's step modal (`web/langflow`,
+/// 813×582) under a strip for the traffic lights.
 #[cfg(not(feature = "admin"))]
-pub const SETUP_SIZE: (f64, f64) = WORK_SIZE;
+pub const SETUP_SIZE: (f64, f64) = (813.0, 620.0);
 
 #[derive(Clone, Copy)]
 pub struct AppState {
@@ -444,6 +445,7 @@ pub fn App() -> Element {
         Screen::Setup => {
             return rsx! {
                 div { class: "app",
+                    TitleBar { overlay: false }
                     div { class: "app-body",
                         div { class: "app-main", record::RecordGraph {} }
                     }

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { MIN_PROGRESS_PERCENTAGE } from "../constants";
 
 interface ProgressIndicatorProps {
@@ -9,6 +10,7 @@ export function ProgressIndicator({
   currentStep,
   totalSteps,
 }: ProgressIndicatorProps) {
+  const { t } = useTranslation();
   const progressPercentage = ((currentStep - 1) / (totalSteps - 1)) * 100;
 
   return (
@@ -22,7 +24,12 @@ export function ProgressIndicator({
         />
       </div>
       <span className="text-sm text-muted-foreground whitespace-nowrap">
-        {currentStep}/{totalSteps} completed
+        {/* withhuman: the label through i18n (Langflow's English kept as the default) */}
+        {t("stepper.completed", {
+          current: currentStep,
+          total: totalSteps,
+          defaultValue: "{{current}}/{{total}} completed",
+        })}
       </span>
     </div>
   );

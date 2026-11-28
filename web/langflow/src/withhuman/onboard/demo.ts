@@ -3,7 +3,7 @@
 // coming up one by one, each hook installed in turn, the app opened). Query parameters set a state
 // to look at directly, for screenshots:
 //   #/onboard?step=judge&judge=jev&jev=busy|ok|err&kept=1
-//   #/onboard?step=agents&hooks=pick&folder=1&python=0&agents=busy|done|err
+//   #/onboard?step=agents&folder=1&python=0&agents=busy|done|err
 //   #/onboard?step=ready&run=busy|ok|err&up=2&agents=busy&done=1
 //   #/onboard?role=developer&step=store&server=busy|ok|err
 // `window.__whOnboardDemo(patch)` changes the demo's data in place.
@@ -40,7 +40,7 @@ const MODELS = ["jev-1.14.0", "jev-1.13.2", "jev-latest"];
 const FOLDER = "~/work/shop";
 
 /** The step the demo opens on, and the choices made before it (from the hash). */
-export const demoStart: { step?: string; judge?: string; hooks?: string } = {};
+export const demoStart: { step?: string; judge?: string } = {};
 
 let data: OnboardData = DEMO_ONBOARD;
 const put = (next: OnboardData) => {
@@ -160,7 +160,6 @@ if (standalone && hash.startsWith("/onboard")) {
   const q = new URLSearchParams(hash.split("?")[1] ?? "");
   demoStart.step = q.get("step") ?? undefined;
   demoStart.judge = q.get("judge") ?? undefined;
-  demoStart.hooks = q.get("hooks") ?? undefined;
   data = fromHash(q);
   setDemo((s) => ({
     record: s.record?.shell ? { ...s.record, shell: { ...s.record.shell, page: "onboard" } } : s.record,

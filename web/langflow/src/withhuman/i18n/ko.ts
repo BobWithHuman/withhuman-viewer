@@ -3,6 +3,8 @@
 // and no "Langflow". Keys not listed keep Langflow's own ko.json.
 
 export const KO: Record<string, string> = {
+  // The stepper modal's progress (the first launch): the count alone.
+  "stepper.completed": "{{current}}/{{total}}",
   // Canvas controls (zoom menu, note, minimize) on a locked session.
   "canvas.controls": "캔버스",
   "version.readOnly": "읽기 전용",

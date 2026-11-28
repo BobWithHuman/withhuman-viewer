@@ -988,6 +988,8 @@ fn shell(state: AppState, agents: Vec<Value>, jev: bool) -> Value {
 #[cfg(not(feature = "admin"))]
 fn asked(mut state: AppState, m: &Value) {
     match m["do"].as_str() {
+        // Not while the first launch is on: the page asks for the last session as it loads.
+        Some("open") if *state.screen.peek() == super::Screen::Setup => {}
         Some("open") => {
             if let Some(id) = m["id"].as_str() {
                 state.open_session(id.to_owned());

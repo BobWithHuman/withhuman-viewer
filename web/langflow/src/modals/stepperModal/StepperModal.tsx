@@ -38,6 +38,8 @@ export function StepperModal({
   sidePanel,
   sidePanelOpen = DEFAULT_SIDE_PANEL_OPEN,
   onCloseAutoFocus,
+  hideCloseButton,
+  overlayClassName,
 }: StepperModalProps) {
   const { minWidth, height: sizeHeight } = switchCaseModalSize(size);
   const isNumericHeight = customHeight && /^\d+$/.test(customHeight);
@@ -68,6 +70,9 @@ export function StepperModal({
           )}
           closeButtonClassName="top-4 right-4"
           onCloseAutoFocus={onCloseAutoFocus}
+          // withhuman: no close button / another backdrop when the caller asks
+          hideCloseButton={hideCloseButton}
+          overlayClassName={overlayClassName}
         >
           {/* Header */}
           <div className="flex flex-col gap-1 px-4 pt-4 pr-14">
