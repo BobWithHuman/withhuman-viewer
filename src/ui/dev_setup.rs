@@ -20,8 +20,10 @@ pub fn own_engine(server: &str) -> bool {
 /// setups found on this machine (the device's, the user's, the folders the app installed in),
 /// each with the engine it reports to and a button to take it out, and a new setup. What is
 /// pressed there comes back here to be done.
+/// `inline`: the page is drawn in 기록's frame (`web/record`), handed its data there; else in a
+/// frame of its own.
 #[component]
-pub fn HookPage() -> Element {
+pub fn HookPage(#[props(default)] inline: bool) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let mut looked = use_signal(|| 0u32);
@@ -108,8 +110,13 @@ pub fn HookPage() -> Element {
     });
     use_effect(move || {
         let d = data();
+        let set = if inline {
+            "__whRecordView"
+        } else {
+            "__whConsoleSet"
+        };
         document::eval(&format!(
-            "requestAnimationFrame(() => window.__whConsoleSet && window.__whConsoleSet('hooks', {d}))"
+            "requestAnimationFrame(() => window.{set} && window.{set}('hooks', {d}))"
         ));
     });
     use_future(move || {
@@ -403,6 +410,9 @@ pub fn HookPage() -> Element {
             }
         }
     });
+    if inline {
+        return rsx! {};
+    }
     rsx! {
         div { id: "wh-console-hooks", class: "wh-console" }
     }

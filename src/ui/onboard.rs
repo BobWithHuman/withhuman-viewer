@@ -63,8 +63,9 @@ fn open(mut state: AppState) {
     state.screen.set(Screen::Work);
 }
 
+/// `inline`: drawn by 기록's frame (`web/langflow`, its `onboard` page), handed its data there.
 #[component]
-pub fn OnboardPage() -> Element {
+pub fn OnboardPage(#[props(default)] inline: bool) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let mut jev = use_signal(|| Status::Idle);
@@ -139,8 +140,13 @@ pub fn OnboardPage() -> Element {
     });
     use_effect(move || {
         let d = data();
+        let set = if inline {
+            "__whRecordView"
+        } else {
+            "__whConsoleSet"
+        };
         document::eval(&format!(
-            "requestAnimationFrame(() => window.__whConsoleSet && window.__whConsoleSet('onboard', {d}))"
+            "requestAnimationFrame(() => window.{set} && window.{set}('onboard', {d}))"
         ));
     });
 
@@ -200,11 +206,17 @@ pub fn OnboardPage() -> Element {
                         hook.set(chosen.iter().map(|a| (*a, Status::Idle)).collect());
                         done.set(false);
                         spawn(async move {
-                            let change = match backend.start_own(&key, &model.peek(), on).await {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    run.set(Status::Err(e));
-                                    return;
+                            // Rehearsed: the engine left as it is, its start a moment's wait.
+                            let change = if hooks::rehearsal() {
+                                tokio::time::sleep(Duration::from_millis(900)).await;
+                                None
+                            } else {
+                                match backend.start_own(&key, &model.peek(), on).await {
+                                    Ok(c) => Some(c),
+                                    Err(e) => {
+                                        run.set(Status::Err(e));
+                                        return;
+                                    }
                                 }
                             };
                             run.set(Status::Ok("실행 중".into()));
@@ -244,12 +256,13 @@ pub fn OnboardPage() -> Element {
                                     }
                                 }
                             }
-                            match backend.finish_own(change) {
-                                Ok(next) => {
+                            match change.map(|c| backend.finish_own(c)) {
+                                None => done.set(hook.peek().values().all(Status::settled)),
+                                Some(Ok(next)) => {
                                     state.public.set(next);
                                     done.set(hook.peek().values().all(Status::settled));
                                 }
-                                Err(e) => run.set(Status::Err(e)),
+                                Some(Err(e)) => run.set(Status::Err(e)),
                             }
                         });
                     }
@@ -322,6 +335,9 @@ pub fn OnboardPage() -> Element {
         }
     });
 
+    if inline {
+        return rsx! {};
+    }
     rsx! {
         div { class: "onboard",
             super::TitleBar { overlay: true }

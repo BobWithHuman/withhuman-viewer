@@ -227,9 +227,9 @@ pub const WORK_MIN: (f64, f64) = (1000.0, 620.0);
 /// The setup's small window.
 #[cfg(feature = "admin")]
 pub const SETUP_SIZE: (f64, f64) = (560.0, 760.0);
-/// The personal app's first launch, at OpenClaw's onboarding window size.
+/// The personal app's first launch is a page of the app itself (`web/langflow`), at its size.
 #[cfg(not(feature = "admin"))]
-pub const SETUP_SIZE: (f64, f64) = (630.0, 752.0);
+pub const SETUP_SIZE: (f64, f64) = WORK_SIZE;
 
 #[derive(Clone, Copy)]
 pub struct AppState {
@@ -269,6 +269,9 @@ pub struct AppState {
     pub full: Signal<u32>,
     pub refresh: Signal<u32>,
     pub fit: Signal<u32>,
+    /// What the personal app's frame shows: `record` (기록), `hooks` or `settings`.
+    #[cfg_attr(feature = "admin", allow(dead_code))]
+    pub web: Signal<&'static str>,
 }
 
 impl AppState {
@@ -340,6 +343,7 @@ pub fn App() -> Element {
         full: Signal::new(0),
         refresh: Signal::new(0),
         fit: Signal::new(0),
+        web: Signal::new("record"),
     });
     // The session list, opened from the session's name in the top bar.
     // VIEWER_PICK opens the session list at once, for a look at it.
@@ -382,12 +386,40 @@ pub fn App() -> Element {
             state.screen.set(Screen::Work);
         }
     });
+    // The personal app's hooks, and its own engine's settings, are pages of 기록's frame: what
+    // would open them (the first launch with no hooks, the menu's 설정…) opens them there.
+    #[cfg(not(feature = "admin"))]
+    use_effect(move || {
+        if (state.screen)() == Screen::Hooks {
+            state.web.set("hooks");
+            state.mode.set(Mode::Graph);
+            state.screen.set(Screen::Work);
+        }
+        if (state.settings_open)()
+            && (state.mode)() != Mode::Compare
+            && state.public.peek().engine == crate::settings::Engine::Own
+        {
+            state.web.set("settings");
+            state.settings_open.set(false);
+        }
+    });
 
     match (state.screen)() {
         #[cfg(feature = "admin")]
         Screen::Setup => return rsx! { setup::Setup {} },
+        // The personal app's first launch is the 기록 frame's own page: its component draws
+        // nothing and hands the frame what each step needs.
         #[cfg(not(feature = "admin"))]
-        Screen::Setup => return rsx! { onboard::OnboardPage {} },
+        Screen::Setup => {
+            return rsx! {
+                div { class: "app",
+                    div { class: "app-body",
+                        div { class: "app-main", record::RecordGraph {} }
+                    }
+                    onboard::OnboardPage { inline: true }
+                }
+            };
+        }
         Screen::Home => {
             return rsx! {
                 div { class: "app home-on",
@@ -452,7 +484,8 @@ pub fn App() -> Element {
             onmousemove: drag,
             onmouseup: drop,
             onmouseleave: drop,
-            TopBar {}
+            // The personal app's 기록 draws its own top strip in the frame.
+            if cfg!(feature = "admin") || (state.mode)() == Mode::Compare { TopBar {} }
             div { class: "app-body",
             if (state.mode)() == Mode::Compare { Sidebar {} }
             div { class: "app-main",
@@ -634,8 +667,14 @@ fn use_loaders(backend: Arc<Backend>, mut state: AppState) {
                 Ok(list) => {
                     // The developer's app shows this machine's sessions alone: the device's
                     // client ID its hooks send.
+                    // A database named by hand (`VIEWER_DB`, to look at another engine's record)
+                    // or the demo record shows every machine's sessions.
                     #[cfg(not(feature = "admin"))]
-                    let list = crate::hooks::mine(list);
+                    let list = if std::env::var("VIEWER_DB").is_ok() || state.public.peek().demo {
+                        list
+                    } else {
+                        crate::hooks::mine(list)
+                    };
                     // Keep the open session, even one the list leaves out (opened from another
                     // page, a session with no start time); else the last one opened, else the
                     // newest.
