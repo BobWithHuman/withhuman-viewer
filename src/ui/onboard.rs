@@ -12,6 +12,36 @@ use dioxus::prelude::*;
 use serde_json::{Value, json};
 
 use super::setup::grow;
+
+/// The first launch's page (`web/onboard`, the landing's code; `npm run build:app` there writes it).
+const PAGE: &str = include_str!("onboard.html");
+
+/// What goes in the app's head for the first launch: the page as a string, how its frame is made
+/// and handed the state (`WHOnboard.render`), and where what it asks goes (the onboarding's
+/// listener). `</` is escaped so the page's own closing tags do not end this script.
+pub fn head_script() -> String {
+    let page = serde_json::to_string(PAGE)
+        .unwrap_or_default()
+        .replace("</", "<\\/");
+    format!(
+        "<script>window.__WH_ONBOARD_HTML = {page};\n\
+         window.__whOnboardSet = function (d) {{\n\
+           window.__whOnboardData = d;\n\
+           const host = document.getElementById('wh-onboard'); if (!host) return;\n\
+           let f = host.querySelector('iframe');\n\
+           if (!f) {{\n\
+             f = document.createElement('iframe'); f.className = 'wh-record-frame';\n\
+             f.addEventListener('load', () => window.__whFontInto && window.__whFontInto(f.contentDocument));\n\
+             f.addEventListener('load', () => f.contentWindow.WHOnboard && f.contentWindow.WHOnboard.render(window.__whOnboardData));\n\
+             f.addEventListener('load', () => f.contentWindow.focus());\n\
+             f.srcdoc = window.__WH_ONBOARD_HTML; host.appendChild(f); return;\n\
+           }}\n\
+           if (f.contentWindow && f.contentWindow.WHOnboard) f.contentWindow.WHOnboard.render(d);\n\
+         }};\n\
+         window.__whOnboardSend = function (m) {{ const on = window.__whConsoleOn && window.__whConsoleOn['onboard']; if (on) on(m); }};\n\
+         </script>"
+    )
+}
 use super::{AppState, Screen, Selection};
 use crate::api::Backend;
 use crate::hooks::{self, Agent, Scope};
@@ -63,8 +93,9 @@ fn open(mut state: AppState) {
     state.screen.set(Screen::Work);
 }
 
+/// `inline`: drawn by 기록's frame (`web/langflow`, its `onboard` page), handed its data there.
 #[component]
-pub fn OnboardPage() -> Element {
+pub fn OnboardPage(#[props(default)] inline: bool) -> Element {
     let backend = use_context::<Arc<Backend>>();
     let mut state = use_context::<AppState>();
     let mut jev = use_signal(|| Status::Idle);
@@ -139,9 +170,16 @@ pub fn OnboardPage() -> Element {
     });
     use_effect(move || {
         let d = data();
-        document::eval(&format!(
-            "requestAnimationFrame(() => window.__whConsoleSet && window.__whConsoleSet('onboard', {d}))"
-        ));
+        // In its own frame (`web/onboard`), else the console page's.
+        if inline {
+            document::eval(&format!(
+                "requestAnimationFrame(() => window.__whOnboardSet && window.__whOnboardSet({d}))"
+            ));
+        } else {
+            document::eval(&format!(
+                "requestAnimationFrame(() => window.__whConsoleSet && window.__whConsoleSet('onboard', {d}))"
+            ));
+        }
     });
 
     use_future(move || {
@@ -152,6 +190,12 @@ pub fn OnboardPage() -> Element {
             );
             while let Ok(m) = eval.recv::<Value>().await {
                 match m["do"].as_str() {
+                    // The page fills the window: its bare top moves the window and zooms it.
+                    Some("drag") => dioxus::desktop::window().drag(),
+                    Some("zoom") => {
+                        let window = dioxus::desktop::window();
+                        window.set_maximized(!window.is_maximized());
+                    }
                     Some("check_jev") => {
                         let key = m["key"].as_str().unwrap_or_default().to_owned();
                         let backend = backend.clone();
@@ -200,11 +244,17 @@ pub fn OnboardPage() -> Element {
                         hook.set(chosen.iter().map(|a| (*a, Status::Idle)).collect());
                         done.set(false);
                         spawn(async move {
-                            let change = match backend.start_own(&key, &model.peek(), on).await {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    run.set(Status::Err(e));
-                                    return;
+                            // Rehearsed: the engine left as it is, its start a moment's wait.
+                            let change = if hooks::rehearsal() {
+                                tokio::time::sleep(Duration::from_millis(900)).await;
+                                None
+                            } else {
+                                match backend.start_own(&key, &model.peek(), on).await {
+                                    Ok(c) => Some(c),
+                                    Err(e) => {
+                                        run.set(Status::Err(e));
+                                        return;
+                                    }
                                 }
                             };
                             run.set(Status::Ok("실행 중".into()));
@@ -244,12 +294,13 @@ pub fn OnboardPage() -> Element {
                                     }
                                 }
                             }
-                            match backend.finish_own(change) {
-                                Ok(next) => {
+                            match change.map(|c| backend.finish_own(c)) {
+                                None => done.set(hook.peek().values().all(Status::settled)),
+                                Some(Ok(next)) => {
                                     state.public.set(next);
                                     done.set(hook.peek().values().all(Status::settled));
                                 }
-                                Err(e) => run.set(Status::Err(e)),
+                                Some(Err(e)) => run.set(Status::Err(e)),
                             }
                         });
                     }
@@ -322,6 +373,11 @@ pub fn OnboardPage() -> Element {
         }
     });
 
+    if inline {
+        return rsx! {
+            div { id: "wh-onboard", class: "wh-record" }
+        };
+    }
     rsx! {
         div { class: "onboard",
             super::TitleBar { overlay: true }

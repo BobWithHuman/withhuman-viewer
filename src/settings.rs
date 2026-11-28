@@ -364,8 +364,10 @@ impl Settings {
         if std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") {
             settings.demo = true;
         }
-        // The developer's app has no demo: it reads the engine it is set up with.
-        if !cfg!(feature = "admin") {
+        // The developer's app has no demo: it reads the engine it is set up with. Only a launch
+        // that asks for it (`VIEWER_MOCK=1` with `VIEWER_FIXTURE=mock/fixture.json`, as the
+        // bundled demo is the security team's) shows that record in it.
+        if !cfg!(feature = "admin") && !std::env::var("VIEWER_MOCK").is_ok_and(|v| v == "1") {
             settings.demo = false;
         }
         settings
