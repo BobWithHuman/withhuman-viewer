@@ -3,4 +3,7 @@
 /web/record/node_modules/
 /web/record/dist/
 /web/console/node_modules/
+/web/langflow/node_modules/
+/web/langflow/dist/
+/web/langflow/dist-*/
 /web/console/dist/

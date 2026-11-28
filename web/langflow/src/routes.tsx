@@ -1,0 +1,228 @@
+import { lazy } from "react";
+import {
+  createBrowserRouter,
+  createRoutesFromElements,
+  Outlet,
+  Route,
+} from "react-router-dom";
+import { ProtectedRoute } from "./components/authorization/authGuard";
+import { ProtectedLoginRoute } from "./components/authorization/authLoginGuard";
+import { AuthSettingsGuard } from "./components/authorization/authSettingsGuard";
+import { PlaygroundAuthGate } from "./components/authorization/playgroundAuthGate";
+import ContextWrapper from "./contexts";
+import CustomDashboardWrapperPage from "./customization/components/custom-DashboardWrapperPage";
+import { CustomNavigate } from "./customization/components/custom-navigate";
+import { BASENAME } from "./customization/config-constants";
+import {
+  ENABLE_CUSTOM_PARAM,
+  ENABLE_FILE_MANAGEMENT,
+  ENABLE_KNOWLEDGE_BASES,
+} from "./customization/feature-flags";
+import { CustomAuthRoutesStore } from "./customization/utils/custom-auth-routes-store";
+import { CustomRoutesStore } from "./customization/utils/custom-routes-store";
+import { CustomRoutesStorePages } from "./customization/utils/custom-routes-store-pages";
+import { AppAuthenticatedPage } from "./pages/AppAuthenticatedPage";
+import { AppInitPage } from "./pages/AppInitPage";
+import { AppWrapperPage } from "./pages/AppWrapperPage";
+import FlowPage from "./pages/FlowPage";
+import LoginPage from "./pages/LoginPage";
+import FilesPage from "./pages/MainPage/pages/filesPage";
+import HomePage from "./pages/MainPage/pages/homePage";
+import KnowledgePage from "./pages/MainPage/pages/knowledgePage";
+import SourceChunksPage from "./pages/MainPage/pages/knowledgePage/sourceChunksPage/SourceChunksPage";
+import CollectionPage from "./pages/MainPage/pages/main-page";
+import SettingsPage from "./pages/SettingsPage";
+import { WithhumanWait } from "./withhuman/chrome/CanvasMark";
+import {
+  SessionsLayout,
+  SessionsOverview,
+} from "./withhuman/chrome/SessionsPage";
+import ApiKeysPage from "./pages/SettingsPage/pages/ApiKeysPage";
+import ConnectionsPage from "./pages/SettingsPage/pages/ConnectionsPage";
+import DBProvidersPage from "./pages/SettingsPage/pages/DBProvidersPage";
+import GeneralPage from "./pages/SettingsPage/pages/GeneralPage";
+import GlobalVariablesPage from "./pages/SettingsPage/pages/GlobalVariablesPage";
+import MCPServersPage from "./pages/SettingsPage/pages/MCPServersPage";
+import McpClientPage from "./pages/SettingsPage/pages/McpClientPage";
+import MigrationPage from "./pages/SettingsPage/pages/MigrationPage";
+import ModelProvidersPage from "./pages/SettingsPage/pages/ModelProvidersPage";
+import MessagesPage from "./pages/SettingsPage/pages/messagesPage";
+import ShortcutsPage from "./pages/SettingsPage/pages/ShortcutsPage";
+
+const LoginAdminPage = lazy(() => import("./pages/AdminPage/LoginPage"));
+
+const PlaygroundPage = lazy(() => import("./pages/Playground"));
+
+const SignUp = lazy(() => import("./pages/SignUpPage"));
+
+const router = createBrowserRouter(
+  createRoutesFromElements([
+    <Route path="/playground/:id/">
+      <Route
+        path=""
+        element={
+          <ContextWrapper key={1}>
+            {/* withhuman: no playground; a session is only looked at. */}
+            <CustomNavigate replace to="/" />
+          </ContextWrapper>
+        }
+      />
+    </Route>,
+    <Route
+      path={ENABLE_CUSTOM_PARAM ? "/:customParam?" : "/"}
+      element={
+        <ContextWrapper key={2}>
+          <Outlet />
+        </ContextWrapper>
+      }
+    >
+      <Route path="" element={<AppInitPage />}>
+        <Route path="" element={<AppWrapperPage />}>
+          <Route
+            path=""
+            element={
+              <ProtectedRoute>
+                <Outlet />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="" element={<AppAuthenticatedPage />}>
+              <Route path="" element={<CustomDashboardWrapperPage />}>
+                {/* withhuman: the flows list is the sessions' overview, in the flow page's frame. */}
+                <Route path="" element={<SessionsLayout />}>
+                  <Route
+                    index
+                    element={<CustomNavigate replace to={"flows"} />}
+                  />
+                  {ENABLE_FILE_MANAGEMENT && (
+                    <Route path="assets">
+                      <Route
+                        index
+                        element={<CustomNavigate replace to="files" />}
+                      />
+                      <Route path="files" element={<FilesPage />} />
+                      {ENABLE_KNOWLEDGE_BASES && (
+                        <>
+                          <Route
+                            path="knowledge-bases"
+                            element={<KnowledgePage />}
+                          />
+                          <Route
+                            path="knowledge-bases/:sourceId/chunks"
+                            element={<SourceChunksPage />}
+                          />
+                        </>
+                      )}
+                    </Route>
+                  )}
+                  <Route
+                    path="flows/"
+                    element={<SessionsOverview />}
+                  />
+                  <Route
+                    path="components/"
+                    element={<SessionsOverview />}
+                  >
+                    <Route
+                      path="folder/:folderId"
+                      element={<SessionsOverview />}
+                    />
+                  </Route>
+                  <Route
+                    path="all/"
+                    element={<SessionsOverview />}
+                  >
+                    <Route
+                      path="folder/:folderId"
+                      element={<SessionsOverview />}
+                    />
+                  </Route>
+                  <Route
+                    path="mcp/"
+                    element={<SessionsOverview />}
+                  >
+                    <Route
+                      path="folder/:folderId"
+                      element={<SessionsOverview />}
+                    />
+                  </Route>
+                </Route>
+                <Route path="settings" element={<SettingsPage />}>
+                  <Route
+                    index
+                    element={<CustomNavigate replace to={"hooks"} />}
+                  />
+                  <Route
+                    path="global-variables"
+                    element={<GlobalVariablesPage />}
+                  />
+                  <Route
+                    path="model-providers"
+                    element={<ModelProvidersPage />}
+                  />
+                  <Route path="db-providers" element={<DBProvidersPage />} />
+                  <Route path="mcp-servers" element={<MCPServersPage />} />
+                  <Route path="connections" element={<ConnectionsPage />} />
+                  <Route path="mcp-client" element={<McpClientPage />} />
+
+                  <Route path="api-keys" element={<ApiKeysPage />} />
+                  <Route
+                    path="general/:scrollId?"
+                    element={
+                      <AuthSettingsGuard>
+                        <GeneralPage />
+                      </AuthSettingsGuard>
+                    }
+                  />
+                  <Route path="shortcuts" element={<ShortcutsPage />} />
+                  <Route path="messages" element={<MessagesPage />} />
+                  <Route path="migration" element={<MigrationPage />} />
+                  {CustomRoutesStore()}
+                </Route>
+                {CustomRoutesStorePages()}
+              </Route>
+              <Route path="flow/:id/">
+                <Route path="" element={<CustomDashboardWrapperPage />}>
+                  <Route path="folder/:folderId/" element={<FlowPage />} />
+                  <Route path="" element={<FlowPage />} />
+                </Route>
+              </Route>
+            </Route>
+          </Route>
+          <Route
+            path="login"
+            element={
+              <ProtectedLoginRoute>
+                {/* withhuman: no Langflow sign-in; the app's mark while auto-login lands. */}
+                <WithhumanWait />
+              </ProtectedLoginRoute>
+            }
+          />
+          <Route
+            path="signup"
+            element={
+              <ProtectedLoginRoute>
+                {/* withhuman: no Langflow sign-in; the app's mark while auto-login lands. */}
+                <WithhumanWait />
+              </ProtectedLoginRoute>
+            }
+          />
+          <Route
+            path="login/admin"
+            element={
+              <ProtectedLoginRoute>
+                {/* withhuman: no Langflow sign-in; the app's mark while auto-login lands. */}
+                <WithhumanWait />
+              </ProtectedLoginRoute>
+            }
+          />
+          {CustomAuthRoutesStore()}
+        </Route>
+      </Route>
+      <Route path="*" element={<CustomNavigate replace to="/" />} />
+    </Route>,
+  ]),
+  { basename: BASENAME || undefined },
+);
+
+export default router;

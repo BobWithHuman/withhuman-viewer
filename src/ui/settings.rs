@@ -33,9 +33,12 @@ pub fn SettingsSheet() -> Element {
 /// The app's own engine, drawn by the console page (`web/console`, `pages/engine.tsx`) in the
 /// sheet: its parts; how Calls are judged (the rules here, or Jev with its key and model),
 /// started again to apply it; the try; and taking the app off this machine.
+///
+/// `inline`: drawn as the 설정 page of 기록's frame (`web/record`), handed its data there, rather
+/// than in a sheet of its own.
 #[cfg(not(feature = "admin"))]
 #[component]
-fn OwnSheet() -> Element {
+pub(super) fn OwnSheet(#[props(default)] inline: bool) -> Element {
     use crate::own::Part;
     use serde_json::{Value, json};
     let backend = use_context::<Arc<Backend>>();
@@ -93,7 +96,10 @@ fn OwnSheet() -> Element {
         move |m: Value| {
             let backend = backend.clone();
             match m["do"].as_str() {
-                Some("close") => state.settings_open.set(false),
+                Some("close") => {
+                    state.settings_open.set(false);
+                    state.web.set("record");
+                }
                 Some("logs") => {
                     let _ =
                         std::process::Command::new(if cfg!(windows) { "explorer" } else { "open" })
@@ -142,6 +148,7 @@ fn OwnSheet() -> Element {
                                 status.set(Status::Idle);
                                 state.reload += 1;
                                 state.settings_open.set(false);
+                                state.web.set("record");
                             }
                             Err(e) => status.set(Status::Err(e)),
                         }
@@ -167,6 +174,33 @@ fn OwnSheet() -> Element {
             }
         }
     };
+    // In 기록's frame: the data handed there, and what is pressed there heard here.
+    use_effect(move || {
+        if inline {
+            let d = data();
+            document::eval(&format!(
+                "requestAnimationFrame(() => window.__whRecordView && window.__whRecordView('engine', {d}))"
+            ));
+        }
+    });
+    let heard = onmsg.clone();
+    use_future(move || {
+        let mut heard = heard.clone();
+        async move {
+            if !inline {
+                return;
+            }
+            let mut eval = document::eval(
+                "window.__whConsoleOn['engine'] = (m) => dioxus.send(m); await new Promise(() => {});",
+            );
+            while let Ok(m) = eval.recv::<Value>().await {
+                heard(m);
+            }
+        }
+    });
+    if inline {
+        return rsx! {};
+    }
 
     rsx! {
         div {
